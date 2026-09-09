@@ -1,0 +1,53 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/anvil-math",
+    "crates/anvil-kernel",
+    "crates/anvil-sketch",
+    "crates/anvil-expr",
+    "crates/anvil-feature",
+    "crates/anvil-cam",
+    "crates/anvil-io",
+    "crates/anvil-ui",
+    "crates/anvil-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/Carbonpoint/anvil-cad"
+rust-version = "1.85"
+
+[workspace.dependencies]
+anvil-math = { path = "crates/anvil-math" }
+anvil-kernel = { path = "crates/anvil-kernel" }
+anvil-sketch = { path = "crates/anvil-sketch" }
+anvil-expr = { path = "crates/anvil-expr" }
+anvil-feature = { path = "crates/anvil-feature" }
+anvil-cam = { path = "crates/anvil-cam" }
+anvil-io = { path = "crates/anvil-io" }
+anvil-ui = { path = "crates/anvil-ui" }
+
+glam = { version = "0.30", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+anyhow = "1"
+rayon = "1"
+inventory = "0.3"
+log = "0.4"
+env_logger = "0.11"
+slotmap = { version = "1", features = ["serde"] }
+eframe = { version = "0.33", default-features = false, features = ["default_fonts", "glow", "persistence", "wayland", "x11"] }
+egui = "0.33"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 4
+
+[profile.dev]
+opt-level = 1
+[profile.dev.package."*"]
+opt-level = 3

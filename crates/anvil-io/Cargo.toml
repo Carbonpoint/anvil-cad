@@ -1,0 +1,12 @@
+[package]
+name = "anvil-io"
+description = "File import and export: native .anvil documents and mesh formats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anvil-kernel.workspace = true
+anvil-feature.workspace = true
+thiserror.workspace = true

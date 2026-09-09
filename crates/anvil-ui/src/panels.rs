@@ -1,0 +1,189 @@
+//! Part navigator, property panel, expression table.
+
+use anvil_feature::param::ParamKind;
+use anvil_feature::{Document, ParamValue};
+use std::collections::HashMap;
+
+#[derive(Default)]
+pub struct PanelState {
+    pub selected: Option<usize>,
+    /// Text being edited, keyed by (feature index, param name).
+    pub drafts: HashMap<(usize, &'static str), String>,
+    pub new_expr_name: String,
+    pub new_expr_value: String,
+    pub expr_drafts: HashMap<String, String>,
+}
+
+/// Returns true if the document changed.
+pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState) -> bool {
+    let mut changed = false;
+    ui.heading("Part Navigator");
+    ui.separator();
+    let mut to_remove = None;
+    let mut to_toggle = None;
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        for (i, node) in doc.features.iter().enumerate() {
+            ui.horizontal(|ui| {
+                let mark = if node.error.is_some() {
+                    "!"
+                } else if node.suppressed {
+                    "-"
+                } else {
+                    "*"
+                };
+                let label = format!("{mark} {i}: {}", node.feature.name());
+                let sel = st.selected == Some(i);
+                let resp = ui.selectable_label(sel, label);
+                if resp.clicked() {
+                    st.selected = Some(i);
+                }
+                if let Some(e) = &node.error {
+                    resp.on_hover_text(e);
+                }
+                if ui.small_button(if node.suppressed { "unsuppress" } else { "suppress" }).clicked() {
+                    to_toggle = Some(i);
+                }
+                if ui.small_button("x").clicked() {
+                    to_remove = Some(i);
+                }
+            });
+        }
+    });
+    if let Some(i) = to_toggle {
+        let s = doc.features[i].suppressed;
+        doc.set_suppressed(i, !s);
+        changed = true;
+    }
+    if let Some(i) = to_remove {
+        doc.remove_feature(i);
+        st.selected = None;
+        changed = true;
+    }
+    changed
+}
+
+/// Generic property editor built from `Feature::params()`.
+pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState) -> bool {
+    ui.heading("Properties");
+    ui.separator();
+    let Some(idx) = st.selected else {
+        ui.label("Select a feature in the Part Navigator.");
+        return false;
+    };
+    if idx >= doc.features.len() {
+        st.selected = None;
+        return false;
+    }
+    let params = doc.features[idx].feature.params();
+    ui.label(doc.features[idx].feature.name());
+    if let Some(e) = &doc.features[idx].error {
+        ui.colored_label(egui::Color32::from_rgb(220, 80, 60), e);
+    }
+    let mut pending: Option<(&'static str, ParamValue)> = None;
+    egui::Grid::new("props").num_columns(2).show(ui, |ui| {
+        for p in &params {
+            ui.label(p.label);
+            match (&p.kind, &p.value) {
+                (ParamKind::Length | ParamKind::Angle | ParamKind::Text, ParamValue::Expr(cur)) => {
+                    let draft = st.drafts.entry((idx, p.name)).or_insert_with(|| cur.clone());
+                    let resp = ui.text_edit_singleline(draft);
+                    if resp.lost_focus() && draft != cur {
+                        pending = Some((p.name, ParamValue::Expr(draft.clone())));
+                    }
+                }
+                (ParamKind::Bool, ParamValue::Bool(b)) => {
+                    let mut v = *b;
+                    if ui.checkbox(&mut v, "").changed() {
+                        pending = Some((p.name, ParamValue::Bool(v)));
+                    }
+                }
+                (ParamKind::FeatureRef { accepts }, ParamValue::FeatureRef(cur)) => {
+                    let mut v = *cur;
+                    let current_name = doc.features.get(v).map(|n| n.feature.name()).unwrap_or_else(|| "?".into());
+                    egui::ComboBox::from_id_salt((idx, p.name)).selected_text(format!("{v}: {current_name}")).show_ui(
+                        ui,
+                        |ui| {
+                            for (i, n) in doc.features.iter().enumerate() {
+                                if i < idx && accepts.contains(&n.feature.type_id()) {
+                                    ui.selectable_value(&mut v, i, format!("{i}: {}", n.feature.name()));
+                                }
+                            }
+                        },
+                    );
+                    if v != *cur {
+                        pending = Some((p.name, ParamValue::FeatureRef(v)));
+                    }
+                }
+                (ParamKind::Choice { options }, ParamValue::Choice(cur)) => {
+                    let mut v = cur.clone();
+                    egui::ComboBox::from_id_salt((idx, p.name, "c")).selected_text(&v).show_ui(ui, |ui| {
+                        for o in options {
+                            ui.selectable_value(&mut v, o.to_string(), *o);
+                        }
+                    });
+                    if &v != cur {
+                        pending = Some((p.name, ParamValue::Choice(v)));
+                    }
+                }
+                _ => {
+                    ui.label("(unsupported)");
+                }
+            }
+            ui.end_row();
+        }
+    });
+    if let Some((name, value)) = pending {
+        let mut err = None;
+        doc.edit_feature(idx, |f| {
+            if let Err(e) = f.set_param(name, value) {
+                err = Some(e);
+            }
+        });
+        if let Some(e) = err {
+            log::warn!("set_param: {e}");
+        }
+        st.drafts.retain(|(i, _), _| *i != idx);
+        return true;
+    }
+    false
+}
+
+pub fn expression_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState) -> bool {
+    let mut changed = false;
+    ui.horizontal(|ui| {
+        ui.heading("Expressions");
+        ui.label("name = expression, for example  h = w / 2 + 5");
+    });
+    let mut edits: Vec<(String, String)> = Vec::new();
+    egui::ScrollArea::horizontal().show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            for p in doc.exprs.iter() {
+                ui.group(|ui| {
+                    ui.label(format!("{} = {:.4}", p.name, p.value));
+                    let draft = st.expr_drafts.entry(p.name.clone()).or_insert_with(|| p.source.clone());
+                    let resp = ui.add(egui::TextEdit::singleline(draft).desired_width(90.0));
+                    if resp.lost_focus() && *draft != p.source {
+                        edits.push((p.name.clone(), draft.clone()));
+                    }
+                });
+            }
+            ui.group(|ui| {
+                ui.add(egui::TextEdit::singleline(&mut st.new_expr_name).hint_text("name").desired_width(60.0));
+                ui.add(egui::TextEdit::singleline(&mut st.new_expr_value).hint_text("value").desired_width(90.0));
+                if ui.button("Add").clicked() && !st.new_expr_name.trim().is_empty() {
+                    edits.push((st.new_expr_name.trim().to_string(), st.new_expr_value.clone()));
+                    st.new_expr_name.clear();
+                    st.new_expr_value.clear();
+                }
+            });
+        });
+    });
+    for (name, src) in edits {
+        match doc.set_expression(&name, &src) {
+            Ok(()) => changed = true,
+            Err(e) => log::warn!("expression {name}: {e}"),
+        }
+        st.expr_drafts.remove(&name);
+    }
+    changed
+}

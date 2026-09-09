@@ -1,0 +1,19 @@
+[package]
+name = "anvil-feature"
+description = "Feature history, regeneration, parameters, undo, and the feature registry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anvil-math.workspace = true
+anvil-kernel.workspace = true
+anvil-sketch.workspace = true
+anvil-expr.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+inventory.workspace = true
+typetag = "0.2"
+log.workspace = true

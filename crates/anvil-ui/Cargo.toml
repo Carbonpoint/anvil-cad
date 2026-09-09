@@ -1,0 +1,18 @@
+[package]
+name = "anvil-ui"
+description = "Anvil desktop UI: ribbon, part navigator, property panel, viewport"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anvil-math.workspace = true
+anvil-kernel.workspace = true
+anvil-feature.workspace = true
+anvil-io.workspace = true
+anvil-cam.workspace = true
+anvil-sketch.workspace = true
+eframe.workspace = true
+egui.workspace = true
+log.workspace = true

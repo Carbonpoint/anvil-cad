@@ -1,0 +1,6 @@
+/target
+**/*.rs.bk
+*.anvil
+*.stl
+*.nc
+.DS_Store
