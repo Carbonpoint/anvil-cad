@@ -400,6 +400,9 @@ impl AnvilApp {
         let mut construction = false;
         let mut clear_constraints = false;
         let mut undo = false;
+        let mut offset = false;
+        let mut project = false;
+        let mut look_at = false;
         let Mode::Sketch(ed) = &mut self.mode else { return };
         ui.horizontal(|ui| {
             if ui.button("Undo").clicked() {
@@ -412,18 +415,46 @@ impl AnvilApp {
                 finish = true;
             }
             ui.separator();
-            ui.label(&ed.message);
+            ui.label(egui::RichText::new(format!("{}: {}", ed.tool.label(), ed.tool.hint())).weak());
+            if !ed.message.is_empty() {
+                ui.separator();
+                ui.label(&ed.message);
+            }
         });
         ui.separator();
+        let tool_button = |ui: &mut egui::Ui, t: Tool, current: Tool, out: &mut Option<Tool>| {
+            if ui.add(egui::Button::new(t.label()).selected(current == t)).on_hover_text(t.hint()).clicked() {
+                *out = Some(t);
+                ui.close();
+            }
+        };
         ui.horizontal_wrapped(|ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    for t in Tool::ALL {
-                        let b = ui
-                            .add(egui::Button::new(t.label()).selected(ed.tool == t).min_size(egui::vec2(56.0, 34.0)));
-                        if b.on_hover_text(t.hint()).clicked() {
-                            new_tool = Some(t);
-                        }
+                    if ui
+                        .add(
+                            egui::Button::new("Select")
+                                .selected(ed.tool == Tool::Select)
+                                .min_size(egui::vec2(52.0, 34.0)),
+                        )
+                        .clicked()
+                    {
+                        new_tool = Some(Tool::Select);
+                    }
+                    for (menu, tools) in Tool::MENUS {
+                        let active = tools.contains(&ed.tool);
+                        let title = if active { ed.tool.label() } else { menu };
+                        let mut resp = None;
+                        ui.scope(|ui| {
+                            if active {
+                                ui.visuals_mut().widgets.inactive.weak_bg_fill = ui.visuals().selection.bg_fill;
+                            }
+                            resp = Some(ui.menu_button(format!("{title} v"), |ui| {
+                                for &t in tools {
+                                    tool_button(ui, t, ed.tool, &mut new_tool);
+                                }
+                            }));
+                        });
                     }
                     ui.label("sides");
                     ui.add(egui::DragValue::new(&mut ed.polygon_sides).range(3..=32));
@@ -435,17 +466,35 @@ impl AnvilApp {
             ui.separator();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
+                    for t in Tool::MODIFY {
+                        if ui.add(egui::Button::new(t.label()).selected(ed.tool == t)).on_hover_text(t.hint()).clicked()
+                        {
+                            new_tool = Some(t);
+                        }
+                    }
+                    if ui.button("Offset").on_hover_text("Offset the selection by the value field").clicked() {
+                        offset = true;
+                    }
+                    if ui
+                        .button("Project")
+                        .on_hover_text("Project body edges lying in this plane into the sketch")
+                        .clicked()
+                    {
+                        project = true;
+                    }
                     if ui.button("Delete").on_hover_text("Delete selected entities (Del)").clicked() {
                         delete = true;
                     }
                     if ui.button("Construction").on_hover_text("Toggle construction on selected lines").clicked() {
                         construction = true;
                     }
-                    if ui.button("Clear constraints").on_hover_text("Remove constraints on the selection").clicked() {
-                        clear_constraints = true;
-                    }
-                    ui.checkbox(&mut ed.snap_grid, "Snap grid");
-                    ui.add(egui::DragValue::new(&mut ed.grid).range(0.0..=1000.0).speed(0.5).prefix("grid "));
+                    ui.checkbox(&mut ed.copy, "copy");
+                    ui.label("n1");
+                    ui.add(egui::DragValue::new(&mut ed.count1).range(1..=200));
+                    ui.label("n2");
+                    ui.add(egui::DragValue::new(&mut ed.count2).range(1..=200));
+                    ui.label("angle");
+                    ui.add(egui::DragValue::new(&mut ed.pattern_angle).range(-360.0..=360.0));
                 });
                 ui.label(egui::RichText::new("Modify").small().weak());
             });
@@ -453,9 +502,12 @@ impl AnvilApp {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     for c in ConstraintTool::ALL {
-                        if ui.add(egui::Button::new(c.label()).min_size(egui::vec2(50.0, 34.0))).clicked() {
+                        if ui.add(egui::Button::new(c.label())).clicked() {
                             constraint = Some(c);
                         }
+                    }
+                    if ui.button("Clear").on_hover_text("Remove constraints on the selection").clicked() {
+                        clear_constraints = true;
                     }
                 });
                 ui.label(egui::RichText::new("Constraints (select first)").small().weak());
@@ -464,7 +516,14 @@ impl AnvilApp {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut ed.dim_value).desired_width(60.0).hint_text("value"));
-                    if ui.button("Length / Distance").clicked() {
+                    if ui
+                        .button("Dimension")
+                        .on_hover_text("Length, distance, radius, or angle from the selection (D)")
+                        .clicked()
+                    {
+                        dimension = Some(DimensionTool::Smart);
+                    }
+                    if ui.button("Length").clicked() {
                         dimension = Some(DimensionTool::Length);
                     }
                     if ui.button("Radius").clicked() {
@@ -474,7 +533,22 @@ impl AnvilApp {
                         dimension = Some(DimensionTool::Angle);
                     }
                 });
-                ui.label(egui::RichText::new("Dimensions").small().weak());
+                ui.label(egui::RichText::new("Dimension (value also sets fillet, scale, offset)").small().weak());
+            });
+            ui.separator();
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Look At").clicked() {
+                        look_at = true;
+                    }
+                    ui.checkbox(&mut ed.show_grid, "Grid");
+                    ui.checkbox(&mut ed.snap_grid, "Snap grid");
+                    ui.checkbox(&mut ed.snap_curves, "Snap curves");
+                    ui.add(egui::DragValue::new(&mut ed.grid).range(0.0..=1000.0).speed(0.5).prefix("grid "));
+                    ui.checkbox(&mut ed.show_points, "Points");
+                    ui.checkbox(&mut ed.show_constraints, "Constraints");
+                });
+                ui.label(egui::RichText::new("Palette").small().weak());
             });
         });
         if let Some(t) = new_tool {
@@ -500,15 +574,29 @@ impl AnvilApp {
             ed.remove_constraints_on_selection(&mut self.doc);
             self.scene_dirty = true;
         }
+        if offset {
+            ed.offset_selection(&mut self.doc);
+            self.scene_dirty = true;
+        }
+        if project {
+            let segs: Vec<[DVec3; 2]> = self.scene.edges.iter().map(|(_, e)| *e).collect();
+            ed.project(&segs, &mut self.doc);
+            self.scene_dirty = true;
+        }
+        if look_at {
+            let plane = ed.sketch.plane;
+            self.camera.look_at_plane(&plane, self.camera.ortho_height.unwrap_or(100.0));
+        }
         if undo {
-            // Undo the last committed sketch step and reload the editor copy.
             let idx = ed.feature;
             self.doc.undo();
+            let tool = ed.tool;
             if let Some(mut ned) = SketchEditor::open(&self.doc, idx) {
-                ned.set_tool(ed.tool);
-                **ed = ned;
+                ned.set_tool(tool);
+                self.mode = Mode::Sketch(Box::new(ned));
             }
             self.scene_dirty = true;
+            return;
         }
         if finish {
             self.finish_sketch();
@@ -607,7 +695,10 @@ impl AnvilApp {
                             self.start_sketch_on(Box::new(SketchFeature::on_datum(name)));
                         } else if let Some(t) = self.hovered_tri {
                             if let Some(plane) = self.scene.face_plane(&self.doc, t) {
-                                self.start_sketch_on(Box::new(SketchFeature::on_plane(plane)));
+                                let segs: Vec<[DVec3; 2]> = self.scene.edges.iter().map(|(_, e)| *e).collect();
+                                let mut sk = SketchFeature::on_plane(plane);
+                                sk.sketch.project_segments(&segs, 1e-4);
+                                self.start_sketch_on(Box::new(sk));
                             }
                         }
                     }
@@ -620,12 +711,26 @@ impl AnvilApp {
                 if esc || secondary_clicked {
                     if ed.clicks.is_empty() && ed.tool != Tool::Select {
                         ed.set_tool(Tool::Select);
-                    } else {
-                        ed.cancel();
+                    } else if ed.cancel(&mut self.doc) {
+                        self.scene_dirty = true;
                     }
                 }
                 if del {
                     ed.delete_selection(&mut self.doc);
+                    self.scene_dirty = true;
+                }
+                let key = |k: egui::Key| ui.input(|i| i.key_pressed(k) && !i.modifiers.any());
+                if key(egui::Key::L) {
+                    ed.set_tool(Tool::Line);
+                }
+                if key(egui::Key::R) {
+                    ed.set_tool(Tool::Rect2);
+                }
+                if key(egui::Key::C) {
+                    ed.set_tool(Tool::CircleCenter);
+                }
+                if key(egui::Key::D) {
+                    ed.apply_dimension(DimensionTool::Smart, &mut self.doc);
                     self.scene_dirty = true;
                 }
                 if resp.drag_started_by(egui::PointerButton::Primary) {

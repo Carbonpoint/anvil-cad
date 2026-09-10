@@ -16,15 +16,30 @@ pub enum Tool {
     Select,
     Point,
     Line,
+    MidpointLine,
     Rect2,
     RectCenter,
+    Rect3,
     CircleCenter,
     Circle2,
     Circle3,
     Arc3,
     ArcCenter,
     Polygon,
+    PolygonInscribed,
+    PolygonEdge,
+    Ellipse,
     Slot,
+    SlotCenter,
+    Spline,
+    Fillet,
+    Trim,
+    Extend,
+    Mirror,
+    MoveCopy,
+    ScaleSel,
+    PatternRect,
+    PatternCirc,
 }
 
 impl Tool {
@@ -33,15 +48,30 @@ impl Tool {
             Tool::Select => "Select",
             Tool::Point => "Point",
             Tool::Line => "Line",
-            Tool::Rect2 => "Rect 2-pt",
-            Tool::RectCenter => "Rect centre",
-            Tool::CircleCenter => "Circle centre",
-            Tool::Circle2 => "Circle 2-pt",
-            Tool::Circle3 => "Circle 3-pt",
-            Tool::Arc3 => "Arc 3-pt",
-            Tool::ArcCenter => "Arc centre",
-            Tool::Polygon => "Polygon",
-            Tool::Slot => "Slot",
+            Tool::MidpointLine => "Midpoint Line",
+            Tool::Rect2 => "2-Point Rectangle",
+            Tool::RectCenter => "Center Rectangle",
+            Tool::Rect3 => "3-Point Rectangle",
+            Tool::CircleCenter => "Center Diameter Circle",
+            Tool::Circle2 => "2-Point Circle",
+            Tool::Circle3 => "3-Point Circle",
+            Tool::Arc3 => "3-Point Arc",
+            Tool::ArcCenter => "Center Point Arc",
+            Tool::Polygon => "Circumscribed Polygon",
+            Tool::PolygonInscribed => "Inscribed Polygon",
+            Tool::PolygonEdge => "Edge Polygon",
+            Tool::Ellipse => "Ellipse",
+            Tool::Slot => "Center to Center Slot",
+            Tool::SlotCenter => "Center Point Slot",
+            Tool::Spline => "Spline",
+            Tool::Fillet => "Fillet",
+            Tool::Trim => "Trim",
+            Tool::Extend => "Extend",
+            Tool::Mirror => "Mirror",
+            Tool::MoveCopy => "Move/Copy",
+            Tool::ScaleSel => "Scale",
+            Tool::PatternRect => "Rectangular Pattern",
+            Tool::PatternCirc => "Circular Pattern",
         }
     }
     pub fn hint(self) -> &'static str {
@@ -58,27 +88,52 @@ impl Tool {
             Tool::ArcCenter => "Click the centre, the start, then the end (counter-clockwise)",
             Tool::Polygon => "Click the centre, then a vertex. Sides in the ribbon field",
             Tool::Slot => "Click the two arc centres. Width in the ribbon field",
+            Tool::MidpointLine => "Click the midpoint, then one end",
+            Tool::Rect3 => "Click two corners of one edge, then a point on the opposite edge",
+            Tool::PolygonInscribed => "Click the centre, then the middle of an edge. Sides in the ribbon field",
+            Tool::PolygonEdge => "Click both ends of one edge. Sides in the ribbon field",
+            Tool::Ellipse => "Click the centre, the end of the first axis, then a point on the ellipse",
+            Tool::SlotCenter => "Click the slot centre, then one arc centre. Width in the ribbon field",
+            Tool::Spline => "Click control points; click the first point to close; right-click to end",
+            Tool::Fillet => "Click two lines that share a corner. Radius from the value field",
+            Tool::Trim => "Click the piece of a line to remove",
+            Tool::Extend => "Click near the end of a line to extend it to the next curve",
+            Tool::Mirror => "Select entities, then click a mirror line",
+            Tool::MoveCopy => "Select entities, click a base point, then a target point. Copy checkbox in the ribbon",
+            Tool::ScaleSel => "Select entities, then click the scale centre. Factor from the value field",
+            Tool::PatternRect => {
+                "Select entities, click the end of the first step, then the end of the second. Counts in the ribbon"
+            }
+            Tool::PatternCirc => "Select entities, then click the pattern centre. Count and angle in the ribbon",
         }
     }
-    pub const ALL: [Tool; 12] = [
-        Tool::Select,
-        Tool::Line,
-        Tool::Rect2,
-        Tool::RectCenter,
-        Tool::CircleCenter,
-        Tool::Circle2,
-        Tool::Circle3,
-        Tool::Arc3,
-        Tool::ArcCenter,
-        Tool::Polygon,
-        Tool::Slot,
-        Tool::Point,
+    /// Menu structure for the ribbon: (menu label, tools).
+    pub const MENUS: [(&'static str, &'static [Tool]); 8] = [
+        ("Line", &[Tool::Line, Tool::MidpointLine]),
+        ("Rectangle", &[Tool::Rect2, Tool::RectCenter, Tool::Rect3]),
+        ("Circle", &[Tool::CircleCenter, Tool::Circle2, Tool::Circle3]),
+        ("Arc", &[Tool::Arc3, Tool::ArcCenter]),
+        ("Polygon", &[Tool::Polygon, Tool::PolygonInscribed, Tool::PolygonEdge]),
+        ("Slot", &[Tool::Slot, Tool::SlotCenter]),
+        ("Curve", &[Tool::Ellipse, Tool::Spline]),
+        ("Point", &[Tool::Point]),
+    ];
+    pub const MODIFY: [Tool; 8] = [
+        Tool::Fillet,
+        Tool::Trim,
+        Tool::Extend,
+        Tool::Mirror,
+        Tool::MoveCopy,
+        Tool::ScaleSel,
+        Tool::PatternRect,
+        Tool::PatternCirc,
     ];
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ConstraintTool {
     Coincident,
+    Collinear,
     Horizontal,
     Vertical,
     Parallel,
@@ -96,6 +151,7 @@ impl ConstraintTool {
     pub fn label(self) -> &'static str {
         match self {
             ConstraintTool::Coincident => "Coincident",
+            ConstraintTool::Collinear => "Collinear",
             ConstraintTool::Horizontal => "Horizontal",
             ConstraintTool::Vertical => "Vertical",
             ConstraintTool::Parallel => "Parallel",
@@ -109,8 +165,9 @@ impl ConstraintTool {
             ConstraintTool::Fix => "Fix",
         }
     }
-    pub const ALL: [ConstraintTool; 12] = [
+    pub const ALL: [ConstraintTool; 13] = [
         ConstraintTool::Coincident,
+        ConstraintTool::Collinear,
         ConstraintTool::Horizontal,
         ConstraintTool::Vertical,
         ConstraintTool::Parallel,
@@ -131,6 +188,8 @@ pub enum DimensionTool {
     Length,
     Radius,
     Angle,
+    /// Picks Length, Radius, or Angle from the selection.
+    Smart,
 }
 
 pub struct SketchEditor {
@@ -147,6 +206,15 @@ pub struct SketchEditor {
     pub polygon_sides: usize,
     pub slot_width: f64,
     pub dim_value: String,
+    pub count1: usize,
+    pub count2: usize,
+    pub pattern_angle: f64,
+    pub copy: bool,
+    pub show_points: bool,
+    pub show_constraints: bool,
+    pub show_grid: bool,
+    pub snap_curves: bool,
+
     pub report: Option<SolveReport>,
     pub message: String,
     pub grid: f64,
@@ -179,6 +247,15 @@ impl SketchEditor {
             polygon_sides: 6,
             slot_width: 6.0,
             dim_value: "10".into(),
+            count1: 3,
+            count2: 1,
+            pattern_angle: 360.0,
+            copy: true,
+            show_points: true,
+            show_constraints: true,
+            show_grid: true,
+            snap_curves: true,
+
             report: Some(report),
             message: String::new(),
             grid: 5.0,
@@ -213,9 +290,20 @@ impl SketchEditor {
         self.message = t.hint().into();
     }
 
-    pub fn cancel(&mut self) {
+    /// Right-click or Esc. An open spline with 2+ points is committed.
+    /// Returns true if something was committed.
+    pub fn cancel(&mut self, doc: &mut Document) -> bool {
+        let mut committed = false;
+        if self.tool == Tool::Spline && self.clicks.len() >= 2 {
+            let pts = self.clicks.clone();
+            self.sketch.add_spline(&pts, false);
+            self.solve();
+            self.commit(doc);
+            committed = true;
+        }
         self.clicks.clear();
         self.click_points.clear();
+        committed
     }
 
     /// World-unit tolerance for picking at the current zoom.
@@ -231,6 +319,11 @@ impl SketchEditor {
         }
         if self.snap_grid && self.grid > 0.0 {
             return (DVec2::new((p.x / self.grid).round() * self.grid, (p.y / self.grid).round() * self.grid), None);
+        }
+        if self.snap_curves {
+            if let Some(q) = self.sketch.nearest_on_curve(p, self.tol(proj)) {
+                return (q, None);
+            }
         }
         (p, None)
     }
@@ -275,6 +368,96 @@ impl SketchEditor {
                     self.solve();
                     self.commit(doc);
                 }
+                return;
+            }
+            Tool::Trim | Tool::Extend => {
+                let hit = self.sketch.pick(p, self.tol(proj));
+                let Some(id) = hit else {
+                    self.message = "Click on a line".into();
+                    return;
+                };
+                let r =
+                    if self.tool == Tool::Trim { self.sketch.trim_line(id, p) } else { self.sketch.extend_line(id, p) };
+                match r {
+                    Ok(()) => {
+                        self.solve();
+                        self.commit(doc);
+                    }
+                    Err(e) => self.message = e,
+                }
+                return;
+            }
+            Tool::Fillet => {
+                let hit = self.sketch.pick(p, self.tol(proj));
+                let Some(id) = hit.filter(|&i| matches!(self.sketch.entities[i], Entity::Line { .. })) else {
+                    self.message = "Click a line".into();
+                    return;
+                };
+                if !self.selection.contains(&id) {
+                    self.selection.push(id);
+                }
+                if self.selection.len() >= 2 {
+                    let r = self.value().unwrap_or(1.0);
+                    let (l1, l2) = (self.selection[0], self.selection[1]);
+                    match self.sketch.fillet_lines(l1, l2, r) {
+                        Ok(_) => {
+                            self.solve();
+                            self.commit(doc);
+                            self.message = "Fillet added".into();
+                        }
+                        Err(e) => self.message = e,
+                    }
+                    self.selection.clear();
+                }
+                return;
+            }
+            Tool::Mirror => {
+                let hit = self.sketch.pick(p, self.tol(proj));
+                match hit.and_then(|i| match self.sketch.entities[i] {
+                    Entity::Line { a, b, .. } => Some((self.sketch.point(a), self.sketch.point(b))),
+                    _ => None,
+                }) {
+                    Some((a, b)) if !self.selection.is_empty() => {
+                        let sel = self.selection.clone();
+                        let out = self.sketch.mirror_entities(&sel, a, b);
+                        self.selection = out;
+                        self.solve();
+                        self.commit(doc);
+                        self.message = "Mirrored".into();
+                    }
+                    Some(_) => self.message = "Select entities first, then click the mirror line".into(),
+                    None => self.message = "Click a line to mirror across".into(),
+                }
+                return;
+            }
+            Tool::ScaleSel => {
+                if self.selection.is_empty() {
+                    self.message = "Select entities first".into();
+                    return;
+                }
+                let f = self.value().unwrap_or(2.0);
+                let sel = self.selection.clone();
+                let out = self.sketch.scale_entities(&sel, sp, f, self.copy);
+                self.selection = out;
+                self.solve();
+                self.commit(doc);
+                self.message = "Scaled".into();
+                return;
+            }
+            Tool::PatternCirc => {
+                if self.selection.is_empty() {
+                    self.message = "Select entities first".into();
+                    return;
+                }
+                let sel = self.selection.clone();
+                self.sketch.pattern_circ(&sel, sp, self.count1, self.pattern_angle.to_radians());
+                self.solve();
+                self.commit(doc);
+                self.message = "Pattern added".into();
+                return;
+            }
+            Tool::MoveCopy | Tool::PatternRect if self.selection.is_empty() => {
+                self.message = "Select entities first (Select tool), then use this tool".into();
                 return;
             }
             _ => {}
@@ -345,6 +528,60 @@ impl SketchEditor {
                 self.sketch.add_slot(c[0], c[1], self.slot_width.max(1e-3));
                 finished = true;
             }
+            Tool::SlotCenter if n == 2 => {
+                self.sketch.add_slot_center_point(c[0], c[1], self.slot_width.max(1e-3));
+                finished = true;
+            }
+            Tool::MidpointLine if n == 2 => {
+                self.sketch.add_line_midpoint(c[0], c[1]);
+                finished = true;
+            }
+            Tool::Rect3 if n == 3 => {
+                self.sketch.add_rectangle_3pt(c[0], c[1], c[2]);
+                finished = true;
+            }
+            Tool::PolygonInscribed if n == 2 => {
+                let d = c[1] - c[0];
+                self.sketch.add_polygon_inscribed(c[0], d.length().max(1e-6), self.polygon_sides, d.y.atan2(d.x));
+                finished = true;
+            }
+            Tool::PolygonEdge if n == 2 => {
+                self.sketch.add_polygon_edge(c[0], c[1], self.polygon_sides);
+                finished = true;
+            }
+            Tool::Ellipse if n == 3 => {
+                let a = c[1] - c[0];
+                let rot = a.y.atan2(a.x);
+                let rx = a.length().max(1e-6);
+                // Solve ry so the ellipse passes through the third click.
+                let v = c[2] - c[0];
+                let (s_, co) = rot.sin_cos();
+                let lx = v.x * co + v.y * s_;
+                let ly = -v.x * s_ + v.y * co;
+                let k = 1.0 - (lx / rx).powi(2);
+                let ry = if k > 1e-9 { (ly.abs() / k.sqrt()).max(1e-6) } else { rx * 0.5 };
+                self.sketch.add_ellipse(c[0], rx, ry, rot);
+                finished = true;
+            }
+            Tool::Spline => {
+                // Closing click on the first point finishes as a closed spline.
+                if n >= 3 && (c[n - 1] - c[0]).length() < self.tol(proj) * 1.5 {
+                    let pts: Vec<DVec2> = c[..n - 1].to_vec();
+                    self.sketch.add_spline(&pts, true);
+                    finished = true;
+                }
+            }
+            Tool::MoveCopy if n == 2 => {
+                let sel = self.selection.clone();
+                let out = self.sketch.move_entities(&sel, c[1] - c[0], self.copy);
+                self.selection = out;
+                finished = true;
+            }
+            Tool::PatternRect if n == 3 => {
+                let sel = self.selection.clone();
+                self.sketch.pattern_rect(&sel, c[1] - c[0], self.count1, c[2] - c[0], self.count2);
+                finished = true;
+            }
             _ => {}
         }
         if finished {
@@ -407,8 +644,42 @@ impl SketchEditor {
             Some(Entity::Point { .. }) => "point",
             Some(Entity::Line { .. }) => "line",
             Some(Entity::Circle { .. }) | Some(Entity::Arc { .. }) => "circle",
+            Some(Entity::Ellipse { .. }) => "ellipse",
+            Some(Entity::Spline { .. }) => "spline",
             None => "none",
         }
+    }
+
+    pub fn value(&self) -> Option<f64> {
+        self.dim_value.trim().parse().ok()
+    }
+
+    /// Offset the selection by the value field.
+    pub fn offset_selection(&mut self, doc: &mut Document) {
+        let Some(d) = self.value() else {
+            self.message = "Enter the offset distance in the value field".into();
+            return;
+        };
+        if self.selection.is_empty() {
+            self.message = "Select entities to offset first".into();
+            return;
+        }
+        let sel = self.selection.clone();
+        let out = self.sketch.offset_entities(&sel, d);
+        self.selection = out;
+        self.solve();
+        self.commit(doc);
+        self.message = "Offset added".into();
+    }
+
+    /// Project 3D segments that lie in the sketch plane.
+    pub fn project(&mut self, segs: &[[anvil_math::DVec3; 2]], doc: &mut Document) {
+        let n = self.sketch.project_segments(segs, 1e-4);
+        if n > 0 {
+            self.solve();
+            self.commit(doc);
+        }
+        self.message = format!("Projected {n} edges");
     }
 
     /// Apply a constraint to the current selection. Returns a message.
@@ -420,6 +691,7 @@ impl SketchEditor {
             (ConstraintTool::Horizontal, ["line"]) => Some(Constraint::Horizontal(sel[0])),
             (ConstraintTool::Vertical, ["line"]) => Some(Constraint::Vertical(sel[0])),
             (ConstraintTool::Parallel, ["line", "line"]) => Some(Constraint::Parallel(sel[0], sel[1])),
+            (ConstraintTool::Collinear, ["line", "line"]) => Some(Constraint::Collinear(sel[0], sel[1])),
             (ConstraintTool::Perpendicular, ["line", "line"]) => Some(Constraint::Perpendicular(sel[0], sel[1])),
             (ConstraintTool::Equal, ["line", "line"]) => Some(Constraint::EqualLength(sel[0], sel[1])),
             (ConstraintTool::Equal, ["circle", "circle"]) => Some(Constraint::EqualRadius(sel[0], sel[1])),
@@ -471,6 +743,15 @@ impl SketchEditor {
         };
         let sel = self.selection.clone();
         let kinds: Vec<&str> = sel.iter().map(|&i| self.kind(i)).collect();
+        let t = if t == DimensionTool::Smart {
+            match kinds.as_slice() {
+                ["circle"] => DimensionTool::Radius,
+                ["line", "line"] => DimensionTool::Angle,
+                _ => DimensionTool::Length,
+            }
+        } else {
+            t
+        };
         let c = match (t, kinds.as_slice()) {
             (DimensionTool::Length, ["line"]) => Some(Constraint::Length(sel[0], v)),
             (DimensionTool::Length, ["point", "point"]) => Some(Constraint::Distance(sel[0], sel[1], v)),
@@ -508,7 +789,7 @@ impl SketchEditor {
             proj.project(plane.to_world(p)).map(|(x, y, _)| Pos2::new(origin.x + x as f32, origin.y + y as f32))
         };
         // Grid.
-        if self.grid > 0.0 && proj.scale * self.grid >= 6.0 {
+        if self.show_grid && self.grid > 0.0 && proj.scale * self.grid >= 6.0 {
             let half_w = proj.width / proj.scale;
             let half_h = proj.height / proj.scale;
             let c = plane.to_local(proj.eye + proj.fwd * 1.0);
@@ -550,62 +831,40 @@ impl SketchEditor {
         };
         for (id, e) in &self.sketch.entities {
             match e {
+                Entity::Point { .. } => {}
                 Entity::Line { a, b, construction } => {
                     if let (Some(p), Some(q)) = (to_screen(self.sketch.point(*a)), to_screen(self.sketch.point(*b))) {
                         painter.line_segment([p, q], stroke_for(id, *construction));
                     }
                 }
-                Entity::Circle { center, radius } => {
-                    let c = self.sketch.point(*center);
-                    let pts: Vec<Pos2> = (0..=64)
-                        .filter_map(|i| {
-                            let t = i as f64 / 64.0 * std::f64::consts::TAU;
-                            to_screen(c + DVec2::new(t.cos(), t.sin()) * *radius)
-                        })
-                        .collect();
+                _ => {
+                    let pts: Vec<Pos2> = self.sketch.sample(id).into_iter().filter_map(to_screen).collect();
                     painter.add(egui::Shape::line(pts, stroke_for(id, false)));
                 }
-                Entity::Arc { center, start, end } => {
-                    let c = self.sketch.point(*center);
-                    let s = self.sketch.point(*start);
-                    let e = self.sketch.point(*end);
-                    let r = (s - c).length();
-                    let a0 = (s - c).y.atan2((s - c).x);
-                    let mut a1 = (e - c).y.atan2((e - c).x);
-                    if a1 <= a0 {
-                        a1 += std::f64::consts::TAU;
-                    }
-                    let n = (((a1 - a0) / std::f64::consts::TAU) * 64.0).ceil().max(2.0) as usize;
-                    let pts: Vec<Pos2> = (0..=n)
-                        .filter_map(|i| {
-                            let t = a0 + (a1 - a0) * i as f64 / n as f64;
-                            to_screen(c + DVec2::new(t.cos(), t.sin()) * r)
-                        })
-                        .collect();
-                    painter.add(egui::Shape::line(pts, stroke_for(id, false)));
-                }
-                Entity::Point { .. } => {}
             }
         }
-        for (id, e) in &self.sketch.entities {
-            if let Entity::Point { pos, .. } = e {
-                if let Some(p) = to_screen(*pos) {
-                    let fixed = self.sketch.constraints.values().any(|c| matches!(c, Constraint::Fix(f) if *f == id));
-                    let col = if self.selection.contains(&id) {
-                        Color32::from_rgb(240, 150, 30)
-                    } else if self.hover == Some(id) {
-                        Color32::from_rgb(60, 160, 240)
-                    } else if fixed {
-                        Color32::from_rgb(30, 30, 30)
-                    } else {
-                        Color32::from_rgb(20, 60, 160)
-                    };
-                    painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(6.0, 6.0)), 1.0, col);
+        if self.show_points {
+            for (id, e) in &self.sketch.entities {
+                if let Entity::Point { pos, .. } = e {
+                    if let Some(p) = to_screen(*pos) {
+                        let fixed =
+                            self.sketch.constraints.values().any(|c| matches!(c, Constraint::Fix(f) if *f == id));
+                        let col = if self.selection.contains(&id) {
+                            Color32::from_rgb(240, 150, 30)
+                        } else if self.hover == Some(id) {
+                            Color32::from_rgb(60, 160, 240)
+                        } else if fixed {
+                            Color32::from_rgb(30, 30, 30)
+                        } else {
+                            Color32::from_rgb(20, 60, 160)
+                        };
+                        painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(6.0, 6.0)), 1.0, col);
+                    }
                 }
             }
         }
         // Constraint glyphs: a small label near the first referenced entity.
-        for c in self.sketch.constraints.values() {
+        for c in self.sketch.constraints.values().filter(|_| self.show_constraints) {
             let Some(&first) = c.refs().first() else { continue };
             let anchor = match self.sketch.entities.get(first) {
                 Some(Entity::Point { pos, .. }) => Some(*pos),
@@ -614,6 +873,8 @@ impl SketchEditor {
                 Some(Entity::Arc { center, start, .. }) => {
                     Some((self.sketch.point(*center) + self.sketch.point(*start)) * 0.5)
                 }
+                Some(Entity::Ellipse { center, .. }) => Some(self.sketch.point(*center)),
+                Some(Entity::Spline { points, .. }) => points.first().map(|&p| self.sketch.point(p)),
                 None => None,
             };
             if let Some(p) = anchor.and_then(to_screen) {
@@ -693,6 +954,48 @@ impl SketchEditor {
                     circles.push((c[0], self.slot_width / 2.0));
                     circles.push((cur, self.slot_width / 2.0));
                 }
+                (Tool::SlotCenter, 1) => {
+                    let d = cur - c[0];
+                    segs.push([c[0] - d, c[0] + d]);
+                    circles.push((c[0] - d, self.slot_width / 2.0));
+                    circles.push((c[0] + d, self.slot_width / 2.0));
+                }
+                (Tool::MidpointLine, 1) => segs.push([c[0] * 2.0 - cur, cur]),
+                (Tool::Rect3, 1) => segs.push([c[0], cur]),
+                (Tool::Rect3, 2) => {
+                    let d = (c[1] - c[0]).normalize_or_zero();
+                    let nn = DVec2::new(-d.y, d.x);
+                    let h = (cur - c[0]).dot(nn);
+                    let (p2, p3) = (c[1] + nn * h, c[0] + nn * h);
+                    segs.extend([[c[0], c[1]], [c[1], p2], [p2, p3], [p3, c[0]]]);
+                }
+                (Tool::PolygonInscribed, 1) | (Tool::PolygonEdge, 1) => segs.push([c[0], cur]),
+                (Tool::Ellipse, 1) => segs.push([c[0], cur]),
+                (Tool::Ellipse, 2) => {
+                    let a = c[1] - c[0];
+                    let rot = a.y.atan2(a.x);
+                    let rx = a.length().max(1e-6);
+                    let ry = ((cur - c[0]).perp_dot(a.normalize_or_zero())).abs().max(1e-6);
+                    let (sr, cr) = rot.sin_cos();
+                    let pts: Vec<DVec2> = (0..=48)
+                        .map(|i| {
+                            let t = i as f64 / 48.0 * std::f64::consts::TAU;
+                            let (x, y) = (rx * t.cos(), ry * t.sin());
+                            c[0] + DVec2::new(x * cr - y * sr, x * sr + y * cr)
+                        })
+                        .collect();
+                    for w in pts.windows(2) {
+                        segs.push([w[0], w[1]]);
+                    }
+                }
+                (Tool::Spline, n) if n >= 1 => {
+                    let mut pts = c.clone();
+                    pts.push(cur);
+                    for w in anvil_sketch::catmull_rom(&pts, false, 8).windows(2) {
+                        segs.push([w[0], w[1]]);
+                    }
+                }
+                (Tool::MoveCopy, 1) | (Tool::PatternRect, 1) | (Tool::PatternRect, 2) => segs.push([c[0], cur]),
                 _ => {}
             }
             for [a, b] in segs {

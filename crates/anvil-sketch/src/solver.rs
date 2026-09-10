@@ -204,6 +204,13 @@ impl Eval<'_> {
                     out.push(dir.perp_dot(m - a));
                     out.push(dir.dot(d));
                 }
+                Constraint::Collinear(l1, l2) => {
+                    let (a, b) = self.line(*l1);
+                    let (c, d) = self.line(*l2);
+                    let dir = (b - a).normalize_or_zero();
+                    out.push(dir.perp_dot(c - a));
+                    out.push(dir.perp_dot(d - a));
+                }
                 Constraint::Fix(_) => {}
                 Constraint::FixX(p, v) => out.push(self.pt(*p).x - v),
                 Constraint::FixY(p, v) => out.push(self.pt(*p).y - v),

@@ -47,17 +47,15 @@ fn walk(s: &Sketch) -> (Vec<Profile>, Vec<Vec<DVec2>>) {
     let mut profiles = Vec::new();
     let mut open = Vec::new();
 
-    // Full circles are profiles on their own.
-    for e in s.entities.values() {
-        if let Entity::Circle { center, radius } = e {
-            let c = s.point(*center);
-            let points = (0..CIRCLE_SEGMENTS)
-                .map(|i| {
-                    let t = i as f64 / CIRCLE_SEGMENTS as f64 * std::f64::consts::TAU;
-                    c + DVec2::new(t.cos(), t.sin()) * *radius
-                })
-                .collect();
-            profiles.push(Profile { points });
+    // Full circles, ellipses, and closed splines are profiles on their own.
+    for (id, e) in &s.entities {
+        let own = matches!(e, Entity::Circle { .. } | Entity::Ellipse { .. } | Entity::Spline { closed: true, .. });
+        if own {
+            let mut points = s.sample(id);
+            points.pop();
+            let mut p = Profile { points };
+            p.make_ccw();
+            profiles.push(p);
         }
     }
 
@@ -80,33 +78,28 @@ fn walk(s: &Sketch) -> (Vec<Profile>, Vec<Vec<DVec2>>) {
 
     // Each edge: (node_a, node_b, intermediate points from a to b exclusive)
     let mut edges: Vec<(usize, usize, Vec<DVec2>)> = Vec::new();
-    for e in s.entities.values() {
+    for (eid, e) in &s.entities {
         match e {
             Entity::Line { a, b, construction: false } => {
                 let na = node_for(*a, s);
                 let nb = node_for(*b, s);
                 edges.push((na, nb, Vec::new()));
             }
-            Entity::Arc { center, start, end } => {
-                let c = s.point(*center);
-                let ps = s.point(*start);
-                let pe = s.point(*end);
-                let r = (ps - c).length();
-                let a0 = (ps - c).y.atan2((ps - c).x);
-                let mut a1 = (pe - c).y.atan2((pe - c).x);
-                if a1 <= a0 {
-                    a1 += std::f64::consts::TAU;
-                }
-                let n = ((a1 - a0) / std::f64::consts::TAU * CIRCLE_SEGMENTS as f64).ceil().max(2.0) as usize;
-                let mid: Vec<DVec2> = (1..n)
-                    .map(|i| {
-                        let t = a0 + (a1 - a0) * i as f64 / n as f64;
-                        c + DVec2::new(t.cos(), t.sin()) * r
-                    })
-                    .collect();
+            Entity::Arc { start, end, .. } => {
+                let mut pts = s.sample(eid);
+                pts.pop();
+                pts.remove(0);
                 let na = node_for(*start, s);
                 let nb = node_for(*end, s);
-                edges.push((na, nb, mid));
+                edges.push((na, nb, pts));
+            }
+            Entity::Spline { points, closed: false } if points.len() >= 2 => {
+                let mut pts = s.sample(eid);
+                pts.pop();
+                pts.remove(0);
+                let na = node_for(points[0], s);
+                let nb = node_for(*points.last().unwrap(), s);
+                edges.push((na, nb, pts));
             }
             _ => {}
         }

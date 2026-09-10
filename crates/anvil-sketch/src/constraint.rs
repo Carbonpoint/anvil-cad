@@ -17,6 +17,8 @@ pub enum Constraint {
     Length(EntityId, f64),
     /// Two lines are parallel (1 equation).
     Parallel(EntityId, EntityId),
+    /// Two lines lie on one infinite line (2 equations).
+    Collinear(EntityId, EntityId),
     /// Two lines are perpendicular (1 equation).
     Perpendicular(EntityId, EntityId),
     /// Two lines have equal length (1 equation).
@@ -55,6 +57,7 @@ impl Constraint {
             Coincident(a, b)
             | Distance(a, b, _)
             | Parallel(a, b)
+            | Collinear(a, b)
             | Perpendicular(a, b)
             | EqualLength(a, b)
             | EqualRadius(a, b)
@@ -79,6 +82,7 @@ impl Constraint {
             Distance(_, _, d) => format!("Distance {d:.3}"),
             Length(_, d) => format!("Length {d:.3}"),
             Parallel(..) => "Parallel".into(),
+            Collinear(..) => "Collinear".into(),
             Perpendicular(..) => "Perpendicular".into(),
             EqualLength(..) => "Equal".into(),
             Radius(_, r) => format!("Radius {r:.3}"),
