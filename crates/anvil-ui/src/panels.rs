@@ -7,6 +7,8 @@ use std::collections::HashMap;
 #[derive(Default)]
 pub struct PanelState {
     pub selected: Option<usize>,
+    /// Set when the user double-clicks a feature in the navigator.
+    pub open_requested: Option<usize>,
     /// Text being edited, keyed by (feature index, param name).
     pub drafts: HashMap<(usize, &'static str), String>,
     pub new_expr_name: String,
@@ -36,6 +38,10 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                 let resp = ui.selectable_label(sel, label);
                 if resp.clicked() {
                     st.selected = Some(i);
+                }
+                if resp.double_clicked() {
+                    st.selected = Some(i);
+                    st.open_requested = Some(i);
                 }
                 if let Some(e) = &node.error {
                     resp.on_hover_text(e);
@@ -104,7 +110,7 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                         ui,
                         |ui| {
                             for (i, n) in doc.features.iter().enumerate() {
-                                if i < idx && accepts.contains(&n.feature.type_id()) {
+                                if i < idx && accepts.contains(&n.feature.kind()) {
                                     ui.selectable_value(&mut v, i, format!("{i}: {}", n.feature.name()));
                                 }
                             }

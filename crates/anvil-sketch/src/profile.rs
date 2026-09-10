@@ -35,7 +35,17 @@ impl Profile {
 }
 
 pub fn extract(s: &Sketch) -> Vec<Profile> {
+    walk(s).0
+}
+
+/// Open polylines (chains that do not close), for sweep paths.
+pub fn extract_open(s: &Sketch) -> Vec<Vec<DVec2>> {
+    walk(s).1
+}
+
+fn walk(s: &Sketch) -> (Vec<Profile>, Vec<Vec<DVec2>>) {
     let mut profiles = Vec::new();
+    let mut open = Vec::new();
 
     // Full circles are profiles on their own.
     for e in s.entities.values() {
@@ -149,9 +159,11 @@ pub fn extract(s: &Sketch) -> Vec<Profile> {
             let mut p = Profile { points: loop_pts };
             p.make_ccw();
             profiles.push(p);
+        } else if !closed && loop_pts.len() >= 2 {
+            open.push(loop_pts);
         }
     }
-    profiles
+    (profiles, open)
 }
 
 #[cfg(test)]

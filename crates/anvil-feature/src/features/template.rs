@@ -7,6 +7,9 @@
 //! 3. Describe editable fields in `params()` and accept edits in `set_param()`.
 //! 4. Build geometry in `regenerate()`.
 //! 5. Update the `inventory::submit!` block: id, label, tab, group, tooltip.
+//!    Tabs today: Solid (groups Create, Modify, Construct, Inspect), CAM.
+//!    Bodies from another feature: `ctx.bodies_of(idx)`. Planes: `ctx.plane_of(idx)`.
+//!    If your feature replaces its input body, list it in `consumes`.
 //!
 //! That is all. The ribbon, part navigator, property panel, save/load, and
 //! undo pick the feature up automatically.
@@ -30,7 +33,7 @@ impl Default for TemplateFeature {
 
 #[typetag::serde(name = "template")]
 impl Feature for TemplateFeature {
-    fn type_id(&self) -> &'static str {
+    fn kind(&self) -> &'static str {
         "template"
     }
     fn name(&self) -> String {
@@ -63,8 +66,8 @@ inventory::submit! {
     FeatureDescriptor {
         id: "template",
         label: "Template",
-        tab: "Home",
-        group: "Feature",
+        tab: "Solid",
+        group: "Create",
         tooltip: "Example feature. Copy me.",
         order: 900,
         create: || Box::new(TemplateFeature::default()),

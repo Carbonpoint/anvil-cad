@@ -20,7 +20,7 @@ impl Default for RevolveFeature {
 
 #[typetag::serde(name = "revolve")]
 impl Feature for RevolveFeature {
-    fn type_id(&self) -> &'static str {
+    fn kind(&self) -> &'static str {
         "revolve"
     }
     fn name(&self) -> String {
@@ -62,8 +62,8 @@ inventory::submit! {
     FeatureDescriptor {
         id: "revolve",
         label: "Revolve",
-        tab: "Home",
-        group: "Feature",
+        tab: "Solid",
+        group: "Create",
         tooltip: "Revolve a sketch profile about an axis",
         order: 20,
         create: || Box::new(RevolveFeature::default()),

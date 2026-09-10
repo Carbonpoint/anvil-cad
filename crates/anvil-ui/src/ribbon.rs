@@ -2,10 +2,10 @@
 //!
 //! Tabs and groups come from two sources:
 //! 1. `anvil_feature::descriptors()`: every registered feature adds a button.
-//! 2. `RibbonAction` entries below for app-level commands (undo, save, ...).
+//! 2. `app_actions()` below for app-level commands (save, fit, measure, ...).
 //!
-//! Nothing here needs editing to add a feature. Add app commands to
-//! `app_actions()`.
+//! The Sketch tab is contextual. It is drawn by the app while the sketch
+//! editor is open and is not part of this list.
 
 use anvil_feature::descriptors;
 
@@ -20,6 +20,13 @@ pub enum RibbonAction {
     FitView,
     DemoPart,
     ExportGcode,
+    EditSketch,
+    Measure,
+    ToggleEdges,
+    ViewIso,
+    ViewTop,
+    ViewFront,
+    ViewRight,
 }
 
 pub struct RibbonButton {
@@ -44,7 +51,9 @@ pub struct RibbonTab {
     pub groups: Vec<RibbonGroup>,
 }
 
-const TAB_ORDER: &[&str] = &["File", "Home", "CAM", "View"];
+const TAB_ORDER: &[&str] = &["File", "Solid", "CAM", "View"];
+const GROUP_ORDER: &[&str] =
+    &["Document", "Export", "Samples", "Create", "Modify", "Construct", "Inspect", "Output", "Camera", "Display"];
 
 fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
     use ButtonKind::Action as A;
@@ -60,7 +69,7 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "Document",
             RibbonButton {
                 label: "Open",
-                tooltip: "Open an .anvil file (path in status bar)",
+                tooltip: "Open the .anvil file named in the status bar",
                 order: 1,
                 kind: A(Load),
             },
@@ -83,15 +92,28 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
         (
             "File",
             "Samples",
+            RibbonButton { label: "Demo part", tooltip: "Load a sample part", order: 0, kind: A(DemoPart) },
+        ),
+        (
+            "Solid",
+            "Create",
             RibbonButton {
-                label: "Demo part",
-                tooltip: "Load a sample sketch + extrude + revolve",
-                order: 0,
-                kind: A(DemoPart),
+                label: "Edit Sketch",
+                tooltip: "Open the selected sketch in the editor (or double-click it)",
+                order: 1,
+                kind: A(EditSketch),
             },
         ),
-        ("Home", "Edit", RibbonButton { label: "Undo", tooltip: "Ctrl+Z", order: 0, kind: A(Undo) }),
-        ("Home", "Edit", RibbonButton { label: "Redo", tooltip: "Ctrl+Y", order: 1, kind: A(Redo) }),
+        (
+            "Solid",
+            "Inspect",
+            RibbonButton {
+                label: "Measure",
+                tooltip: "Volume and bounding box of the selected feature's bodies",
+                order: 0,
+                kind: A(Measure),
+            },
+        ),
         (
             "CAM",
             "Output",
@@ -106,6 +128,23 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "View",
             "Camera",
             RibbonButton { label: "Fit", tooltip: "Fit all bodies in the viewport", order: 0, kind: A(FitView) },
+        ),
+        ("View", "Camera", RibbonButton { label: "Iso", tooltip: "Isometric view", order: 1, kind: A(ViewIso) }),
+        ("View", "Camera", RibbonButton { label: "Top", tooltip: "Look down the Z axis", order: 2, kind: A(ViewTop) }),
+        (
+            "View",
+            "Camera",
+            RibbonButton { label: "Front", tooltip: "Look along the Y axis", order: 3, kind: A(ViewFront) },
+        ),
+        (
+            "View",
+            "Camera",
+            RibbonButton { label: "Right", tooltip: "Look along the X axis", order: 4, kind: A(ViewRight) },
+        ),
+        (
+            "View",
+            "Display",
+            RibbonButton { label: "Edges", tooltip: "Toggle model edges", order: 0, kind: A(ToggleEdges) },
         ),
     ]
 }
@@ -143,6 +182,7 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
         for g in &mut t.groups {
             g.buttons.sort_by_key(|b| (b.order, b.label));
         }
+        t.groups.sort_by_key(|g| GROUP_ORDER.iter().position(|n| *n == g.name).unwrap_or(usize::MAX));
     }
     tabs.sort_by_key(|t| TAB_ORDER.iter().position(|n| *n == t.name).unwrap_or(usize::MAX));
     tabs

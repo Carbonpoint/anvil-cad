@@ -8,13 +8,21 @@ Workspace, expressions, sketch solver, planar kernel with extrude and
 revolve, feature history with undo and save, CPU viewport, ribbon from
 registry, STL export, contour G-code.
 
-## M2: Interaction
+## M2: Interaction (mostly done 2026-09-09)
 
-* Viewport picking: CPU ray cast against the triangle mesh, then face and
-  edge highlight. Face ids are already carried per triangle.
-* Sketch editor: draw lines, rectangles, circles on a plane; add constraints
-  and dimensions by clicking; live solve while dragging.
-* Datum planes from faces. Sketch on a face.
+Done: z-buffer viewport with id-buffer picking of bodies and faces; sketch
+on a datum plane or a face; sketch editor with line, rectangle (2-point,
+centre), circle (centre, 2-point, 3-point), arc (3-point, centre), polygon,
+slot, point; 12 constraint tools and 3 dimension tools; drag with live
+solve; primitives, sweep, loft, mirror, patterns, move, scale, offset and
+angled planes; measure.
+
+Open:
+* Edge picking and per-edge fillet selection.
+* Dimension values as expressions, and dimension labels you can drag.
+* Trim, extend, offset, and sketch fillet tools.
+* Sketch text and spline entities.
+* Project face edges into a sketch.
 
 ## M3: Real solids
 

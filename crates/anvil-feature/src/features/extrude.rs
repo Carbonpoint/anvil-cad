@@ -18,7 +18,7 @@ impl Default for ExtrudeFeature {
 
 #[typetag::serde(name = "extrude")]
 impl Feature for ExtrudeFeature {
-    fn type_id(&self) -> &'static str {
+    fn kind(&self) -> &'static str {
         "extrude"
     }
     fn name(&self) -> String {
@@ -64,8 +64,8 @@ inventory::submit! {
     FeatureDescriptor {
         id: "extrude",
         label: "Extrude",
-        tab: "Home",
-        group: "Feature",
+        tab: "Solid",
+        group: "Create",
         tooltip: "Extrude a sketch profile along its normal",
         order: 10,
         create: || Box::new(ExtrudeFeature::default()),

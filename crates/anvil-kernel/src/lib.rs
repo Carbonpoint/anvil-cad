@@ -21,7 +21,7 @@ pub mod topology;
 pub use mesh::TriMesh;
 pub use topology::{Edge, EdgeId, Face, FaceId, Solid, Surface, Vertex, VertexId};
 
-use anvil_math::{Axis, DVec2, Plane};
+use anvil_math::{Axis, DVec2, DVec3, Plane};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -53,6 +53,15 @@ pub trait Kernel {
     fn boolean(&self, a: &Solid, b: &Solid, op: BooleanOp) -> KernelResult<Solid>;
     fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f64) -> KernelResult<Solid>;
     fn tessellate(&self, solid: &Solid) -> TriMesh;
+    fn sweep(&self, plane: &Plane, profile: &[DVec2], path: &[DVec3], closed: bool) -> KernelResult<Solid>;
+    fn loft(&self, sections: &[(Plane, Vec<DVec2>)]) -> KernelResult<Solid>;
+    fn box_solid(&self, corner: DVec3, size: DVec3) -> KernelResult<Solid>;
+    fn cylinder(&self, plane: &Plane, center: DVec2, radius: f64, height: f64) -> KernelResult<Solid>;
+    fn sphere(&self, center: DVec3, radius: f64) -> KernelResult<Solid>;
+    fn torus(&self, center: DVec3, major: f64, minor: f64) -> KernelResult<Solid>;
+    fn mirror(&self, solid: &Solid, plane: &Plane) -> Solid;
+    fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
+    fn shell(&self, solid: &Solid, thickness: f64) -> KernelResult<Solid>;
 }
 
 /// The built-in polyhedral kernel.
@@ -74,5 +83,32 @@ impl Kernel for NativeKernel {
     }
     fn tessellate(&self, solid: &Solid) -> TriMesh {
         mesh::tessellate(solid)
+    }
+    fn sweep(&self, plane: &Plane, profile: &[DVec2], path: &[DVec3], closed: bool) -> KernelResult<Solid> {
+        ops::sweep(plane, profile, path, closed)
+    }
+    fn loft(&self, sections: &[(Plane, Vec<DVec2>)]) -> KernelResult<Solid> {
+        ops::loft(sections)
+    }
+    fn box_solid(&self, corner: DVec3, size: DVec3) -> KernelResult<Solid> {
+        ops::box_solid(corner, size)
+    }
+    fn cylinder(&self, plane: &Plane, center: DVec2, radius: f64, height: f64) -> KernelResult<Solid> {
+        ops::cylinder(plane, center, radius, height)
+    }
+    fn sphere(&self, center: DVec3, radius: f64) -> KernelResult<Solid> {
+        ops::sphere(center, radius)
+    }
+    fn torus(&self, center: DVec3, major: f64, minor: f64) -> KernelResult<Solid> {
+        ops::torus(center, major, minor)
+    }
+    fn mirror(&self, solid: &Solid, plane: &Plane) -> Solid {
+        ops::mirror(solid, plane)
+    }
+    fn chamfer(&self, _solid: &Solid, _edges: &[EdgeId], _distance: f64) -> KernelResult<Solid> {
+        Err(KernelError::Unsupported("chamfer"))
+    }
+    fn shell(&self, _solid: &Solid, _thickness: f64) -> KernelResult<Solid> {
+        Err(KernelError::Unsupported("shell"))
     }
 }

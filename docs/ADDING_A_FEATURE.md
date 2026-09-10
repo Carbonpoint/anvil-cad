@@ -55,7 +55,7 @@ rest of the history still regenerates.
 Edit the `inventory::submit!` block. Remove the `#[cfg(any())]` line above
 it. Set:
 
-* `id`: stable string, same as `type_id()`.
+* `id`: stable string, same as `kind()`.
 * `label`: button text.
 * `tab` and `group`: where the button goes. Existing tabs: File, Home, CAM,
   View. A new tab name creates a new tab.

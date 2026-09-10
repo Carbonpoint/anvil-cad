@@ -13,8 +13,9 @@ ribbon click
        exprs.evaluate()                   (anvil-expr, dependency order)
        for each feature in order:
          feature.regenerate(ctx)          (anvil-sketch solve, anvil-kernel ops)
-  -> anvil_io::document_mesh()            (parallel tessellation, anvil-kernel)
-  -> viewport::draw()                     (CPU projection, egui shapes)
+  -> scene::Scene::build()                (parallel tessellation, feature edges)
+  -> raster::Framebuffer::draw_scene()    (CPU z-buffer, id buffer for picking)
+  -> egui texture + overlays              (sketch entities, datum planes, triad)
 ```
 
 ## Crate dependency order
@@ -43,8 +44,10 @@ demo loader.
 * **Sketch solver.** `anvil_sketch::solver::solve` is one function over a
   `Sketch`. A graph-decomposition front end or a SolveSpace port can replace
   it without touching entities or constraints.
-* **Viewport.** `viewport::draw` takes a `TriMesh` and a camera. A glow or
-  wgpu renderer is a second implementation of the same call (ADR 0003).
+* **Viewport.** `raster::Framebuffer::draw_scene` takes a `Scene` and a
+  `Projector`. A glow or wgpu renderer is a second implementation of the
+  same call (ADR 0003). Picking reads the id buffer, so it stays on the CPU
+  on either path.
 * **Posts.** `Post` is a trait. Each controller dialect is one struct.
 * **Native file format.** `Document` is plain serde. The JSON writer in
   `anvil-io` is the only place that knows the container (ADR 0002).
@@ -60,10 +63,13 @@ why WASM was chosen over dynamic libraries.
 ## Known limits of the draft
 
 * Bodies do not combine. Each Extrude or Revolve makes a separate body. A
-  boolean step is needed before "Extrude: subtract" can exist.
-* Fillet returns `Unsupported`.
-* The sketch has no interactive editor yet. Sketches are built in code.
-* Face and edge selection in the viewport does not exist yet.
+  boolean step is needed before "Extrude: cut" and Hole can exist.
+* Fillet, Chamfer, Shell, Combine, Hole return `Unsupported`.
+* A sketch on a face stores the face plane as geometry, not as a reference.
+  If the face moves, the sketch stays where it was.
+* Edge selection in the viewport does not exist yet. Faces and bodies can
+  be picked.
+* Dimensions in sketches are numbers, not expressions, for now.
 * Topological naming: features reference upstream features by index, and
   fillets reference all edges. Persistent naming is a roadmap item, not a
   retrofit; see the research summary for why it must come early.

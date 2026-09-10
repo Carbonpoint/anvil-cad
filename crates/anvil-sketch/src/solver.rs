@@ -167,9 +167,53 @@ impl Eval<'_> {
                     let (c, r) = self.circle(*cid);
                     out.push((self.pt(*p) - c).length() - r);
                 }
+                Constraint::EqualRadius(c1, c2) => {
+                    out.push(self.circle(*c1).1 - self.circle(*c2).1);
+                }
+                Constraint::Concentric(c1, c2) => {
+                    let d = self.circle(*c1).0 - self.circle(*c2).0;
+                    out.push(d.x);
+                    out.push(d.y);
+                }
+                Constraint::Midpoint(p, l) => {
+                    let (a, b) = self.line(*l);
+                    let d = self.pt(*p) - (a + b) * 0.5;
+                    out.push(d.x);
+                    out.push(d.y);
+                }
+                Constraint::Tangent(l, cid) => {
+                    let (a, b) = self.line(*l);
+                    let (c, r) = self.circle(*cid);
+                    let dir = (b - a).normalize_or_zero();
+                    out.push(dir.perp_dot(c - a).abs() - r);
+                }
+                Constraint::Angle(l1, l2, deg) => {
+                    let (a, b) = self.line(*l1);
+                    let (c, d) = self.line(*l2);
+                    let u = (b - a).normalize_or_zero();
+                    let v = (d - c).normalize_or_zero();
+                    let ang = u.perp_dot(v).atan2(u.dot(v));
+                    out.push(ang - deg.to_radians());
+                }
+                Constraint::Symmetric(p1, p2, l) => {
+                    let (a, b) = self.line(*l);
+                    let dir = (b - a).normalize_or_zero();
+                    let m = (self.pt(*p1) + self.pt(*p2)) * 0.5;
+                    let d = self.pt(*p2) - self.pt(*p1);
+                    // Midpoint on the line, and the join perpendicular to it.
+                    out.push(dir.perp_dot(m - a));
+                    out.push(dir.dot(d));
+                }
                 Constraint::Fix(_) => {}
                 Constraint::FixX(p, v) => out.push(self.pt(*p).x - v),
                 Constraint::FixY(p, v) => out.push(self.pt(*p).y - v),
+            }
+        }
+        // Implicit: an arc's end point is at the same radius as its start.
+        for e in self.s.entities.values() {
+            if let Entity::Arc { center, start, end } = e {
+                let c = self.pt(*center);
+                out.push((self.pt(*start) - c).length() - (self.pt(*end) - c).length());
             }
         }
     }

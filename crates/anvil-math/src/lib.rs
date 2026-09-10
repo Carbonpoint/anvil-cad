@@ -97,6 +97,17 @@ pub fn approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() <= LINEAR_TOL
 }
 
+/// Euler order used by Move/Copy: rotate about X, then Y, then Z (extrinsic).
+pub fn glam_euler() -> glam::EulerRot {
+    glam::EulerRot::ZYX
+}
+
+impl Default for Aabb {
+    fn default() -> Self {
+        Aabb::empty()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

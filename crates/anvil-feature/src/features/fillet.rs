@@ -4,7 +4,7 @@
 //! `Unsupported` on regenerate. The parameter surface and ribbon entry are
 //! in place so the UI flow can be developed against it.
 
-use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError};
+use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, BODY_TYPES};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -21,7 +21,7 @@ impl Default for FilletFeature {
 
 #[typetag::serde(name = "fillet")]
 impl Feature for FilletFeature {
-    fn type_id(&self) -> &'static str {
+    fn kind(&self) -> &'static str {
         "fillet"
     }
     fn name(&self) -> String {
@@ -29,7 +29,7 @@ impl Feature for FilletFeature {
     }
     fn params(&self) -> Vec<ParamSpec> {
         vec![
-            ParamSpec::feature_ref("body", "Body", vec!["extrude", "revolve"], self.body_feature),
+            ParamSpec::feature_ref("body", "Body", BODY_TYPES.to_vec(), self.body_feature),
             ParamSpec::length("radius", "Radius", &self.radius),
         ]
     }
@@ -43,15 +43,10 @@ impl Feature for FilletFeature {
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let r = ctx.eval(&self.radius)?;
-        let body = ctx
-            .upstream
-            .get(self.body_feature)
-            .and_then(|o| o.as_ref())
-            .and_then(|o| o.bodies.first())
-            .ok_or(RegenError::BadReference(ctx.index, self.body_feature, "body"))?;
+        let body = &ctx.bodies_of(self.body_feature)?[0];
         let edges: Vec<_> = body.edges.keys().collect();
         let out = ctx.kernel.fillet(body, &edges, r)?;
-        Ok(FeatureOutput { bodies: vec![out], ..Default::default() })
+        Ok(FeatureOutput { bodies: vec![out], consumes: vec![self.body_feature], ..Default::default() })
     }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())
@@ -62,8 +57,8 @@ inventory::submit! {
     FeatureDescriptor {
         id: "fillet",
         label: "Fillet",
-        tab: "Home",
-        group: "Feature",
+        tab: "Solid",
+        group: "Modify",
         tooltip: "Round the edges of a body (kernel support pending)",
         order: 30,
         create: || Box::new(FilletFeature::default()),

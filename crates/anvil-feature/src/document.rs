@@ -44,6 +44,42 @@ impl RegenContext<'_> {
     pub fn eval(&self, expr: &str) -> Result<f64, RegenError> {
         Ok(self.exprs.eval_str(expr)?)
     }
+    /// Bodies produced by an earlier feature.
+    pub fn bodies_of(&self, idx: FeatureId) -> Result<&[Solid], RegenError> {
+        let out = self
+            .upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .ok_or(RegenError::BadReference(self.index, idx, "output"))?;
+        if out.bodies.is_empty() {
+            return Err(RegenError::BadReference(self.index, idx, "body"));
+        }
+        Ok(&out.bodies)
+    }
+
+    /// Plane defined by an earlier feature (sketch or construction plane).
+    pub fn plane_of(&self, idx: FeatureId) -> Result<anvil_math::Plane, RegenError> {
+        self.upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .and_then(|o| o.plane)
+            .ok_or(RegenError::BadReference(self.index, idx, "plane"))
+    }
+
+    /// Open paths of an earlier sketch feature, in world coordinates.
+    pub fn paths_of(&self, idx: FeatureId) -> Result<Vec<Vec<anvil_math::DVec3>>, RegenError> {
+        let out = self
+            .upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .ok_or(RegenError::BadReference(self.index, idx, "output"))?;
+        let plane = out.plane.ok_or(RegenError::BadReference(self.index, idx, "sketch plane"))?;
+        if out.paths.is_empty() {
+            return Err(RegenError::BadReference(self.index, idx, "open path"));
+        }
+        Ok(out.paths.iter().map(|p| p.iter().map(|&q| plane.to_world(q)).collect()).collect())
+    }
+
     pub fn profiles_of(&self, idx: FeatureId) -> Result<(&anvil_math::Plane, &[anvil_sketch::Profile]), RegenError> {
         let out = self
             .upstream
@@ -200,9 +236,32 @@ impl Document {
         }
     }
 
-    /// Every body produced by the current history.
+    /// Every visible body with the index of the feature that made it.
+    /// Bodies consumed by a later feature (move, fillet, ...) are hidden.
+    pub fn visible_bodies(&self) -> Vec<(FeatureId, &Solid)> {
+        let consumed: std::collections::HashSet<usize> =
+            self.features.iter().filter_map(|n| n.output.as_ref()).flat_map(|o| o.consumes.iter().copied()).collect();
+        self.features
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| !consumed.contains(i))
+            .filter_map(|(i, n)| n.output.as_ref().map(|o| (i, o)))
+            .flat_map(|(i, o)| o.bodies.iter().map(move |b| (i, b)))
+            .collect()
+    }
+
+    /// Every visible body produced by the current history.
     pub fn bodies(&self) -> Vec<&Solid> {
-        self.features.iter().filter_map(|n| n.output.as_ref()).flat_map(|o| o.bodies.iter()).collect()
+        self.visible_bodies().into_iter().map(|(_, b)| b).collect()
+    }
+
+    /// Insert a feature at a position (for editing history order).
+    pub fn insert_feature(&mut self, at: FeatureId, feature: Box<dyn Feature>) -> FeatureId {
+        self.snapshot();
+        let at = at.min(self.features.len());
+        self.features.insert(at, FeatureNode { feature, suppressed: false, output: None, error: None });
+        self.regenerate();
+        at
     }
 
     pub fn to_json(&self) -> serde_json::Result<String> {

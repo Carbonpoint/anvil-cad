@@ -75,7 +75,7 @@ mod tests {
     #[test]
     fn stl_round_trip_size() {
         let mut doc = Document::new("t");
-        doc.add_feature(Box::new(SketchFeature::default()));
+        doc.add_feature(Box::new(SketchFeature::rectangle("XY", 40.0, 25.0)));
         doc.add_feature(Box::new(ExtrudeFeature::default()));
         let mesh = document_mesh(&doc);
         assert_eq!(mesh.triangle_count(), 12);
