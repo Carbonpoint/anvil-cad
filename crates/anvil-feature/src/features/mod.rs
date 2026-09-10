@@ -3,6 +3,7 @@
 //! To add one, copy `template.rs`, rename, and add a `pub mod` line here.
 
 pub mod construct;
+pub mod emboss;
 pub mod extrude;
 pub mod fillet;
 pub mod loft;

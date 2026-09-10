@@ -59,13 +59,28 @@ fn tessellate_face(solid: &Solid, id: FaceId, f: &Face) -> TriMesh {
     let origin = solid.pos(f.outer[0]);
     let to2d = |p: DVec3| DVec2::new((p - origin).dot(u), (p - origin).dot(v));
 
-    let pts3: Vec<DVec3> = f.outer.iter().map(|&vid| solid.pos(vid)).collect();
-    let pts2: Vec<DVec2> = pts3.iter().map(|&p| to2d(p)).collect();
-    let tris = ear_clip(&pts2);
+    let mut pts3: Vec<DVec3> = f.outer.iter().map(|&vid| solid.pos(vid)).collect();
+    let mut pts2: Vec<DVec2> = pts3.iter().map(|&p| to2d(p)).collect();
+    let tris = if f.inner.is_empty() {
+        ear_clip(&pts2)
+    } else {
+        // Holes: append their points after the outer loop and bridge them.
+        let outer_n = pts2.len();
+        let mut holes: Vec<Vec<usize>> = Vec::new();
+        for h in &f.inner {
+            let start = pts2.len();
+            for &vid in h {
+                pts3.push(solid.pos(vid));
+                pts2.push(to2d(solid.pos(vid)));
+            }
+            holes.push((start..pts2.len()).collect());
+        }
+        ear_clip_with_holes(&pts2, outer_n, &holes)
+    };
 
     let face_of_tri = vec![id; tris.len() / 3];
     TriMesh {
-        normals: vec![n; f.outer.len()],
+        normals: vec![n; pts3.len()],
         positions: pts3,
         indices: tris.iter().map(|&i| i as u32).collect(),
         face_of_tri,
@@ -118,6 +133,60 @@ pub fn ear_clip(poly: &[DVec2]) -> Vec<usize> {
     out
 }
 
+/// Ear clipping for a polygon with holes. `pts[..outer_n]` is the outer
+/// loop; `holes` lists index ranges of each hole. Each hole is bridged to
+/// the nearest outer vertex, which is adequate for text glyphs and simple
+/// pockets. Output triangles index into `pts`.
+pub fn ear_clip_with_holes(pts: &[DVec2], outer_n: usize, holes: &[Vec<usize>]) -> Vec<usize> {
+    let area = |idx: &[usize]| -> f64 {
+        let n = idx.len();
+        (0..n).map(|i| pts[idx[i]].perp_dot(pts[idx[(i + 1) % n]])).sum()
+    };
+    let mut merged: Vec<usize> = (0..outer_n).collect();
+    if area(&merged) < 0.0 {
+        merged.reverse();
+    }
+    // Process holes from rightmost to leftmost.
+    let mut hs: Vec<Vec<usize>> = holes.to_vec();
+    for h in &mut hs {
+        if area(h) > 0.0 {
+            h.reverse(); // holes go clockwise
+        }
+    }
+    hs.sort_by(|a, b| {
+        let ma = a.iter().map(|&i| pts[i].x).fold(f64::NEG_INFINITY, f64::max);
+        let mb = b.iter().map(|&i| pts[i].x).fold(f64::NEG_INFINITY, f64::max);
+        mb.partial_cmp(&ma).unwrap()
+    });
+    for h in hs {
+        // Hole vertex with max x, then the closest merged vertex to it.
+        let (hk, _) =
+            h.iter()
+                .enumerate()
+                .fold((0, f64::NEG_INFINITY), |acc, (k, &i)| if pts[i].x > acc.1 { (k, pts[i].x) } else { acc });
+        let hp = pts[h[hk]];
+        let (mi, _) = merged.iter().enumerate().fold((0, f64::INFINITY), |acc, (k, &i)| {
+            let d = (pts[i] - hp).length_squared();
+            if d < acc.1 {
+                (k, d)
+            } else {
+                acc
+            }
+        });
+        let mut new_loop = Vec::with_capacity(merged.len() + h.len() + 2);
+        new_loop.extend_from_slice(&merged[..=mi]);
+        for k in 0..h.len() {
+            new_loop.push(h[(hk + k) % h.len()]);
+        }
+        new_loop.push(h[hk]);
+        new_loop.push(merged[mi]);
+        new_loop.extend_from_slice(&merged[mi + 1..]);
+        merged = new_loop;
+    }
+    let local: Vec<DVec2> = merged.iter().map(|&i| pts[i]).collect();
+    ear_clip(&local).into_iter().map(|i| merged[i]).collect()
+}
+
 fn point_in_tri(p: DVec2, a: DVec2, b: DVec2, c: DVec2) -> bool {
     let s1 = (b - a).perp_dot(p - a);
     let s2 = (c - b).perp_dot(p - b);
@@ -144,5 +213,13 @@ mod tests {
             DVec2::new(0.0, 2.0),
         ];
         assert_eq!(ear_clip(&l).len(), 12);
+    }
+    #[test]
+    fn ear_clip_square_with_square_hole() {
+        let mut pts = vec![DVec2::new(0.0, 0.0), DVec2::new(10.0, 0.0), DVec2::new(10.0, 10.0), DVec2::new(0.0, 10.0)];
+        pts.extend([DVec2::new(3.0, 3.0), DVec2::new(7.0, 3.0), DVec2::new(7.0, 7.0), DVec2::new(3.0, 7.0)]);
+        let tris = ear_clip_with_holes(&pts, 4, &[vec![4, 5, 6, 7]]);
+        let area: f64 = tris.chunks(3).map(|t| (pts[t[1]] - pts[t[0]]).perp_dot(pts[t[2]] - pts[t[0]]) * 0.5).sum();
+        assert!((area - 84.0).abs() < 1e-9, "{area}");
     }
 }

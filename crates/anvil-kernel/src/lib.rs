@@ -63,6 +63,13 @@ pub trait Kernel {
     fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
     fn shell(&self, solid: &Solid, thickness: f64) -> KernelResult<Solid>;
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)>;
+    fn extrude_with_holes(
+        &self,
+        plane: &Plane,
+        outer: &[DVec2],
+        holes: &[Vec<DVec2>],
+        distance: f64,
+    ) -> KernelResult<Solid>;
 }
 
 /// The built-in polyhedral kernel.
@@ -114,5 +121,14 @@ impl Kernel for NativeKernel {
     }
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
         ops::split_by_plane(solid, plane)
+    }
+    fn extrude_with_holes(
+        &self,
+        plane: &Plane,
+        outer: &[DVec2],
+        holes: &[Vec<DVec2>],
+        distance: f64,
+    ) -> KernelResult<Solid> {
+        ops::extrude_with_holes(plane, outer, holes, distance)
     }
 }

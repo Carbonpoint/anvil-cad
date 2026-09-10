@@ -16,4 +16,6 @@ serde_json.workspace = true
 thiserror.workspace = true
 inventory.workspace = true
 typetag = "0.2"
+ttf-parser = "0.25"
+qrcode = { version = "0.14", default-features = false }
 log.workspace = true

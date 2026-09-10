@@ -62,15 +62,21 @@ impl Solid {
     }
 
     pub fn add_face(&mut self, outer: Vec<VertexId>, surface: Surface) -> FaceId {
-        let n = outer.len();
-        for i in 0..n {
-            let a = outer[i];
-            let b = outer[(i + 1) % n];
-            if !self.edges.values().any(|e| (e.a == a && e.b == b) || (e.a == b && e.b == a)) {
-                self.edges.insert(Edge { a, b });
+        self.add_face_with_holes(outer, Vec::new(), surface)
+    }
+
+    pub fn add_face_with_holes(&mut self, outer: Vec<VertexId>, inner: Vec<Vec<VertexId>>, surface: Surface) -> FaceId {
+        for lp in std::iter::once(&outer).chain(inner.iter()) {
+            let n = lp.len();
+            for i in 0..n {
+                let a = lp[i];
+                let b = lp[(i + 1) % n];
+                if !self.edges.values().any(|e| (e.a == a && e.b == b) || (e.a == b && e.b == a)) {
+                    self.edges.insert(Edge { a, b });
+                }
             }
         }
-        self.faces.insert(Face { outer, inner: Vec::new(), surface })
+        self.faces.insert(Face { outer, inner, surface })
     }
 
     pub fn pos(&self, v: VertexId) -> DVec3 {
@@ -151,12 +157,14 @@ impl Solid {
         use std::collections::HashMap;
         let mut adj: HashMap<(VertexId, VertexId), Vec<FaceId>> = HashMap::new();
         for (fid, f) in &self.faces {
-            let n = f.outer.len();
-            for i in 0..n {
-                let a = f.outer[i];
-                let b = f.outer[(i + 1) % n];
-                let key = if a < b { (a, b) } else { (b, a) };
-                adj.entry(key).or_default().push(fid);
+            for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
+                let n = lp.len();
+                for i in 0..n {
+                    let a = lp[i];
+                    let b = lp[(i + 1) % n];
+                    let key = if a < b { (a, b) } else { (b, a) };
+                    adj.entry(key).or_default().push(fid);
+                }
             }
         }
         let cos_min = min_angle.cos();
@@ -193,12 +201,14 @@ impl Solid {
         let mut by_edge: HashMap<(VertexId, VertexId), Vec<FaceId>> = HashMap::new();
         for &fid in &ids {
             let f = &self.faces[fid];
-            let n = f.outer.len();
-            for i in 0..n {
-                let a = f.outer[i];
-                let b = f.outer[(i + 1) % n];
-                let key = if a < b { (a, b) } else { (b, a) };
-                by_edge.entry(key).or_default().push(fid);
+            for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
+                let n = lp.len();
+                for i in 0..n {
+                    let a = lp[i];
+                    let b = lp[(i + 1) % n];
+                    let key = if a < b { (a, b) } else { (b, a) };
+                    by_edge.entry(key).or_default().push(fid);
+                }
             }
         }
         let mut visited: HashSet<FaceId> = HashSet::new();
@@ -209,29 +219,34 @@ impl Solid {
             visited.insert(seed);
             let mut queue = VecDeque::from([seed]);
             while let Some(fid) = queue.pop_front() {
-                let loop_a = self.faces[fid].outer.clone();
-                let n = loop_a.len();
-                for i in 0..n {
-                    let a = loop_a[i];
-                    let b = loop_a[(i + 1) % n];
-                    let key = if a < b { (a, b) } else { (b, a) };
-                    for &nb in &by_edge[&key] {
-                        if nb == fid || visited.contains(&nb) {
-                            continue;
-                        }
-                        // Neighbour must traverse b -> a. If it goes a -> b, flip it.
-                        let lb = &self.faces[nb].outer;
-                        let m = lb.len();
-                        let same_dir = (0..m).any(|k| lb[k] == a && lb[(k + 1) % m] == b);
-                        if same_dir {
-                            let face = &mut self.faces[nb];
-                            face.outer.reverse();
-                            for l in &mut face.inner {
-                                l.reverse();
+                let face_a = self.faces[fid].clone();
+                let loops_a: Vec<&Vec<VertexId>> = std::iter::once(&face_a.outer).chain(face_a.inner.iter()).collect();
+                for loop_a in loops_a {
+                    let n = loop_a.len();
+                    for i in 0..n {
+                        let a = loop_a[i];
+                        let b = loop_a[(i + 1) % n];
+                        let key = if a < b { (a, b) } else { (b, a) };
+                        for &nb in &by_edge[&key] {
+                            if nb == fid || visited.contains(&nb) {
+                                continue;
                             }
+                            // Neighbour must traverse b -> a. If it goes a -> b, flip it.
+                            let fb = &self.faces[nb];
+                            let same_dir = std::iter::once(&fb.outer).chain(fb.inner.iter()).any(|lb| {
+                                let m = lb.len();
+                                (0..m).any(|k| lb[k] == a && lb[(k + 1) % m] == b)
+                            });
+                            if same_dir {
+                                let face = &mut self.faces[nb];
+                                face.outer.reverse();
+                                for l in &mut face.inner {
+                                    l.reverse();
+                                }
+                            }
+                            visited.insert(nb);
+                            queue.push_back(nb);
                         }
-                        visited.insert(nb);
-                        queue.push_back(nb);
                     }
                 }
             }

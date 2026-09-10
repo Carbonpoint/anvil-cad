@@ -71,3 +71,38 @@ fn sketch_on_offset_plane_follows_the_plane() {
     assert!((b[0].bounds().min.z - 7.0).abs() < 1e-9);
     assert!((b[0].bounds().max.z - 10.0).abs() < 1e-9);
 }
+
+#[test]
+fn text_and_qr_make_bodies_with_holes() {
+    use anvil_feature::features::emboss::{QrFeature, TextFeature};
+    let mut doc = Document::new("t");
+    doc.add_feature(Box::new(TextFeature {
+        text: "AO".into(),
+        size: "10".into(),
+        height: "1".into(),
+        ..Default::default()
+    }));
+    let n = doc.features[0].error.clone();
+    assert!(n.is_none(), "{n:?}");
+    let bodies = doc.bodies();
+    assert_eq!(bodies.len(), 2, "one body per glyph");
+    assert!(bodies.iter().all(|b| b.volume() > 0.0));
+    assert!(bodies[1].faces.values().any(|f| !f.inner.is_empty()), "O has a hole");
+    doc.add_feature(Box::new(QrFeature { data: "https://anvil.test".into(), ..Default::default() }));
+    assert!(doc.features[1].error.is_none());
+    assert!(doc.bodies().len() > 30);
+}
+
+#[test]
+fn sketch_circle_inside_rectangle_extrudes_a_hole() {
+    let mut doc = Document::new("t");
+    let mut sk = SketchFeature::rectangle("XY", 20.0, 20.0);
+    let c = sk.sketch.add_point(0.0, 0.0);
+    sk.sketch.add_circle(c, 5.0);
+    doc.add_feature(Box::new(sk));
+    doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "2".into(), symmetric: false }));
+    let b = doc.bodies();
+    assert_eq!(b.len(), 1);
+    let exact = (400.0 - std::f64::consts::PI * 25.0) * 2.0;
+    assert!((b[0].volume() - exact).abs() / exact < 0.01, "{} vs {exact}", b[0].volume());
+}

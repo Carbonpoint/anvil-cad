@@ -266,6 +266,55 @@ impl Sketch {
         [l0, l1, l2, l3]
     }
 
+    /// Rectangle with a fillet radius per corner, in order bottom-left,
+    /// bottom-right, top-right, top-left. A zero radius keeps a sharp corner.
+    pub fn add_rounded_rectangle(&mut self, x0: f64, y0: f64, x1: f64, y1: f64, radii: [f64; 4]) -> Vec<EntityId> {
+        let corners = [DVec2::new(x0, y0), DVec2::new(x1, y0), DVec2::new(x1, y1), DVec2::new(x0, y1)];
+        // Direction from each corner to the next and the previous corner.
+        let n = 4;
+        let mut pts_in: Vec<DVec2> = Vec::new();
+        let mut pts_out: Vec<DVec2> = Vec::new();
+        for i in 0..n {
+            let c = corners[i];
+            let prev = corners[(i + n - 1) % n];
+            let next = corners[(i + 1) % n];
+            let r = radii[i].max(0.0);
+            pts_in.push(c + (prev - c).normalize_or_zero() * r);
+            pts_out.push(c + (next - c).normalize_or_zero() * r);
+        }
+        let mut ids = Vec::new();
+        let mut point_ids: Vec<(EntityId, EntityId)> = Vec::new();
+        for i in 0..n {
+            let a = self.add_point(pts_in[i].x, pts_in[i].y);
+            let b = self.add_point(pts_out[i].x, pts_out[i].y);
+            point_ids.push((a, b));
+        }
+        for i in 0..n {
+            // Corner arc at corner i from pts_in[i] to pts_out[i] (CCW rectangle).
+            let r = radii[i].max(0.0);
+            if r > 0.0 {
+                let c = corners[i];
+                let prev = corners[(i + n - 1) % n];
+                let next = corners[(i + 1) % n];
+                let center = c + (prev - c).normalize_or_zero() * r + (next - c).normalize_or_zero() * r;
+                let cp = self.add_point(center.x, center.y);
+                ids.push(self.add_arc(cp, point_ids[i].0, point_ids[i].1));
+            } else {
+                // Collapse the two coincident points into one.
+                self.constrain(Constraint::Coincident(point_ids[i].0, point_ids[i].1));
+            }
+            // Edge from pts_out[i] to pts_in[i+1].
+            let l = self.add_line(point_ids[i].1, point_ids[(i + 1) % n].0);
+            if i % 2 == 0 {
+                self.constrain(Constraint::Horizontal(l));
+            } else {
+                self.constrain(Constraint::Vertical(l));
+            }
+            ids.push(l);
+        }
+        ids
+    }
+
     /// Regular polygon by centre and inscribed (apothem) radius.
     pub fn add_polygon_inscribed(&mut self, center: DVec2, apothem: f64, sides: usize, rotation: f64) -> Vec<EntityId> {
         let n = sides.max(3) as f64;
@@ -497,6 +546,17 @@ mod tests {
             "{:?}",
             p.iter().map(|q| q.signed_area()).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn rounded_rectangle_is_one_closed_profile() {
+        let mut s = Sketch::new(Plane::XY);
+        s.add_rounded_rectangle(0.0, 0.0, 85.6, 53.98, [12.7, 6.35, 12.7, 6.35]);
+        let p = s.profiles();
+        assert_eq!(p.len(), 1);
+        let cut = |r: f64| r * r * (1.0 - std::f64::consts::FRAC_PI_4);
+        let exact = 85.6 * 53.98 - 2.0 * cut(12.7) - 2.0 * cut(6.35);
+        assert!((p[0].signed_area() - exact).abs() < 2.0, "{} vs {exact}", p[0].signed_area());
     }
 
     #[test]

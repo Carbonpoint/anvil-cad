@@ -49,9 +49,10 @@ impl Feature for ExtrudeFeature {
             plane.origin -= plane.normal() * (d / 2.0);
             dist = d.abs();
         }
+        let loops: Vec<Vec<anvil_math::DVec2>> = profiles.iter().map(|p| p.points.clone()).collect();
         let mut bodies = Vec::new();
-        for p in profiles {
-            bodies.push(ctx.kernel.extrude(&plane, &p.points, dist)?);
+        for (outer, holes) in crate::features::emboss::nest_loops(&loops) {
+            bodies.push(ctx.kernel.extrude_with_holes(&plane, &outer, &holes, dist)?);
         }
         Ok(FeatureOutput { bodies, ..Default::default() })
     }

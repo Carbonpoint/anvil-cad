@@ -55,6 +55,66 @@ pub fn extrude(plane: &Plane, profile: &[DVec2], distance: f64) -> KernelResult<
     Ok(s)
 }
 
+/// Extrude an outer profile with holes. Holes must lie inside the outer
+/// loop and not touch it.
+pub fn extrude_with_holes(plane: &Plane, outer: &[DVec2], holes: &[Vec<DVec2>], distance: f64) -> KernelResult<Solid> {
+    if holes.is_empty() {
+        return extrude(plane, outer, distance);
+    }
+    if outer.len() < 3 {
+        return Err(KernelError::DegenerateProfile);
+    }
+    if distance.abs() <= anvil_math::LINEAR_TOL {
+        return Err(KernelError::InvalidInput("extrude distance is zero".into()));
+    }
+    let prof = ccw(outer);
+    let hole_profs: Vec<Vec<DVec2>> = holes
+        .iter()
+        .filter(|h| h.len() >= 3)
+        .map(|h| {
+            let mut c = ccw(h);
+            c.reverse(); // holes run clockwise
+            c
+        })
+        .collect();
+    let offset = plane.normal() * distance;
+    let mut s = Solid::new();
+    let mk = |s: &mut Solid, pts: &[DVec2], lift: bool| -> Vec<VertexId> {
+        pts.iter()
+            .map(|&p| s.add_vertex(plane.to_world(p) + if lift { offset } else { anvil_math::DVec3::ZERO }))
+            .collect()
+    };
+    let bottom = mk(&mut s, &prof, false);
+    let top = mk(&mut s, &prof, true);
+    let hb: Vec<Vec<VertexId>> = hole_profs.iter().map(|h| mk(&mut s, h, false)).collect();
+    let ht: Vec<Vec<VertexId>> = hole_profs.iter().map(|h| mk(&mut s, h, true)).collect();
+    let mut lo = bottom.clone();
+    lo.reverse();
+    let lo_holes: Vec<Vec<VertexId>> = hb
+        .iter()
+        .map(|h| {
+            let mut r = h.clone();
+            r.reverse();
+            r
+        })
+        .collect();
+    s.add_face_with_holes(lo, lo_holes, Surface::Plane);
+    s.add_face_with_holes(top.clone(), ht.clone(), Surface::Plane);
+    let walls = |s: &mut Solid, b: &[VertexId], t: &[VertexId]| {
+        let n = b.len();
+        for i in 0..n {
+            let j = (i + 1) % n;
+            s.add_face(vec![b[i], b[j], t[j], t[i]], Surface::Plane);
+        }
+    };
+    walls(&mut s, &bottom, &top);
+    for (b, t) in hb.iter().zip(ht.iter()) {
+        walls(&mut s, b, t);
+    }
+    s.make_consistent();
+    Ok(s)
+}
+
 /// Revolve a closed profile about `axis` (given in world space, lying in the
 /// sketch plane) by `angle` radians. A full 2*pi gives a closed ring.
 pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> KernelResult<Solid> {
@@ -633,5 +693,13 @@ mod tests {
         let length = 3.0 * (std::f64::consts::TAU * 10.0f64).hypot(4.0);
         let exact = length * std::f64::consts::PI;
         assert!((s.volume() - exact).abs() / exact < 0.05, "{} vs {}", s.volume(), exact);
+    }
+    #[test]
+    fn extrude_with_hole_volume() {
+        let outer = square(10.0);
+        let hole = vec![DVec2::new(3.0, 3.0), DVec2::new(7.0, 3.0), DVec2::new(7.0, 7.0), DVec2::new(3.0, 7.0)];
+        let s = extrude_with_holes(&Plane::XY, &outer, &[hole], 2.0).unwrap();
+        assert!((s.volume() - 168.0).abs() < 1e-6, "{}", s.volume());
+        assert_eq!(s.faces.len(), 10);
     }
 }
