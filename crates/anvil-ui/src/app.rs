@@ -39,6 +39,8 @@ pub struct AnvilApp {
     file_path: String,
     status: String,
     saved_camera: Option<Camera>,
+    com_marker: Option<DVec3>,
+    color_edit: [u8; 3],
 }
 
 const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ", Plane::YZ)];
@@ -65,6 +67,8 @@ impl AnvilApp {
             file_path: "part.anvil".into(),
             status: "Ready".into(),
             saved_camera: None,
+            com_marker: None,
+            color_edit: [140, 170, 205],
         };
         app.load_demo();
         app
@@ -286,6 +290,76 @@ impl AnvilApp {
                 }
             }
             RibbonAction::ToggleEdges => self.style.draw_edges = !self.style.draw_edges,
+            RibbonAction::DeleteFeature => match self.panels.selected {
+                Some(i) => {
+                    self.doc.remove_feature(i);
+                    self.panels.selected = None;
+                    self.invalidate();
+                    self.status = format!("Deleted feature {i}");
+                }
+                None => self.status = "Select a feature to delete".into(),
+            },
+            RibbonAction::ComputeAll => {
+                self.doc.regenerate();
+                self.invalidate();
+                let errors = self.doc.features.iter().filter(|f| f.error.is_some()).count();
+                self.status = format!("Regenerated {} features, {errors} with errors", self.doc.features.len());
+            }
+            RibbonAction::CenterOfMass => match self.panels.selected.and_then(|i| self.doc.features[i].output.as_ref())
+            {
+                Some(out) if !out.bodies.is_empty() => {
+                    let mut total = 0.0;
+                    let mut c = DVec3::ZERO;
+                    for b in &out.bodies {
+                        let v = b.volume();
+                        c += b.centroid() * v;
+                        total += v;
+                    }
+                    let c = if total > 0.0 { c / total } else { DVec3::ZERO };
+                    self.com_marker = Some(c);
+                    self.status = format!(
+                        "Centre of mass: {}, {}, {}",
+                        self.doc.fmt_length(c.x),
+                        self.doc.fmt_length(c.y),
+                        self.doc.fmt_length(c.z)
+                    );
+                }
+                _ => self.status = "Select a feature that produces a body".into(),
+            },
+            RibbonAction::BillOfMaterials => {
+                let mut lines = Vec::new();
+                let mut total_mass = 0.0;
+                for (i, n) in self.doc.features.iter().enumerate() {
+                    let Some(out) = &n.output else { continue };
+                    if out.bodies.is_empty() {
+                        continue;
+                    }
+                    let vol: f64 = out.bodies.iter().map(|b| b.volume()).sum();
+                    let mass = self.doc.mass_of(i);
+                    total_mass += mass.unwrap_or(0.0);
+                    let mat =
+                        self.doc.material.get(&i).map(|m| m.name.clone()).unwrap_or_else(|| "(no material)".into());
+                    lines.push(format!(
+                        "{i} {}: {} bodies, {}, {}, {}",
+                        n.feature.name(),
+                        out.bodies.len(),
+                        self.doc.fmt_volume(vol),
+                        mat,
+                        mass.map(|m| format!("{m:.2} g")).unwrap_or_default()
+                    ));
+                }
+                for l in &lines {
+                    log::info!("BOM {l}");
+                }
+                self.status = format!(
+                    "BOM: {} items, total mass {total_mass:.2} g. Full list in the log (RUST_LOG=info).",
+                    lines.len()
+                );
+            }
+            RibbonAction::ToggleUnits => {
+                self.doc.unit = if self.doc.unit == "mm" { "in".into() } else { "mm".into() };
+                self.status = format!("Display unit: {}", self.doc.unit);
+            }
             RibbonAction::ViewIso => {
                 self.camera.unlock();
                 self.camera.yaw = 0.8;
@@ -655,6 +729,12 @@ impl AnvilApp {
 
         match &mut self.mode {
             Mode::Model => {
+                if del && self.panels.selected.is_some() && resp.hovered() {
+                    let i = self.panels.selected.unwrap();
+                    self.doc.remove_feature(i);
+                    self.panels.selected = None;
+                    self.scene_dirty = true;
+                }
                 if resp.dragged_by(egui::PointerButton::Primary) {
                     let d = resp.drag_delta();
                     self.camera.orbit(d.x as f64, d.y as f64);
@@ -851,6 +931,19 @@ impl AnvilApp {
                 }
             }
         }
+        if let Some(c) = self.com_marker {
+            if let Some(p) = to_screen(c) {
+                painter.circle_stroke(p, 7.0, Stroke::new(2.0f32, Color32::from_rgb(220, 40, 40)));
+                painter.line_segment(
+                    [p - egui::vec2(10.0, 0.0), p + egui::vec2(10.0, 0.0)],
+                    Stroke::new(1.0f32, Color32::from_rgb(220, 40, 40)),
+                );
+                painter.line_segment(
+                    [p - egui::vec2(0.0, 10.0), p + egui::vec2(0.0, 10.0)],
+                    Stroke::new(1.0f32, Color32::from_rgb(220, 40, 40)),
+                );
+            }
+        }
         self.draw_triad(&painter, rect);
     }
 
@@ -918,6 +1011,50 @@ impl eframe::App for AnvilApp {
         egui::SidePanel::right("properties").default_width(270.0).show(ctx, |ui| {
             if panels::property_panel(ui, &mut self.doc, &mut self.panels) {
                 self.invalidate();
+            }
+            if let Some(sel) = self.panels.selected {
+                if self
+                    .doc
+                    .features
+                    .get(sel)
+                    .and_then(|f| f.output.as_ref())
+                    .map(|o| !o.bodies.is_empty())
+                    .unwrap_or(false)
+                {
+                    ui.separator();
+                    ui.heading("Appearance");
+                    ui.horizontal(|ui| {
+                        if let Some(c) = self.doc.appearance.get(&sel) {
+                            self.color_edit = *c;
+                        }
+                        if ui.color_edit_button_srgb(&mut self.color_edit).changed() {
+                            self.doc.appearance.insert(sel, self.color_edit);
+                            self.scene_dirty = true;
+                        }
+                        if ui.button("Reset").clicked() {
+                            self.doc.appearance.remove(&sel);
+                            self.scene_dirty = true;
+                        }
+                    });
+                    ui.heading("Physical Material");
+                    let current =
+                        self.doc.material.get(&sel).map(|m| m.name.clone()).unwrap_or_else(|| "(none)".into());
+                    egui::ComboBox::from_id_salt(("material", sel)).selected_text(&current).show_ui(ui, |ui| {
+                        if ui.selectable_label(current == "(none)", "(none)").clicked() {
+                            self.doc.material.remove(&sel);
+                        }
+                        for (name, density) in anvil_feature::MATERIALS {
+                            if ui.selectable_label(current == *name, format!("{name} ({density} g/cm3)")).clicked() {
+                                self.doc
+                                    .material
+                                    .insert(sel, anvil_feature::Material { name: name.to_string(), density: *density });
+                            }
+                        }
+                    });
+                    if let Some(m) = self.doc.mass_of(sel) {
+                        ui.label(format!("Mass {m:.2} g"));
+                    }
+                }
             }
             if let Mode::Sketch(ed) = &self.mode {
                 ui.separator();

@@ -350,6 +350,167 @@ pub fn mirror(solid: &Solid, plane: &Plane) -> Solid {
     solid.transformed(|p| p - n * (2.0 * (p - o).dot(n)), true)
 }
 
+/// Helix path about the Z axis through `center`, for coils and springs.
+pub fn helix_path(
+    center: anvil_math::DVec3,
+    radius: f64,
+    pitch: f64,
+    turns: f64,
+    segments_per_turn: usize,
+) -> Vec<anvil_math::DVec3> {
+    let n = ((turns * segments_per_turn as f64).ceil() as usize).max(2);
+    (0..=n)
+        .map(|i| {
+            let t = turns * i as f64 / n as f64;
+            let a = t * std::f64::consts::TAU;
+            center + anvil_math::DVec3::new(radius * a.cos(), radius * a.sin(), pitch * t)
+        })
+        .collect()
+}
+
+/// Build a solid from a closed triangle mesh (for STL import). Every
+/// triangle becomes a face. Vertices closer than `weld` are merged.
+pub fn from_triangles(tris: &[[anvil_math::DVec3; 3]], weld: f64) -> Solid {
+    use std::collections::HashMap;
+    let mut s = Solid::new();
+    let key = |p: anvil_math::DVec3| -> (i64, i64, i64) {
+        ((p.x / weld).round() as i64, (p.y / weld).round() as i64, (p.z / weld).round() as i64)
+    };
+    let mut map: HashMap<(i64, i64, i64), VertexId> = HashMap::new();
+    for t in tris {
+        let ids: Vec<VertexId> = t.iter().map(|&p| *map.entry(key(p)).or_insert_with(|| s.add_vertex(p))).collect();
+        if ids[0] == ids[1] || ids[1] == ids[2] || ids[0] == ids[2] {
+            continue;
+        }
+        s.faces.insert(crate::topology::Face { outer: ids, inner: Vec::new(), surface: Surface::Revolved { id: 9 } });
+    }
+    // Edges for display: rebuild from faces.
+    let faces: Vec<Vec<VertexId>> = s.faces.values().map(|f| f.outer.clone()).collect();
+    let mut seen = std::collections::HashSet::new();
+    for f in faces {
+        for i in 0..f.len() {
+            let a = f[i];
+            let b = f[(i + 1) % f.len()];
+            let k = if a < b { (a, b) } else { (b, a) };
+            if seen.insert(k) {
+                s.edges.insert(crate::topology::Edge { a, b });
+            }
+        }
+    }
+    s.make_consistent();
+    s
+}
+
+/// Split a solid by a plane. Returns (below, above) along the plane normal.
+/// Works on planar-facet solids: faces are clipped and each half is capped
+/// with the intersection polygon(s).
+pub fn split_by_plane(solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
+    use anvil_math::DVec3;
+    let n = plane.normal();
+    let dist = |p: DVec3| (p - plane.origin).dot(n);
+    let mut halves = [Solid::new(), Solid::new()];
+    let mut welds: [std::collections::HashMap<(i64, i64, i64), VertexId>; 2] = Default::default();
+    let weld_key = |p: DVec3| ((p.x * 1e7).round() as i64, (p.y * 1e7).round() as i64, (p.z * 1e7).round() as i64);
+    let mut cap_segments: Vec<[DVec3; 2]> = Vec::new();
+    let mut any_cut = false;
+    for f in solid.faces.values() {
+        let pts: Vec<DVec3> = f.outer.iter().map(|&v| solid.pos(v)).collect();
+        let ds: Vec<f64> = pts.iter().map(|&p| dist(p)).collect();
+        for (side, keep_positive) in [(0usize, false), (1usize, true)] {
+            let inside = |d: f64| if keep_positive { d >= -1e-9 } else { d <= 1e-9 };
+            let mut poly: Vec<DVec3> = Vec::new();
+            let mut cut_pts: Vec<DVec3> = Vec::new();
+            for i in 0..pts.len() {
+                let j = (i + 1) % pts.len();
+                let (p, q) = (pts[i], pts[j]);
+                let (dp, dq) = (ds[i], ds[j]);
+                if inside(dp) {
+                    poly.push(p);
+                }
+                if (dp > 1e-9 && dq < -1e-9) || (dp < -1e-9 && dq > 1e-9) {
+                    let t = dp / (dp - dq);
+                    let x = p + (q - p) * t;
+                    poly.push(x);
+                    cut_pts.push(x);
+                }
+            }
+            if cut_pts.len() == 2 && side == 0 {
+                cap_segments.push([cut_pts[0], cut_pts[1]]);
+                any_cut = true;
+            }
+            if poly.len() >= 3 {
+                let h = &mut halves[side];
+                let w = &mut welds[side];
+                let ids: Vec<VertexId> =
+                    poly.iter().map(|&p| *w.entry(weld_key(p)).or_insert_with(|| h.add_vertex(p))).collect();
+                h.add_face(ids, f.surface);
+            }
+        }
+    }
+    if !any_cut {
+        return Err(KernelError::InvalidInput("plane does not cut the body".into()));
+    }
+    // Chain cap segments into loops and cap both halves.
+    let loops = chain_segments(&cap_segments);
+    for lp in loops {
+        if lp.len() < 3 {
+            continue;
+        }
+        let below: Vec<VertexId> =
+            lp.iter().map(|&p| *welds[0].entry(weld_key(p)).or_insert_with(|| halves[0].add_vertex(p))).collect();
+        halves[0].add_face(below, Surface::Plane);
+        let above: Vec<VertexId> =
+            lp.iter().rev().map(|&p| *welds[1].entry(weld_key(p)).or_insert_with(|| halves[1].add_vertex(p))).collect();
+        halves[1].add_face(above, Surface::Plane);
+    }
+    let [mut below, mut above] = halves;
+    below.make_consistent();
+    above.make_consistent();
+    Ok((below, above))
+}
+
+fn chain_segments(segs: &[[anvil_math::DVec3; 2]]) -> Vec<Vec<anvil_math::DVec3>> {
+    let mut used = vec![false; segs.len()];
+    let mut loops = Vec::new();
+    for start in 0..segs.len() {
+        if used[start] {
+            continue;
+        }
+        used[start] = true;
+        let mut lp = vec![segs[start][0], segs[start][1]];
+        loop {
+            let last = *lp.last().unwrap();
+            let mut found = false;
+            for (i, s) in segs.iter().enumerate() {
+                if used[i] {
+                    continue;
+                }
+                let next = if (s[0] - last).length() < 1e-7 {
+                    Some(s[1])
+                } else if (s[1] - last).length() < 1e-7 {
+                    Some(s[0])
+                } else {
+                    None
+                };
+                if let Some(p) = next {
+                    used[i] = true;
+                    lp.push(p);
+                    found = true;
+                    break;
+                }
+            }
+            if !found || (lp.last().unwrap() - lp[0]).length() < 1e-7 {
+                break;
+            }
+        }
+        if (lp.last().unwrap() - lp[0]).length() < 1e-7 {
+            lp.pop();
+        }
+        loops.push(lp);
+    }
+    loops
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -431,5 +592,46 @@ mod tests {
         let m = mirror(&b, &Plane::YZ);
         assert!((m.volume() - 8.0).abs() < 1e-9);
         assert!(m.bounds().max.x < 0.0);
+    }
+
+    #[test]
+    fn split_cube_gives_two_halves() {
+        let b = box_solid(DVec3::ZERO, DVec3::new(10.0, 10.0, 10.0)).unwrap();
+        let plane = Plane { origin: DVec3::new(0.0, 0.0, 4.0), ..Plane::XY };
+        let (lo, hi) = split_by_plane(&b, &plane).unwrap();
+        assert!((lo.volume() - 400.0).abs() < 1e-6, "{}", lo.volume());
+        assert!((hi.volume() - 600.0).abs() < 1e-6, "{}", hi.volume());
+        assert_eq!(lo.euler_characteristic(), 2);
+    }
+
+    #[test]
+    fn triangles_round_trip_to_solid() {
+        let b = box_solid(DVec3::ZERO, DVec3::new(2.0, 2.0, 2.0)).unwrap();
+        let m = crate::mesh::tessellate(&b);
+        let tris: Vec<[DVec3; 3]> = m
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]])
+            .collect();
+        let s = from_triangles(&tris, 1e-6);
+        assert!((s.volume() - 8.0).abs() < 1e-9, "{}", s.volume());
+    }
+
+    #[test]
+    fn helix_sweep_makes_a_coil() {
+        let path = helix_path(DVec3::ZERO, 10.0, 4.0, 3.0, 24);
+        let prof: Vec<DVec2> = (0..32)
+            .map(|i| {
+                let t = i as f64 / 32.0 * std::f64::consts::TAU;
+                DVec2::new(t.cos(), t.sin())
+            })
+            .collect();
+        let plane = Plane { origin: path[0], x_axis: DVec3::X, y_axis: DVec3::Z };
+        let s = sweep(&plane, &prof, &path, false).unwrap();
+        let length = 3.0 * (std::f64::consts::TAU * 10.0f64).hypot(4.0);
+        let exact = length * std::f64::consts::PI;
+        assert!((s.volume() - exact).abs() / exact < 0.05, "{} vs {}", s.volume(), exact);
     }
 }

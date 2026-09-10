@@ -27,6 +27,11 @@ pub enum RibbonAction {
     ViewTop,
     ViewFront,
     ViewRight,
+    DeleteFeature,
+    ComputeAll,
+    CenterOfMass,
+    BillOfMaterials,
+    ToggleUnits,
 }
 
 pub struct RibbonButton {
@@ -52,8 +57,20 @@ pub struct RibbonTab {
 }
 
 const TAB_ORDER: &[&str] = &["File", "Solid", "CAM", "View"];
-const GROUP_ORDER: &[&str] =
-    &["Document", "Export", "Samples", "Create", "Modify", "Construct", "Inspect", "Output", "Camera", "Display"];
+const GROUP_ORDER: &[&str] = &[
+    "Document",
+    "Export",
+    "Samples",
+    "Create",
+    "Modify",
+    "Construct",
+    "Inspect",
+    "Insert",
+    "Manage",
+    "Output",
+    "Camera",
+    "Display",
+];
 
 fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
     use ButtonKind::Action as A;
@@ -113,6 +130,51 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 order: 0,
                 kind: A(Measure),
             },
+        ),
+        (
+            "Solid",
+            "Inspect",
+            RibbonButton {
+                label: "Center of Mass",
+                tooltip: "Centre of mass of the selected feature's bodies, shown in the viewport",
+                order: 1,
+                kind: A(CenterOfMass),
+            },
+        ),
+        (
+            "Solid",
+            "Modify",
+            RibbonButton {
+                label: "Delete",
+                tooltip: "Delete the selected feature (Del in model mode)",
+                order: 90,
+                kind: A(DeleteFeature),
+            },
+        ),
+        (
+            "Solid",
+            "Manage",
+            RibbonButton {
+                label: "Compute All",
+                tooltip: "Regenerate the whole history",
+                order: 0,
+                kind: A(ComputeAll),
+            },
+        ),
+        (
+            "Solid",
+            "Manage",
+            RibbonButton {
+                label: "Bill of Materials",
+                tooltip: "List bodies with volume and mass in the status bar and log",
+                order: 1,
+                kind: A(BillOfMaterials),
+            },
+        ),
+        (
+            "Solid",
+            "Manage",
+            RibbonButton { label: "Units mm/in", tooltip: "Toggle the display unit", order: 2, kind: A(ToggleUnits) },
         ),
         (
             "CAM",

@@ -17,6 +17,8 @@ pub struct Scene {
     pub bodies: Vec<(usize, usize)>,
     /// Edge segments per body: (body index, a, b).
     pub edges: Vec<(u32, [DVec3; 2])>,
+    /// Optional colour per body index.
+    pub colors: Vec<Option<[u8; 3]>>,
     pub bounds: Aabb,
 }
 
@@ -28,6 +30,7 @@ impl Scene {
             let bi = per_feature_count.entry(fi).or_insert(0);
             let body_index = sc.bodies.len() as u32;
             sc.bodies.push((fi, *bi));
+            sc.colors.push(doc.appearance.get(&fi).copied());
             *bi += 1;
             let m = anvil_kernel::mesh::tessellate(body);
             sc.tri_body.extend(std::iter::repeat_n(body_index, m.triangle_count()));

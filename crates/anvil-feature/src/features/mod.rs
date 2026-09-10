@@ -10,6 +10,7 @@ pub mod pending;
 pub mod primitives;
 pub mod revolve;
 pub mod sketch;
+pub mod solid_extra;
 pub mod sweep;
 pub mod template;
 pub mod transform;

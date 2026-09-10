@@ -94,11 +94,42 @@ impl RegenContext<'_> {
     }
 }
 
+/// Physical material: name and density in g/cm3.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Material {
+    pub name: String,
+    pub density: f64,
+}
+
+/// Materials offered by the ribbon. Density in g/cm3.
+pub const MATERIALS: &[(&str, f64)] = &[
+    ("Steel", 7.85),
+    ("Stainless 316", 8.0),
+    ("Aluminum 6061", 2.70),
+    ("Titanium Ti-6Al-4V", 4.43),
+    ("Brass", 8.5),
+    ("Copper", 8.96),
+    ("Magnesium AZ31", 1.77),
+    ("ABS", 1.04),
+    ("PLA", 1.24),
+    ("Nylon", 1.15),
+    ("Oak", 0.75),
+];
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Document {
     pub name: String,
     pub features: Vec<FeatureNode>,
     pub exprs: ExprTable,
+    /// Display colour per feature index, RGB.
+    #[serde(default)]
+    pub appearance: std::collections::HashMap<usize, [u8; 3]>,
+    /// Physical material per feature index.
+    #[serde(default)]
+    pub material: std::collections::HashMap<usize, Material>,
+    /// Display unit: "mm" or "in". Geometry is always stored in mm.
+    #[serde(default = "default_unit")]
+    pub unit: String,
     #[serde(skip)]
     undo: Vec<Snapshot>,
     #[serde(skip)]
@@ -111,12 +142,19 @@ struct Snapshot {
     exprs: ExprTable,
 }
 
+fn default_unit() -> String {
+    "mm".into()
+}
+
 impl Default for Document {
     fn default() -> Self {
         Document {
             name: "Untitled".into(),
             features: Vec::new(),
             exprs: ExprTable::new(),
+            appearance: Default::default(),
+            material: Default::default(),
+            unit: default_unit(),
             undo: Vec::new(),
             redo: Vec::new(),
         }
@@ -173,6 +211,19 @@ impl Document {
         if idx < self.features.len() {
             self.snapshot();
             self.features.remove(idx);
+            fn shift<V>(m: &mut std::collections::HashMap<usize, V>, idx: usize) {
+                let mut nm = std::collections::HashMap::new();
+                for (k, v) in m.drain() {
+                    if k < idx {
+                        nm.insert(k, v);
+                    } else if k > idx {
+                        nm.insert(k - 1, v);
+                    }
+                }
+                *m = nm;
+            }
+            shift(&mut self.appearance, idx);
+            shift(&mut self.material, idx);
             self.regenerate();
         }
     }
@@ -253,6 +304,30 @@ impl Document {
     /// Every visible body produced by the current history.
     pub fn bodies(&self) -> Vec<&Solid> {
         self.visible_bodies().into_iter().map(|(_, b)| b).collect()
+    }
+
+    /// Mass in grams of a feature's bodies, if it has a material.
+    pub fn mass_of(&self, idx: FeatureId) -> Option<f64> {
+        let m = self.material.get(&idx)?;
+        let vol_mm3: f64 = self.features.get(idx)?.output.as_ref()?.bodies.iter().map(|b| b.volume()).sum();
+        Some(vol_mm3 / 1000.0 * m.density)
+    }
+
+    /// Format a length in the document unit.
+    pub fn fmt_length(&self, mm: f64) -> String {
+        if self.unit == "in" {
+            format!("{:.4} in", mm / 25.4)
+        } else {
+            format!("{mm:.3} mm")
+        }
+    }
+
+    pub fn fmt_volume(&self, mm3: f64) -> String {
+        if self.unit == "in" {
+            format!("{:.4} in3", mm3 / 16387.064)
+        } else {
+            format!("{mm3:.2} mm3")
+        }
     }
 
     /// Insert a feature at a position (for editing history order).

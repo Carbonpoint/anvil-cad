@@ -62,6 +62,7 @@ pub trait Kernel {
     fn mirror(&self, solid: &Solid, plane: &Plane) -> Solid;
     fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
     fn shell(&self, solid: &Solid, thickness: f64) -> KernelResult<Solid>;
+    fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)>;
 }
 
 /// The built-in polyhedral kernel.
@@ -110,5 +111,8 @@ impl Kernel for NativeKernel {
     }
     fn shell(&self, _solid: &Solid, _thickness: f64) -> KernelResult<Solid> {
         Err(KernelError::Unsupported("shell"))
+    }
+    fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
+        ops::split_by_plane(solid, plane)
     }
 }

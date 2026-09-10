@@ -13,10 +13,11 @@
 
 pub mod document;
 pub mod features;
+pub mod mesh_loader;
 pub mod param;
 pub mod registry;
 
-pub use document::{Document, FeatureId, FeatureNode, RegenContext, RegenError};
+pub use document::{Document, FeatureId, FeatureNode, Material, RegenContext, RegenError, MATERIALS};
 pub use param::{ParamSpec, ParamValue};
 pub use registry::{descriptor, descriptors, FeatureDescriptor};
 
@@ -61,7 +62,7 @@ pub const BODY_TYPES: &[&str] = &[
 ];
 
 /// Feature type ids that define a plane.
-pub const PLANE_TYPES: &[&str] = &["sketch", "offset_plane", "angle_plane"];
+pub const PLANE_TYPES: &[&str] = &["sketch", "offset_plane", "angle_plane", "plane_3pt", "midplane"];
 
 /// The trait every feature implements.
 ///

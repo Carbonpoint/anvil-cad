@@ -8,5 +8,6 @@ repository.workspace = true
 
 [dependencies]
 anvil-kernel.workspace = true
+anvil-math.workspace = true
 anvil-feature.workspace = true
 thiserror.workspace = true

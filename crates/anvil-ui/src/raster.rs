@@ -104,6 +104,8 @@ impl Framebuffer {
                 style.selected
             } else if Some(body) == hovered {
                 style.hovered
+            } else if let Some(Some(c)) = scene.colors.get(body as usize) {
+                Color32::from_rgb(c[0], c[1], c[2])
             } else {
                 style.body
             };

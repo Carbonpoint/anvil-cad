@@ -58,6 +58,46 @@ pub fn write_stl(mesh: &TriMesh, path: &Path) -> Result<(), IoError> {
     Ok(())
 }
 
+/// Read a binary or ASCII STL into triangles (millimetres).
+pub fn read_stl(path: &Path) -> Result<Vec<[anvil_math::DVec3; 3]>, IoError> {
+    use anvil_math::DVec3;
+    let bytes = std::fs::read(path)?;
+    let looks_ascii = bytes.starts_with(b"solid") && bytes.len() >= 84 && {
+        let count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
+        84 + count * 50 != bytes.len()
+    };
+    let mut tris = Vec::new();
+    if looks_ascii || bytes.len() < 84 {
+        let text = String::from_utf8_lossy(&bytes);
+        let mut cur: Vec<DVec3> = Vec::new();
+        for line in text.lines() {
+            let mut it = line.split_whitespace();
+            if it.next() == Some("vertex") {
+                let v: Vec<f64> = it.take(3).filter_map(|x| x.parse().ok()).collect();
+                if v.len() == 3 {
+                    cur.push(DVec3::new(v[0], v[1], v[2]));
+                }
+                if cur.len() == 3 {
+                    tris.push([cur[0], cur[1], cur[2]]);
+                    cur.clear();
+                }
+            }
+        }
+    } else {
+        let count = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
+        let f = |o: usize| f32::from_le_bytes([bytes[o], bytes[o + 1], bytes[o + 2], bytes[o + 3]]) as f64;
+        for i in 0..count {
+            let base = 84 + i * 50 + 12;
+            if base + 36 > bytes.len() {
+                break;
+            }
+            let p = |k: usize| DVec3::new(f(base + k * 12), f(base + k * 12 + 4), f(base + k * 12 + 8));
+            tris.push([p(0), p(1), p(2)]);
+        }
+    }
+    Ok(tris)
+}
+
 /// Tessellate every body in a document into one mesh.
 pub fn document_mesh(doc: &Document) -> TriMesh {
     let mut m = TriMesh::default();
@@ -84,5 +124,9 @@ mod tests {
         let p = dir.join("cube.stl");
         write_stl(&mesh, &p).unwrap();
         assert_eq!(std::fs::metadata(&p).unwrap().len(), 84 + 12 * 50);
+        let tris = read_stl(&p).unwrap();
+        assert_eq!(tris.len(), 12);
+        let solid = anvil_kernel::ops::from_triangles(&tris, 1e-6);
+        assert!((solid.volume() - doc.bodies()[0].volume()).abs() < 1e-6);
     }
 }

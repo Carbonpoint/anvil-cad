@@ -239,3 +239,25 @@ impl Solid {
         self.orient_outward();
     }
 }
+
+impl Solid {
+    /// Centre of mass assuming uniform density, by the divergence theorem.
+    pub fn centroid(&self) -> DVec3 {
+        let m = crate::mesh::tessellate(self);
+        let mut vol = 0.0;
+        let mut c = DVec3::ZERO;
+        for t in m.indices.as_chunks::<3>().0 {
+            let a = m.positions[t[0] as usize];
+            let b = m.positions[t[1] as usize];
+            let d = m.positions[t[2] as usize];
+            let v = a.dot(b.cross(d)) / 6.0;
+            vol += v;
+            c += (a + b + d) / 4.0 * v;
+        }
+        if vol.abs() < 1e-300 {
+            DVec3::ZERO
+        } else {
+            c / vol
+        }
+    }
+}
