@@ -59,6 +59,20 @@ impl Scene {
         doc.features.get(fi)?.output.as_ref()?.bodies.get(bi)
     }
 
+    /// Outer loop and holes of a face in the coordinates of `face_plane`.
+    pub fn face_loops(
+        &self,
+        doc: &Document,
+        tri: usize,
+    ) -> Option<(Plane, Vec<anvil_math::DVec2>, Vec<Vec<anvil_math::DVec2>>)> {
+        let plane = self.face_plane(doc, tri)?;
+        let solid = self.solid_of_tri(doc, tri)?;
+        let face = &solid.faces[self.face_of_tri(tri)?];
+        let outer = face.outer.iter().map(|&v| plane.to_local(solid.pos(v))).collect();
+        let holes = face.inner.iter().map(|l| l.iter().map(|&v| plane.to_local(solid.pos(v))).collect()).collect();
+        Some((plane, outer, holes))
+    }
+
     /// A sketch plane on the picked face: origin at the face centroid,
     /// normal along the face normal, x axis aligned with world X where possible.
     pub fn face_plane(&self, doc: &Document, tri: usize) -> Option<Plane> {

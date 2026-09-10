@@ -82,6 +82,21 @@ impl Framebuffer {
         selected: Option<u32>,
         hovered: Option<u32>,
     ) {
+        self.draw_scene_faces(scene, proj, style, selected, hovered, None, None);
+    }
+
+    /// Like `draw_scene`, with a selected and a hovered face to tint.
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_scene_faces(
+        &mut self,
+        scene: &Scene,
+        proj: &Projector,
+        style: &Style,
+        selected: Option<u32>,
+        hovered: Option<u32>,
+        selected_face: Option<(u32, anvil_kernel::FaceId)>,
+        hovered_face: Option<(u32, anvil_kernel::FaceId)>,
+    ) {
         let mesh = &scene.mesh;
         let projected: Vec<Option<(f64, f64, f64)>> = mesh.positions.iter().map(|&p| proj.project(p)).collect();
         for (t, idx) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
@@ -100,7 +115,12 @@ impl Framebuffer {
                 continue;
             }
             let body = scene.tri_body[t];
-            let base = if Some(body) == selected {
+            let face = scene.mesh.face_of_tri.get(t).copied();
+            let base = if face.is_some() && selected_face == face.map(|f| (body, f)) {
+                style.selected
+            } else if face.is_some() && hovered_face == face.map(|f| (body, f)) {
+                style.hovered
+            } else if Some(body) == selected {
                 style.selected
             } else if Some(body) == hovered {
                 style.hovered

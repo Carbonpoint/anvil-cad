@@ -41,6 +41,13 @@ pub struct AnvilApp {
     saved_camera: Option<Camera>,
     com_marker: Option<DVec3>,
     color_edit: [u8; 3],
+    /// Extra selected features (Ctrl+click). `panels.selected` is the primary.
+    multi: Vec<usize>,
+    /// Selected face: (body index in scene, face id, triangle used to pick it).
+    selected_face: Option<(u32, anvil_kernel::FaceId, usize)>,
+    hovered_face: Option<(u32, anvil_kernel::FaceId)>,
+    /// Model-mode box select in screen pixels.
+    box_select: Option<(Pos2, Pos2)>,
 }
 
 const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ", Plane::YZ)];
@@ -69,6 +76,10 @@ impl AnvilApp {
             saved_camera: None,
             com_marker: None,
             color_edit: [140, 170, 205],
+            multi: Vec::new(),
+            selected_face: None,
+            hovered_face: None,
+            box_select: None,
         };
         app.load_demo();
         app
@@ -290,15 +301,26 @@ impl AnvilApp {
                 }
             }
             RibbonAction::ToggleEdges => self.style.draw_edges = !self.style.draw_edges,
-            RibbonAction::DeleteFeature => match self.panels.selected {
-                Some(i) => {
-                    self.doc.remove_feature(i);
-                    self.panels.selected = None;
-                    self.invalidate();
-                    self.status = format!("Deleted feature {i}");
+            RibbonAction::DeleteFeature => {
+                let mut all: Vec<usize> = self.multi.clone();
+                if let Some(i) = self.panels.selected {
+                    all.push(i);
                 }
-                None => self.status = "Select a feature to delete".into(),
-            },
+                all.sort_unstable();
+                all.dedup();
+                if all.is_empty() {
+                    self.status = "Select a feature to delete".into();
+                } else {
+                    for &i in all.iter().rev() {
+                        self.doc.remove_feature(i);
+                    }
+                    self.panels.selected = None;
+                    self.multi.clear();
+                    self.selected_face = None;
+                    self.invalidate();
+                    self.status = format!("Deleted {} feature(s)", all.len());
+                }
+            }
             RibbonAction::ComputeAll => {
                 self.doc.regenerate();
                 self.invalidate();
@@ -356,6 +378,32 @@ impl AnvilApp {
                     lines.len()
                 );
             }
+            RibbonAction::Export3mf => {
+                let p = PathBuf::from(&self.file_path).with_extension("3mf");
+                self.status = match anvil_io::write_3mf(&self.doc, &p) {
+                    Ok(n) => format!("Wrote {} with {n} objects (one per feature)", p.display()),
+                    Err(e) => format!("3MF export failed: {e}"),
+                };
+            }
+            RibbonAction::ExportStlParts => {
+                let p = PathBuf::from(&self.file_path).with_extension("stl");
+                self.status = match anvil_io::write_stl_parts(&self.doc, &p) {
+                    Ok(files) => format!("Wrote {} STL files next to {}", files.len(), p.display()),
+                    Err(e) => format!("STL export failed: {e}"),
+                };
+            }
+            RibbonAction::SampleCard => {
+                self.doc = anvil_io::business_card("Your Name", "https://www.linkedin.com/in/your-handle");
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.camera.fit(&self.scene.bounds);
+                self.file_path = "business_card.anvil".into();
+                self.status = "Business card loaded. Edit the Text and QR features, then File > 3MF (parts).".into();
+            }
+            RibbonAction::PressPull => self.press_pull(),
             RibbonAction::ToggleUnits => {
                 self.doc.unit = if self.doc.unit == "mm" { "in".into() } else { "mm".into() };
                 self.status = format!("Display unit: {}", self.doc.unit);
@@ -385,7 +433,11 @@ impl AnvilApp {
 
     fn add_feature_by_id(&mut self, id: &str) {
         if id == "sketch" {
-            self.begin_pick_plane();
+            if self.selected_face.is_some() {
+                self.sketch_on_selected_face();
+            } else {
+                self.begin_pick_plane();
+            }
             return;
         }
         if let Some(d) = descriptor(id) {
@@ -409,6 +461,39 @@ impl AnvilApp {
                 Some(e) => format!("Added {}: {e}", d.label),
                 None => format!("Added {}. Edit its parameters in the Properties panel.", d.label),
             };
+        }
+    }
+
+    fn press_pull(&mut self) {
+        let Some((_, _, tri)) = self.selected_face else {
+            self.status = "Click a face first, then Press Pull".into();
+            return;
+        };
+        let Some((plane, outer, holes)) = self.scene.face_loops(&self.doc, tri) else {
+            self.status = "Face not found".into();
+            return;
+        };
+        let source = self.scene.body_of_tri(tri).map(|(fi, _)| fi).unwrap_or(0);
+        let f =
+            anvil_feature::features::emboss::FaceExtrudeFeature { plane, outer, holes, distance: "5".into(), source };
+        let idx = self.doc.add_feature(Box::new(f));
+        self.panels.selected = Some(idx);
+        self.selected_face = None;
+        self.invalidate();
+        self.status = "Press Pull added as a new body. Set its distance in Properties (negative goes inward).".into();
+    }
+
+    fn sketch_on_selected_face(&mut self) {
+        let Some((_, _, tri)) = self.selected_face else {
+            self.begin_pick_plane();
+            return;
+        };
+        if let Some(plane) = self.scene.face_plane(&self.doc, tri) {
+            let segs: Vec<[DVec3; 2]> = self.scene.edges.iter().map(|(_, e)| *e).collect();
+            let mut sk = SketchFeature::on_plane(plane);
+            sk.sketch.project_segments(&segs, 1e-4);
+            self.selected_face = None;
+            self.start_sketch_on(Box::new(sk));
         }
     }
 
@@ -719,7 +804,10 @@ impl AnvilApp {
         // Hover picking from the previous frame's id buffer.
         self.hovered_tri = pointer.and_then(|(x, y)| self.fb.tri_at(x as usize, y as usize));
         self.hovered_body = self.hovered_tri.and_then(|t| self.scene.tri_body.get(t).copied());
+        self.hovered_face =
+            self.hovered_tri.and_then(|t| Some((self.scene.tri_body.get(t).copied()?, self.scene.face_of_tri(t)?)));
         self.hovered_datum = None;
+        let ctrl = ui.input(|i| i.modifiers.command);
 
         let selected_body = self
             .panels
@@ -729,24 +817,148 @@ impl AnvilApp {
 
         match &mut self.mode {
             Mode::Model => {
-                if del && self.panels.selected.is_some() && resp.hovered() {
-                    let i = self.panels.selected.unwrap();
-                    self.doc.remove_feature(i);
-                    self.panels.selected = None;
-                    self.scene_dirty = true;
+                if del && resp.hovered() && (self.panels.selected.is_some() || !self.multi.is_empty()) {
+                    self.run_action(RibbonAction::DeleteFeature);
+                }
+                if ui.input(|i| i.key_pressed(egui::Key::Q)) && self.selected_face.is_some() {
+                    self.press_pull();
+                }
+                if resp.drag_started_by(egui::PointerButton::Primary) && shift {
+                    if let Some(p) = resp.interact_pointer_pos() {
+                        self.box_select = Some((p, p));
+                    }
                 }
                 if resp.dragged_by(egui::PointerButton::Primary) {
-                    let d = resp.drag_delta();
-                    self.camera.orbit(d.x as f64, d.y as f64);
+                    if let Some((a, _)) = self.box_select {
+                        if let Some(p) = resp.interact_pointer_pos() {
+                            self.box_select = Some((a, p));
+                        }
+                    } else {
+                        let d = resp.drag_delta();
+                        self.camera.orbit(d.x as f64, d.y as f64);
+                    }
+                }
+                if resp.drag_stopped_by(egui::PointerButton::Primary) {
+                    if let Some((a, b)) = self.box_select.take() {
+                        // Select every body whose projected points all fall in the box.
+                        let r = egui::Rect::from_two_pos(a, b);
+                        let mut hits: Vec<usize> = Vec::new();
+                        for (bi, (fi, _)) in self.scene.bodies.iter().enumerate() {
+                            let mut all = true;
+                            let mut any = false;
+                            for (t, &tb) in self.scene.tri_body.iter().enumerate() {
+                                if tb as usize != bi {
+                                    continue;
+                                }
+                                for k in 0..3 {
+                                    let v = self.scene.mesh.positions[self.scene.mesh.indices[t * 3 + k] as usize];
+                                    match proj.project(v) {
+                                        Some((x, y, _)) => {
+                                            let p = Pos2::new(rect.left() + x as f32, rect.top() + y as f32);
+                                            if r.contains(p) {
+                                                any = true
+                                            } else {
+                                                all = false
+                                            }
+                                        }
+                                        None => all = false,
+                                    }
+                                }
+                            }
+                            if any && all {
+                                hits.push(*fi);
+                            }
+                        }
+                        hits.dedup();
+                        if let Some(first) = hits.first() {
+                            self.panels.selected = Some(*first);
+                            self.multi = hits[1..].to_vec();
+                            self.status = format!("Selected {} feature(s)", hits.len());
+                        }
+                    }
                 }
                 if resp.clicked() {
                     match self.hovered_body {
                         Some(b) => {
                             let (fi, _) = self.scene.bodies[b as usize];
-                            self.panels.selected = Some(fi);
+                            if ctrl {
+                                if self.panels.selected == Some(fi) {
+                                    self.panels.selected = self.multi.pop();
+                                } else if let Some(k) = self.multi.iter().position(|&m| m == fi) {
+                                    self.multi.remove(k);
+                                } else {
+                                    if let Some(prev) = self.panels.selected {
+                                        self.multi.push(prev);
+                                    }
+                                    self.panels.selected = Some(fi);
+                                }
+                            } else {
+                                self.panels.selected = Some(fi);
+                                self.multi.clear();
+                            }
+                            self.selected_face =
+                                self.hovered_tri.and_then(|t| Some((b, self.scene.face_of_tri(t)?, t)));
                         }
-                        None => self.panels.selected = None,
+                        None => {
+                            if !ctrl {
+                                self.panels.selected = None;
+                                self.multi.clear();
+                            }
+                            self.selected_face = None;
+                        }
                     }
+                }
+                // Right-click menu.
+                let has_face = self.selected_face.is_some() || self.hovered_face.is_some();
+                let mut act: Option<RibbonAction> = None;
+                let mut sketch_here = false;
+                resp.context_menu(|ui| {
+                    if has_face {
+                        if ui.button("Sketch on this face").clicked() {
+                            sketch_here = true;
+                            ui.close();
+                        }
+                        if ui.button("Press Pull this face (Q)").clicked() {
+                            act = Some(RibbonAction::PressPull);
+                            ui.close();
+                        }
+                        ui.separator();
+                    }
+                    if ui.button("Sketch (pick plane)").clicked() {
+                        sketch_here = false;
+                        act = None;
+                        self.selected_face = None;
+                        self.begin_pick_plane();
+                        ui.close();
+                    }
+                    if ui.button("Measure").clicked() {
+                        act = Some(RibbonAction::Measure);
+                        ui.close();
+                    }
+                    if ui.button("Delete feature (Del)").clicked() {
+                        act = Some(RibbonAction::DeleteFeature);
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui.button("Fit view").clicked() {
+                        act = Some(RibbonAction::FitView);
+                        ui.close();
+                    }
+                    if ui.button("Isometric").clicked() {
+                        act = Some(RibbonAction::ViewIso);
+                        ui.close();
+                    }
+                });
+                if sketch_here {
+                    if self.selected_face.is_none() {
+                        if let Some(t) = self.hovered_tri {
+                            self.selected_face = self.hovered_face.map(|(b, f)| (b, f, t));
+                        }
+                    }
+                    self.sketch_on_selected_face();
+                }
+                if let Some(a) = act {
+                    self.run_action(a);
                 }
             }
             Mode::PickPlane => {
@@ -788,7 +1000,7 @@ impl AnvilApp {
                 let plane = ed.sketch.plane;
                 let sp = pointer.and_then(|(x, y)| proj.pixel_to_plane(x, y, &plane));
                 ed.on_hover(sp, &proj);
-                if esc || secondary_clicked {
+                if esc || (secondary_clicked && !ed.clicks.is_empty()) {
                     if ed.clicks.is_empty() && ed.tool != Tool::Select {
                         ed.set_tool(Tool::Select);
                     } else if ed.cancel(&mut self.doc) {
@@ -824,22 +1036,59 @@ impl AnvilApp {
                     }
                 }
                 if resp.drag_stopped_by(egui::PointerButton::Primary) {
-                    ed.on_drag_end(&mut self.doc);
+                    ed.on_drag_end(&mut self.doc, shift || ctrl);
                     self.scene_dirty = true;
                 }
                 if resp.clicked() {
                     if let Some(p) = sp {
-                        ed.on_click(p, shift, &proj, &mut self.doc);
+                        ed.on_click(p, shift || ctrl, &proj, &mut self.doc);
                         self.scene_dirty = true;
                     }
+                }
+                if ed.editing.is_some() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                    ed.commit_edit(&mut self.doc);
+                    self.scene_dirty = true;
+                }
+                let mut pick: Option<Tool> = None;
+                let mut finish = false;
+                resp.context_menu(|ui| {
+                    for t in [
+                        Tool::Select,
+                        Tool::Line,
+                        Tool::Rect2,
+                        Tool::CircleCenter,
+                        Tool::Arc3,
+                        Tool::Dimension,
+                        Tool::Trim,
+                        Tool::Fillet,
+                    ] {
+                        if ui.button(t.label()).clicked() {
+                            pick = Some(t);
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    if ui.button("Finish Sketch").clicked() {
+                        finish = true;
+                        ui.close();
+                    }
+                });
+                if let Some(t) = pick {
+                    ed.set_tool(t);
+                }
+                if finish {
+                    self.finish_sketch();
                 }
             }
         }
 
         // Render.
         self.fb.clear(self.style.background);
-        let hovered = if matches!(self.mode, Mode::Model | Mode::PickPlane) { self.hovered_body } else { None };
-        self.fb.draw_scene(&self.scene, &proj, &self.style, selected_body, hovered);
+        let in_model = matches!(self.mode, Mode::Model | Mode::PickPlane);
+        let hovered = if in_model { self.hovered_body } else { None };
+        let sel_face = self.selected_face.map(|(b, f, _)| (b, f));
+        let hov_face = if in_model { self.hovered_face } else { None };
+        self.fb.draw_scene_faces(&self.scene, &proj, &self.style, selected_body, hovered, sel_face, hov_face);
         let image = self.fb.to_image();
         let tex = match &mut self.texture {
             Some(t) => {
@@ -930,6 +1179,14 @@ impl AnvilApp {
                     );
                 }
             }
+        }
+        if let Some((a, b)) = self.box_select {
+            painter.rect_stroke(
+                egui::Rect::from_two_pos(a, b),
+                0.0,
+                Stroke::new(1.0f32, Color32::from_rgb(60, 100, 220)),
+                egui::StrokeKind::Middle,
+            );
         }
         if let Some(c) = self.com_marker {
             if let Some(p) = to_screen(c) {

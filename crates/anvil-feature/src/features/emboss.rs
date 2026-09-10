@@ -583,4 +583,3 @@ impl Feature for FaceExtrudeFeature {
 inventory::submit! { FeatureDescriptor { id: "text", label: "Text", tab: "Solid", group: "Create", tooltip: "Embossed text as separate bodies (one per letter)", order: 41, create: || Box::new(TextFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "qr", label: "QR Code", tab: "Solid", group: "Create", tooltip: "Embossed QR code for a URL or text", order: 42, create: || Box::new(QrFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "texture", label: "Texture", tab: "Solid", group: "Create", tooltip: "Tiled relief pattern (hex, circle, diamond, square, triangle)", order: 43, create: || Box::new(TextureFeature::default()) } }
-inventory::submit! { FeatureDescriptor { id: "face_extrude", label: "Press Pull", tab: "Solid", group: "Modify", tooltip: "Extrude the selected face into a new body (select a face in the viewport first)", order: 0, create: || Box::new(FaceExtrudeFeature::default()) } }

@@ -48,6 +48,38 @@ points at the selected sketch. Edit its parameters in the Properties panel.
 Double-click a sketch in the Part Navigator to edit it again. Everything
 downstream regenerates.
 
+## Selecting and dimensioning
+
+* Click a body to select its feature. Ctrl+click adds or removes features.
+  Shift+drag draws a box; bodies fully inside are selected.
+* The face under the click is highlighted. With a face selected, **Sketch**
+  starts a sketch on it, and **Press Pull** (or Q) extrudes it into a new
+  body. Right-click a face for the same commands.
+* In a sketch, the **Dimension tool** works by clicking: a line gives a
+  length, two points a distance, a circle a radius, two lines an angle. The
+  measured value appears in the value field. Type a new value and press
+  Enter. Click any dimension label later to edit it.
+* Snaps show a marker: square for a point, triangle for a midpoint, circle
+  for a centre, diamond for a circle quadrant, cross for a point on a curve.
+* Drag on empty space with the Select tool to box select. Left to right
+  selects entities fully inside; right to left selects anything touched.
+* Right-click in a sketch for the common tools and Finish Sketch.
+
+## Business card for multi-colour printing
+
+1. File > Samples > **Business card**. The document has four features: the
+   rounded outline sketch (0.5 in and 0.25 in corner radii), the 0.8 mm
+   card body, the embossed Text, and the QR Code.
+2. Select the Text feature and set your name in Properties. Select the QR
+   Code feature and set its content to your LinkedIn or website URL. Both
+   read expressions `card_t` (card thickness) and `emboss` (relief height)
+   from the Expressions panel.
+3. Optional: add **Texture** for a hex or dot relief on part of the face.
+4. File > **3MF (parts)**. The file has one object per feature. In Bambu
+   Studio, open it and answer Yes to "load as a single object with multiple
+   parts". Assign a filament to the text and QR parts. **STL per part**
+   writes one STL per feature instead.
+
 ## Bodies
 
 Click a body in the viewport to select its feature. Move/Copy, Scale,

@@ -40,6 +40,7 @@ pub enum Tool {
     ScaleSel,
     PatternRect,
     PatternCirc,
+    Dimension,
 }
 
 impl Tool {
@@ -72,6 +73,7 @@ impl Tool {
             Tool::ScaleSel => "Scale",
             Tool::PatternRect => "Rectangular Pattern",
             Tool::PatternCirc => "Circular Pattern",
+            Tool::Dimension => "Dimension",
         }
     }
     pub fn hint(self) -> &'static str {
@@ -105,6 +107,7 @@ impl Tool {
                 "Select entities, click the end of the first step, then the end of the second. Counts in the ribbon"
             }
             Tool::PatternCirc => "Select entities, then click the pattern centre. Count and angle in the ribbon",
+            Tool::Dimension => "Click a line, a circle, two points, or two lines; then type the value and press Enter. Click a label to edit it",
         }
     }
     /// Menu structure for the ribbon: (menu label, tools).
@@ -210,6 +213,12 @@ pub struct SketchEditor {
     pub count2: usize,
     pub pattern_angle: f64,
     pub copy: bool,
+    /// Dimension label being edited (value in `dim_value`).
+    pub editing: Option<anvil_sketch::ConstraintId>,
+    /// Drag-box selection in sketch coordinates: (start, current).
+    pub box_select: Option<(DVec2, DVec2)>,
+    /// Where the cursor snapped and what kind: "point", "mid", "center", "curve", "grid".
+    pub snap_kind: &'static str,
     pub show_points: bool,
     pub show_constraints: bool,
     pub show_grid: bool,
@@ -251,6 +260,9 @@ impl SketchEditor {
             count2: 1,
             pattern_angle: 360.0,
             copy: true,
+            editing: None,
+            box_select: None,
+            snap_kind: "",
             show_points: true,
             show_constraints: true,
             show_grid: true,
@@ -311,11 +323,62 @@ impl SketchEditor {
         PICK_TOL_PX / proj.scale
     }
 
-    fn snap(&self, p: DVec2, proj: &Projector) -> (DVec2, Option<EntityId>) {
-        if let Some(id) = self.sketch.pick(p, self.tol(proj)) {
-            if let Entity::Point { pos, .. } = self.sketch.entities[id] {
-                return (pos, Some(id));
+    /// Snap candidates besides points: (position, kind).
+    fn special_snaps(&self) -> Vec<(DVec2, &'static str)> {
+        let mut out = Vec::new();
+        for e in self.sketch.entities.values() {
+            match e {
+                Entity::Line { a, b, .. } => out.push(((self.sketch.point(*a) + self.sketch.point(*b)) * 0.5, "mid")),
+                Entity::Circle { center, radius } => {
+                    let c = self.sketch.point(*center);
+                    out.push((c, "center"));
+                    for d in [DVec2::X, DVec2::Y, -DVec2::X, -DVec2::Y] {
+                        out.push((c + d * *radius, "quad"));
+                    }
+                }
+                Entity::Arc { center, .. } | Entity::Ellipse { center, .. } => {
+                    out.push((self.sketch.point(*center), "center"))
+                }
+                _ => {}
             }
+        }
+        out
+    }
+
+    fn snap_full(&self, p: DVec2, proj: &Projector) -> (DVec2, Option<EntityId>, &'static str) {
+        let tol = self.tol(proj);
+        if let Some(id) = self.sketch.pick(p, tol) {
+            if let Entity::Point { pos, .. } = self.sketch.entities[id] {
+                return (pos, Some(id), "point");
+            }
+        }
+        if let Some((q, kind)) = self
+            .special_snaps()
+            .into_iter()
+            .filter(|(q, _)| (*q - p).length() <= tol)
+            .min_by(|a, b| (a.0 - p).length().partial_cmp(&(b.0 - p).length()).unwrap())
+        {
+            return (q, None, kind);
+        }
+        if self.snap_grid && self.grid > 0.0 {
+            return (
+                DVec2::new((p.x / self.grid).round() * self.grid, (p.y / self.grid).round() * self.grid),
+                None,
+                "grid",
+            );
+        }
+        if self.snap_curves {
+            if let Some(q) = self.sketch.nearest_on_curve(p, tol) {
+                return (q, None, "curve");
+            }
+        }
+        (p, None, "")
+    }
+
+    fn snap(&self, p: DVec2, proj: &Projector) -> (DVec2, Option<EntityId>) {
+        let (q, id, _) = self.snap_full(p, proj);
+        if id.is_some() {
+            return (q, id);
         }
         if self.snap_grid && self.grid > 0.0 {
             return (DVec2::new((p.x / self.grid).round() * self.grid, (p.y / self.grid).round() * self.grid), None);
@@ -333,14 +396,181 @@ impl SketchEditor {
     }
 
     pub fn on_hover(&mut self, p: Option<DVec2>, proj: &Projector) {
-        self.cursor = p.map(|q| self.snap(q, proj).0);
-        self.hover = p.and_then(|q| self.sketch.pick(q, self.tol(proj)));
+        match p {
+            Some(q) => {
+                let (sp, _, kind) = self.snap_full(q, proj);
+                self.cursor = Some(sp);
+                self.snap_kind = kind;
+                self.hover = self.sketch.pick(q, self.tol(proj));
+            }
+            None => {
+                self.cursor = None;
+                self.hover = None;
+                self.snap_kind = "";
+            }
+        }
+    }
+
+    /// Screen positions of dimension labels, for click-to-edit.
+    pub fn label_positions(&self, proj: &Projector) -> Vec<(anvil_sketch::ConstraintId, DVec2)> {
+        let mut out = Vec::new();
+        for (cid, c) in &self.sketch.constraints {
+            if c.value().is_none() {
+                continue;
+            }
+            let Some(&first) = c.refs().first() else { continue };
+            if let Some(a) = self.anchor_of(first) {
+                out.push((cid, a));
+            }
+        }
+        let _ = proj;
+        out
+    }
+
+    fn anchor_of(&self, id: EntityId) -> Option<DVec2> {
+        match self.sketch.entities.get(id) {
+            Some(Entity::Point { pos, .. }) => Some(*pos),
+            Some(Entity::Line { a, b, .. }) => Some((self.sketch.point(*a) + self.sketch.point(*b)) * 0.5),
+            Some(Entity::Circle { center, radius }) => Some(self.sketch.point(*center) + DVec2::new(*radius, 0.0)),
+            Some(Entity::Arc { center, start, .. }) => {
+                Some((self.sketch.point(*center) + self.sketch.point(*start)) * 0.5)
+            }
+            Some(Entity::Ellipse { center, .. }) => Some(self.sketch.point(*center)),
+            Some(Entity::Spline { points, .. }) => points.first().map(|&p| self.sketch.point(p)),
+            None => None,
+        }
+    }
+
+    /// Apply the value field to the dimension being edited.
+    pub fn commit_edit(&mut self, doc: &mut Document) {
+        let Some(cid) = self.editing else { return };
+        let Ok(v) = self.dim_value.trim().parse::<f64>() else {
+            self.message = "Enter a number".into();
+            return;
+        };
+        if let Some(c) = self.sketch.constraints.get_mut(cid) {
+            c.set_value(v);
+        }
+        self.editing = None;
+        self.solve();
+        self.commit(doc);
+        self.message = "Dimension updated".into();
+    }
+
+    /// Start editing the dimension label nearest to `p`, if any.
+    pub fn try_edit_label(&mut self, p: DVec2, proj: &Projector) -> bool {
+        let tol = self.tol(proj) * 2.0;
+        let hit = self
+            .label_positions(proj)
+            .into_iter()
+            .filter(|(_, a)| (*a - p).length() <= tol)
+            .min_by(|a, b| (a.1 - p).length().partial_cmp(&(b.1 - p).length()).unwrap());
+        if let Some((cid, _)) = hit {
+            self.editing = Some(cid);
+            self.dim_value = format!("{:.3}", self.sketch.constraints[cid].value().unwrap_or(0.0));
+            self.message = "Type the new value and press Enter".into();
+            return true;
+        }
+        false
+    }
+
+    /// Box selection: window (all inside) when dragged left to right,
+    /// crossing (any inside) when dragged right to left.
+    pub fn finish_box_select(&mut self, shift: bool) {
+        let Some((a, b)) = self.box_select.take() else { return };
+        let (lo, hi) = (a.min(b), a.max(b));
+        let crossing = b.x < a.x;
+        if !shift {
+            self.selection.clear();
+        }
+        let inside = |p: DVec2| p.x >= lo.x && p.x <= hi.x && p.y >= lo.y && p.y <= hi.y;
+        for (id, e) in &self.sketch.entities {
+            let pts = self.sketch.sample(id);
+            let hit = if matches!(e, Entity::Point { .. }) {
+                inside(pts[0])
+            } else if crossing {
+                pts.iter().any(|&p| inside(p))
+            } else {
+                pts.iter().all(|&p| inside(p))
+            };
+            if hit && !self.selection.contains(&id) {
+                self.selection.push(id);
+            }
+        }
     }
 
     pub fn on_click(&mut self, p: DVec2, shift: bool, proj: &Projector, doc: &mut Document) {
         let (sp, existing) = self.snap(p, proj);
         match self.tool {
+            Tool::Dimension => {
+                if self.try_edit_label(p, proj) {
+                    return;
+                }
+                let hit = self.sketch.pick(p, self.tol(proj));
+                let Some(id) = hit else {
+                    self.selection.clear();
+                    return;
+                };
+                if !self.selection.contains(&id) {
+                    self.selection.push(id);
+                }
+                let kinds: Vec<&str> = self.selection.iter().map(|&i| self.kind(i)).collect();
+                let sel = self.selection.clone();
+                let c = match kinds.as_slice() {
+                    ["line"] => {
+                        let (a, b) = match self.sketch.entities[sel[0]] {
+                            Entity::Line { a, b, .. } => (a, b),
+                            _ => unreachable!(),
+                        };
+                        Some(Constraint::Length(sel[0], (self.sketch.point(a) - self.sketch.point(b)).length()))
+                    }
+                    ["circle"] => {
+                        let r = match &self.sketch.entities[sel[0]] {
+                            Entity::Circle { radius, .. } => *radius,
+                            Entity::Arc { center, start, .. } => {
+                                (self.sketch.point(*start) - self.sketch.point(*center)).length()
+                            }
+                            _ => 0.0,
+                        };
+                        Some(Constraint::Radius(sel[0], r))
+                    }
+                    ["point", "point"] => Some(Constraint::Distance(
+                        sel[0],
+                        sel[1],
+                        (self.sketch.point(sel[0]) - self.sketch.point(sel[1])).length(),
+                    )),
+                    ["line", "line"] => {
+                        let dir = |id: EntityId| match self.sketch.entities[id] {
+                            Entity::Line { a, b, .. } => {
+                                (self.sketch.point(b) - self.sketch.point(a)).normalize_or_zero()
+                            }
+                            _ => DVec2::X,
+                        };
+                        let (u, v) = (dir(sel[0]), dir(sel[1]));
+                        Some(Constraint::Angle(sel[0], sel[1], u.perp_dot(v).atan2(u.dot(v)).to_degrees()))
+                    }
+                    ["point"] => None,
+                    _ => {
+                        self.selection = vec![id];
+                        None
+                    }
+                };
+                if let Some(c) = c {
+                    let v = c.value().unwrap_or(0.0);
+                    let cid = self.sketch.constrain(c);
+                    self.editing = Some(cid);
+                    self.dim_value = format!("{v:.3}");
+                    self.selection.clear();
+                    self.solve();
+                    self.commit(doc);
+                    self.message = "Type the value and press Enter (or leave as measured)".into();
+                }
+                return;
+            }
             Tool::Select => {
+                if self.try_edit_label(p, proj) {
+                    return;
+                }
                 let hit = self.sketch.pick(p, self.tol(proj));
                 match hit {
                     Some(id) => {
@@ -596,14 +826,18 @@ impl SketchEditor {
         if self.tool != Tool::Select {
             return;
         }
-        if let Some(id) = self.sketch.pick(p, self.tol(proj)) {
-            if matches!(self.sketch.entities[id], Entity::Point { .. }) {
-                self.dragging = Some(id);
-            }
+        match self.sketch.pick(p, self.tol(proj)) {
+            Some(id) if matches!(self.sketch.entities[id], Entity::Point { .. }) => self.dragging = Some(id),
+            Some(_) => {}
+            None => self.box_select = Some((p, p)),
         }
     }
 
     pub fn on_drag(&mut self, p: DVec2) {
+        if let Some((a, _)) = self.box_select {
+            self.box_select = Some((a, p));
+            return;
+        }
         if let Some(id) = self.dragging {
             if let Entity::Point { pos, .. } = &mut self.sketch.entities[id] {
                 *pos = p;
@@ -613,7 +847,11 @@ impl SketchEditor {
         }
     }
 
-    pub fn on_drag_end(&mut self, doc: &mut Document) {
+    pub fn on_drag_end(&mut self, doc: &mut Document, shift: bool) {
+        if self.box_select.is_some() {
+            self.finish_box_select(shift);
+            return;
+        }
         if self.dragging.take().is_some() {
             self.commit(doc);
         }
@@ -864,7 +1102,8 @@ impl SketchEditor {
             }
         }
         // Constraint glyphs: a small label near the first referenced entity.
-        for c in self.sketch.constraints.values().filter(|_| self.show_constraints) {
+        for (cid, c) in self.sketch.constraints.iter().filter(|_| self.show_constraints) {
+            let editing = self.editing == Some(cid);
             let Some(&first) = c.refs().first() else { continue };
             let anchor = match self.sketch.entities.get(first) {
                 Some(Entity::Point { pos, .. }) => Some(*pos),
@@ -890,12 +1129,14 @@ impl SketchEditor {
                     other => other.value().map(|v| format!("{v:.2}")).unwrap_or_else(|| other.label()),
                 };
                 if !glyph.is_empty() {
+                    let col = if editing { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(150, 60, 20) };
+                    let size = if c.value().is_some() { 12.5 } else { 11.0 };
                     painter.text(
                         p + egui::vec2(6.0, -10.0),
                         egui::Align2::LEFT_BOTTOM,
                         glyph,
-                        egui::FontId::proportional(11.0),
-                        Color32::from_rgb(150, 60, 20),
+                        egui::FontId::proportional(size),
+                        col,
                     );
                 }
             }
@@ -1013,7 +1254,63 @@ impl SketchEditor {
                 painter.add(egui::Shape::line(pts, preview));
             }
             if let Some(p) = to_screen(cur) {
-                painter.circle_stroke(p, 4.0, Stroke::new(1.0f32, Color32::from_rgb(60, 60, 60)));
+                let col = Color32::from_rgb(60, 60, 60);
+                match self.snap_kind {
+                    "point" => {
+                        painter.rect_stroke(
+                            egui::Rect::from_center_size(p, egui::vec2(10.0, 10.0)),
+                            0.0,
+                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                            egui::StrokeKind::Middle,
+                        );
+                    }
+                    "mid" => {
+                        painter.add(egui::Shape::closed_line(
+                            vec![p + egui::vec2(0.0, -6.0), p + egui::vec2(6.0, 5.0), p + egui::vec2(-6.0, 5.0)],
+                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                        ));
+                    }
+                    "center" => {
+                        painter.circle_stroke(p, 6.0, Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)));
+                    }
+                    "quad" => {
+                        painter.add(egui::Shape::closed_line(
+                            vec![
+                                p + egui::vec2(0.0, -6.0),
+                                p + egui::vec2(6.0, 0.0),
+                                p + egui::vec2(0.0, 6.0),
+                                p + egui::vec2(-6.0, 0.0),
+                            ],
+                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                        ));
+                    }
+                    "curve" => {
+                        painter.line_segment(
+                            [p + egui::vec2(-5.0, -5.0), p + egui::vec2(5.0, 5.0)],
+                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                        );
+                    }
+                    _ => {
+                        painter.circle_stroke(p, 4.0, Stroke::new(1.0f32, col));
+                    }
+                }
+            }
+        }
+        if let Some((a, b)) = self.box_select {
+            if let (Some(pa), Some(pb)) = (to_screen(a), to_screen(b)) {
+                let crossing = b.x < a.x;
+                let col = if crossing { Color32::from_rgb(60, 160, 60) } else { Color32::from_rgb(60, 100, 220) };
+                painter.rect_stroke(
+                    egui::Rect::from_two_pos(pa, pb),
+                    0.0,
+                    Stroke::new(1.0f32, col),
+                    egui::StrokeKind::Middle,
+                );
+                painter.rect_filled(
+                    egui::Rect::from_two_pos(pa, pb),
+                    0.0,
+                    Color32::from_rgba_unmultiplied(col.r(), col.g(), col.b(), 25),
+                );
             }
         }
     }

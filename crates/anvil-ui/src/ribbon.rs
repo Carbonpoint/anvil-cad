@@ -32,6 +32,10 @@ pub enum RibbonAction {
     CenterOfMass,
     BillOfMaterials,
     ToggleUnits,
+    Export3mf,
+    ExportStlParts,
+    SampleCard,
+    PressPull,
 }
 
 pub struct RibbonButton {
@@ -175,6 +179,46 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "Solid",
             "Manage",
             RibbonButton { label: "Units mm/in", tooltip: "Toggle the display unit", order: 2, kind: A(ToggleUnits) },
+        ),
+        (
+            "File",
+            "Export",
+            RibbonButton {
+                label: "3MF (parts)",
+                tooltip: "Export a 3MF with one object per feature, for Bambu Studio or PrusaSlicer",
+                order: 1,
+                kind: A(Export3mf),
+            },
+        ),
+        (
+            "File",
+            "Export",
+            RibbonButton {
+                label: "STL per part",
+                tooltip: "Export one STL file per feature",
+                order: 2,
+                kind: A(ExportStlParts),
+            },
+        ),
+        (
+            "File",
+            "Samples",
+            RibbonButton {
+                label: "Business card",
+                tooltip: "Credit-card blank with two fillet radii, embossed name, and QR code",
+                order: 1,
+                kind: A(SampleCard),
+            },
+        ),
+        (
+            "Solid",
+            "Modify",
+            RibbonButton {
+                label: "Press Pull",
+                tooltip: "Extrude the selected face into a new body (Q)",
+                order: 0,
+                kind: A(PressPull),
+            },
         ),
         (
             "CAM",
