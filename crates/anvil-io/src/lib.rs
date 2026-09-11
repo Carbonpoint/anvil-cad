@@ -303,7 +303,12 @@ pub fn business_card(name: &str, url: &str) -> Document {
     let mut sk = SketchFeature::on_datum("XY");
     sk.sketch.add_rounded_rectangle(0.0, 0.0, 85.6, 53.98, [12.7, 6.35, 12.7, 6.35]);
     doc.add_feature(Box::new(sk));
-    doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "card_t".into(), symmetric: false }));
+    doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 0,
+        distance: "card_t".into(),
+        symmetric: false,
+        ..Default::default()
+    }));
     doc.add_feature(Box::new(TextFeature {
         text: name.into(),
         x: "30".into(),

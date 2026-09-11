@@ -1,11 +1,12 @@
-//! Features whose kernel support is pending: Chamfer, Shell, Combine, Hole.
+//! Features whose kernel support is pending: Chamfer, Shell. Combine works
+//! through the CSG boolean.
 //!
 //! They exist so the ribbon, property panel, and file format are complete.
 //! Each returns a clear error until the kernel gains the operation
 //! (see ADR 0001, milestone M3).
 
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, BODY_TYPES};
-use anvil_kernel::{BooleanOp, KernelError};
+use anvil_kernel::BooleanOp;
 use serde::{Deserialize, Serialize};
 
 macro_rules! pending_feature {
@@ -67,7 +68,7 @@ pending_feature!(ShellFeature, "shell", "Shell", "Hollow a body with a wall thic
     Ok(FeatureOutput { bodies: vec![out], consumes: vec![f.body], ..Default::default() })
 });
 
-pending_feature!(CombineFeature, "combine", "Combine", "Join, cut, or intersect two bodies (kernel support pending)", 33, "Modify",
+pending_feature!(CombineFeature, "combine", "Combine", "Join, cut, or intersect two bodies", 33, "Modify",
 { tool: length = "2" / "Tool body index", op: length = "0" / "0 join, 1 cut, 2 intersect" },
 |f, ctx| {
     let tool = ctx.eval(&f.tool)? as usize;
@@ -78,10 +79,4 @@ pending_feature!(CombineFeature, "combine", "Combine", "Join, cut, or intersect 
     Ok(FeatureOutput { bodies: vec![out], consumes: vec![f.body, tool], ..Default::default() })
 });
 
-pending_feature!(HoleFeature, "hole", "Hole", "Drilled hole into a body (kernel support pending)", 40, "Create",
-{ diameter: length = "6" / "Diameter", depth: length = "10" / "Depth" },
-|f, ctx| {
-    let _ = (ctx.eval(&f.diameter)?, ctx.eval(&f.depth)?);
-    let _ = ctx.bodies_of(f.body)?;
-    Err(RegenError::Kernel(KernelError::Unsupported("hole (needs boolean subtract)")))
-});
+// Hole is implemented in `hole.rs` now that booleans exist.

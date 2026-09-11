@@ -9,7 +9,12 @@ fn sketch_then_extrude_makes_a_body() {
     let mut doc = Document::new("test");
     doc.set_expression("h", "12").unwrap();
     doc.add_feature(Box::new(SketchFeature::rectangle("XY", 10.0, 20.0)));
-    let e = doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "h".into(), symmetric: false }));
+    let e = doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 0,
+        distance: "h".into(),
+        symmetric: false,
+        ..Default::default()
+    }));
     assert!(doc.features[e].error.is_none(), "{:?}", doc.features[e].error);
     let bodies = doc.bodies();
     assert_eq!(bodies.len(), 1);
@@ -65,7 +70,12 @@ fn sketch_on_offset_plane_follows_the_plane() {
     let mut sk = SketchFeature::on_feature(0);
     sk.sketch.add_rectangle(0.0, 0.0, 4.0, 4.0);
     doc.add_feature(Box::new(sk));
-    doc.add_feature(Box::new(ExtrudeFeature { sketch: 1, distance: "3".into(), symmetric: false }));
+    doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 1,
+        distance: "3".into(),
+        symmetric: false,
+        ..Default::default()
+    }));
     let b = doc.bodies();
     assert_eq!(b.len(), 1, "{:?}", doc.features.iter().map(|f| f.error.clone()).collect::<Vec<_>>());
     assert!((b[0].bounds().min.z - 7.0).abs() < 1e-9);
@@ -100,9 +110,63 @@ fn sketch_circle_inside_rectangle_extrudes_a_hole() {
     let c = sk.sketch.add_point(0.0, 0.0);
     sk.sketch.add_circle(c, 5.0);
     doc.add_feature(Box::new(sk));
-    doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "2".into(), symmetric: false }));
+    doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 0,
+        distance: "2".into(),
+        symmetric: false,
+        ..Default::default()
+    }));
     let b = doc.bodies();
     assert_eq!(b.len(), 1);
     let exact = (400.0 - std::f64::consts::PI * 25.0) * 2.0;
     assert!((b[0].volume() - exact).abs() / exact < 0.01, "{} vs {exact}", b[0].volume());
+}
+
+#[test]
+fn cut_extrude_and_hole_remove_volume() {
+    use anvil_feature::features::hole::HoleFeature;
+    let mut doc = Document::new("t");
+    doc.add_feature(Box::new(BoxFeature {
+        width: "40".into(),
+        depth: "30".into(),
+        height: "10".into(),
+        ..Default::default()
+    }));
+    let mut pocket = SketchFeature::rectangle("XY", 10.0, 10.0);
+    for e in pocket.sketch.entities.values_mut() {
+        if let anvil_sketch::Entity::Point { pos, .. } = e {
+            pos.x += 20.0;
+            pos.y += 15.0;
+        }
+    }
+    doc.add_feature(Box::new(pocket));
+    // Pocket 4 mm deep from the top face (z = 10): sketch on an offset plane via z? Use symmetric cut through the top.
+    let mut sk = doc.features[1].feature.downcast_ref::<SketchFeature>().unwrap().clone();
+    sk.sketch.plane.origin.z = 10.0;
+    sk.source = anvil_feature::features::sketch::PlaneSource::Custom;
+    doc.edit_feature(1, |f| *f.downcast_mut::<SketchFeature>().unwrap() = sk);
+    doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 1,
+        distance: "-4".into(),
+        symmetric: false,
+        operation: "cut".into(),
+        target: 0,
+    }));
+    assert!(doc.features[2].error.is_none(), "{:?}", doc.features[2].error);
+    let v = doc.bodies()[0].volume();
+    assert!((v - (12000.0 - 400.0)).abs() < 1e-6, "{v}");
+    doc.add_feature(Box::new(HoleFeature {
+        body: 2,
+        x: "8".into(),
+        y: "8".into(),
+        z: "10".into(),
+        diameter: "6".into(),
+        depth: "100".into(),
+        ..Default::default()
+    }));
+    assert!(doc.features[3].error.is_none(), "{:?}", doc.features[3].error);
+    let v2 = doc.bodies()[0].volume();
+    let hole = std::f64::consts::PI * 9.0 * 10.0;
+    assert!((v2 - (11600.0 - hole)).abs() / hole < 0.02, "{v2}");
+    assert_eq!(doc.bodies().len(), 1, "cut and hole consume their targets");
 }

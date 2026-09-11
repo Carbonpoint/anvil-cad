@@ -14,6 +14,7 @@
 //! (truck, OpenCASCADE via FFI). Everything above the kernel talks to the
 //! trait, not to the structs directly.
 
+pub mod csg;
 pub mod mesh;
 pub mod ops;
 pub mod topology;
@@ -84,7 +85,11 @@ impl Kernel for NativeKernel {
         ops::revolve(plane, profile, axis, angle)
     }
     fn boolean(&self, a: &Solid, b: &Solid, op: BooleanOp) -> KernelResult<Solid> {
-        ops::boolean(a, b, op)
+        let r = csg::boolean(a, b, op);
+        if r.faces.is_empty() {
+            return Err(KernelError::BooleanFailed("result is empty".into()));
+        }
+        Ok(r)
     }
     fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f64) -> KernelResult<Solid> {
         ops::fillet(solid, edges, radius)

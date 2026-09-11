@@ -91,11 +91,21 @@ impl AnvilApp {
         doc.set_expression("h", "w / 2").ok();
         doc.set_expression("thk", "12").ok();
         doc.add_feature(Box::new(SketchFeature::rectangle("XY", 60.0, 30.0)));
-        doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "thk".into(), symmetric: false }));
+        doc.add_feature(Box::new(ExtrudeFeature {
+            sketch: 0,
+            distance: "thk".into(),
+            symmetric: false,
+            ..Default::default()
+        }));
         let mut ring = SketchFeature::on_datum("XZ");
         ring.sketch.add_rectangle(41.0, 22.0, 49.0, 28.0);
         doc.add_feature(Box::new(ring));
-        doc.add_feature(Box::new(RevolveFeature { sketch: 2, axis: "Y".into(), angle_deg: "270".into() }));
+        doc.add_feature(Box::new(RevolveFeature {
+            sketch: 2,
+            axis: "Y".into(),
+            angle_deg: "270".into(),
+            ..Default::default()
+        }));
         self.doc = doc;
         self.panels = PanelState::default();
         self.mode = Mode::Model;
