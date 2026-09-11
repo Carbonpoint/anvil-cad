@@ -13,6 +13,7 @@
 
 pub mod document;
 pub mod features;
+pub mod fonts;
 pub mod mesh_loader;
 pub mod param;
 pub mod registry;
@@ -34,6 +35,9 @@ pub struct FeatureOutput {
     pub paths: Vec<Vec<anvil_math::DVec2>>,
     /// The plane a sketch or construction feature defines.
     pub plane: Option<anvil_math::Plane>,
+    /// Short advice shown under the feature in Properties, for example a
+    /// printability warning. Not an error: the feature still regenerated.
+    pub note: Option<String>,
     /// Indices of upstream features whose bodies this feature replaces.
     /// Their bodies are hidden from `Document::bodies()`.
     pub consumes: Vec<usize>,

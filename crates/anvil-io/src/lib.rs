@@ -319,6 +319,8 @@ pub fn business_card(name: &str, url: &str) -> Document {
         size: "7".into(),
         height: "emboss".into(),
         center: true,
+        // Heavy strokes print cleanly with a 0.4 mm nozzle at this size.
+        font_path: "builtin:Archivo Black".into(),
         ..Default::default()
     }));
     doc.add_feature(Box::new(QrFeature {

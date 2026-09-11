@@ -9,7 +9,7 @@ use anvil_math::{DVec2, Plane};
 use serde::{Deserialize, Serialize};
 
 /// Bundled font (DejaVu Sans, Bitstream Vera licence, see assets/).
-pub const DEFAULT_FONT: &[u8] = include_bytes!("../../assets/DejaVuSans.ttf");
+pub const DEFAULT_FONT: &[u8] = crate::fonts::BUILTIN[0].1;
 
 fn text_param(name: &'static str, label: &'static str, v: &str) -> ParamSpec {
     ParamSpec { name, label, kind: crate::param::ParamKind::Text, value: ParamValue::Expr(v.to_string()) }
@@ -89,6 +89,39 @@ pub fn nest_loops(loops: &[Vec<DVec2>]) -> Vec<(Vec<DVec2>, Vec<Vec<DVec2>>)> {
         }
     }
     out.into_iter().map(|(_, o, h)| (o, h)).collect()
+}
+
+fn zero() -> String {
+    "0".into()
+}
+
+fn perimeter(p: &[DVec2]) -> f64 {
+    let n = p.len();
+    (0..n).map(|i| (p[(i + 1) % n] - p[i]).length()).sum()
+}
+
+/// Grow a closed loop by `d` (negative shrinks), independent of winding.
+/// Corner mitres are clamped so sharp glyph corners do not spike.
+pub fn offset_loop(poly: &[DVec2], d: f64) -> Vec<DVec2> {
+    let n = poly.len();
+    let sign = if polygon_area(poly) >= 0.0 { 1.0 } else { -1.0 };
+    (0..n)
+        .map(|i| {
+            let p0 = poly[(i + n - 1) % n];
+            let p1 = poly[i];
+            let p2 = poly[(i + 1) % n];
+            let d1 = (p1 - p0).normalize_or_zero();
+            let d2 = (p2 - p1).normalize_or_zero();
+            let n1 = DVec2::new(d1.y, -d1.x) * sign;
+            let n2 = DVec2::new(d2.y, -d2.x) * sign;
+            let bis = (n1 + n2).normalize_or_zero();
+            if bis == DVec2::ZERO {
+                return p1 + n1 * d;
+            }
+            let cos_half = bis.dot(n1).max(0.5);
+            p1 + bis * (d / cos_half)
+        })
+        .collect()
 }
 
 fn polygon_area(p: &[DVec2]) -> f64 {
@@ -200,6 +233,10 @@ pub struct TextFeature {
     pub size: String,
     pub height: String,
     pub center: bool,
+    /// Grow every stroke outward by this distance (mm), to make thin fonts
+    /// printable. Zero keeps the font as drawn.
+    #[serde(default = "zero")]
+    pub thicken: String,
     /// "new" (separate bodies), "join", or "cut" into `target`.
     #[serde(default = "crate::features::extrude::default_op")]
     pub operation: String,
@@ -221,6 +258,7 @@ impl Default for TextFeature {
             size: "8".into(),
             height: "1".into(),
             center: true,
+            thicken: "0".into(),
             operation: "new".into(),
             target: 0,
         }
@@ -233,12 +271,17 @@ impl Feature for TextFeature {
         "text"
     }
     fn name(&self) -> String {
-        format!("Text \"{}\"", self.text)
+        format!("Text \"{}\" ({})", self.text, crate::fonts::display_name(&self.font_path))
     }
     fn params(&self) -> Vec<ParamSpec> {
         let mut v = vec![
             text_param("text", "Text", &self.text),
-            text_param("font_path", "Font file (blank = DejaVu Sans)", &self.font_path),
+            ParamSpec {
+                name: "font_path",
+                label: "Font",
+                kind: crate::param::ParamKind::Font,
+                value: ParamValue::Expr(self.font_path.clone()),
+            },
             ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature", "Face"], &self.plane),
             ParamSpec::length("x", "X on plane", &self.x),
             ParamSpec::length("y", "Y on plane", &self.y),
@@ -246,6 +289,7 @@ impl Feature for TextFeature {
             ParamSpec::length("size", "Font size (em)", &self.size),
             ParamSpec::length("height", "Emboss height", &self.height),
             ParamSpec::boolean("center", "Centre horizontally", self.center),
+            ParamSpec::length("thicken", "Thicken strokes (mm)", &self.thicken),
             ParamSpec::choice("operation", "Operation", vec!["new", "join", "cut"], &self.operation),
         ];
         if self.operation != "new" {
@@ -275,6 +319,7 @@ impl Feature for TextFeature {
             ("size", ParamValue::Expr(s)) => self.size = s,
             ("height", ParamValue::Expr(s)) => self.height = s,
             ("center", ParamValue::Bool(b)) => self.center = b,
+            ("thicken", ParamValue::Expr(s)) => self.thicken = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -285,26 +330,48 @@ impl Feature for TextFeature {
         let off = DVec2::new(ctx.eval(&self.x)?, ctx.eval(&self.y)?);
         let size = ctx.eval(&self.size)?;
         let h = ctx.eval(&self.height)?;
-        let font_bytes;
-        let font: &[u8] = if self.font_path.trim().is_empty() {
-            DEFAULT_FONT
-        } else {
-            font_bytes =
-                std::fs::read(self.font_path.trim()).map_err(|e| RegenError::Other(format!("font file: {e}")))?;
-            &font_bytes
-        };
-        let glyphs = text_outlines(font, &self.text, size, self.center).map_err(RegenError::Other)?;
+        let font = crate::fonts::load(&self.font_path).map_err(RegenError::Other)?;
+        let glyphs = text_outlines(&font, &self.text, size, self.center).map_err(RegenError::Other)?;
         let mut bodies = Vec::new();
+        let grow = ctx.eval(&self.thicken)?;
+        // Average stroke width per glyph region: 2 * area / perimeter. For a
+        // thin stroke of width w and length L this is close to w.
+        let mut thinnest = f64::INFINITY;
         for loops in glyphs {
             let loops: Vec<Vec<DVec2>> = loops.into_iter().map(|c| c.into_iter().map(|p| p + off).collect()).collect();
             for (outer, holes) in nest_loops(&loops) {
+                let (outer, holes) = if grow.abs() > 1e-9 {
+                    (
+                        offset_loop(&outer, grow),
+                        holes.iter().map(|h| offset_loop(h, -grow)).filter(|h| polygon_area(h).abs() > 1e-6).collect(),
+                    )
+                } else {
+                    (outer, holes)
+                };
+                let area = polygon_area(&outer).abs() - holes.iter().map(|h| polygon_area(h).abs()).sum::<f64>();
+                let perim = perimeter(&outer) + holes.iter().map(|h| perimeter(h)).sum::<f64>();
+                if perim > 0.0 && area > 0.0 {
+                    thinnest = thinnest.min(2.0 * area / perim);
+                }
                 bodies.push(ctx.kernel.extrude_with_holes(&plane, &outer, &holes, h)?);
             }
         }
         if bodies.is_empty() {
             return Err(RegenError::Other("no printable glyphs".into()));
         }
-        crate::features::extrude::apply_operation(ctx, &self.operation, self.target, bodies)
+        let mut out = crate::features::extrude::apply_operation(ctx, &self.operation, self.target, bodies)?;
+        if thinnest.is_finite() {
+            out.note = Some(if thinnest < 0.8 {
+                // Each side grows by the thicken distance; round up to 0.05 mm.
+                let target = grow + ((0.8 - thinnest) / 2.0 / 0.05).ceil() * 0.05;
+                format!(
+                    "Strokes about {thinnest:.2} mm wide. A 0.4 mm nozzle needs about 0.8 mm: try Archivo Black, a larger size, or Thicken {target:.2}."
+                )
+            } else {
+                format!("Strokes about {thinnest:.2} mm wide: printable with a 0.4 mm nozzle.")
+            });
+        }
+        Ok(out)
     }
     fn place_on_face(&mut self, plane: Plane, body: usize) -> bool {
         self.plane = "Face".into();

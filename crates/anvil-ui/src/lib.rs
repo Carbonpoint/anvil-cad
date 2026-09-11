@@ -44,3 +44,18 @@ pub fn render_offscreen(doc: &anvil_feature::Document, width: usize, height: usi
     fb.draw_scene(&scene, &proj, &style, None, None);
     fb.to_image()
 }
+
+/// Render a document looking straight down the Z axis, framed to fit.
+pub fn render_top(doc: &anvil_feature::Document, width: usize, height: usize) -> egui::ColorImage {
+    let scene = scene::Scene::build(doc);
+    let mut cam = camera::Camera::default();
+    let plane = anvil_math::Plane { origin: scene.bounds.center(), ..anvil_math::Plane::XY };
+    let span = (scene.bounds.max - scene.bounds.min).max_element().max(1.0);
+    cam.look_at_plane(&plane, span * 0.75);
+    let proj = camera::Projector::new(&cam, width as f64, height as f64);
+    let mut fb = raster::Framebuffer::new(width, height);
+    let style = raster::Style::default();
+    fb.clear(style.background);
+    fb.draw_scene(&scene, &proj, &style, None, None);
+    fb.to_image()
+}

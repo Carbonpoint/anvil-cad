@@ -111,12 +111,39 @@ silently succeeding.
 * **Import DXF**: type a path and press the button. Lines, arcs, circles,
   and polylines are added in millimetres.
 
+## Fonts for Text
+
+Select a Text feature and open the **Font** dropdown in Properties. It
+lists the bundled fonts first, then every font installed on the computer.
+Type in the search box to filter. The last row takes a path to any .ttf or
+.otf file.
+
+Bundled fonts open the same on every computer:
+
+| Font | Stroke width at 7 mm size | Good for 0.4 mm nozzle |
+| --- | --- | --- |
+| Archivo Black | about 0.99 mm | Yes, recommended |
+| Liberation Sans Bold | about 0.70 mm | Borderline; use Thicken 0.05 or a larger size |
+| DejaVu Sans Bold | a little thicker than regular | Borderline |
+| DejaVu Sans | about 0.54 mm | No at 7 mm |
+| DejaVu Serif, Serif Bold, Sans Mono | thin | No at small sizes |
+
+Properties shows the stroke width under the Text feature and says when it
+is too thin for a 0.4 mm nozzle. **Thicken strokes** grows every letter
+outward by the given distance, which works with any font. A rule of thumb:
+strokes should be at least twice the nozzle width.
+
+A document that uses an installed font stores the file path. On another
+computer without that font the Text feature shows an error; pick a bundled
+font to share files.
+
 ## Business card for multi-colour printing
 
 1. File > Samples > **Business card**. The document has four features: the
    rounded outline sketch (0.5 in and 0.25 in corner radii), the 0.8 mm
    card body, the embossed Text, and the QR Code.
-2. Select the Text feature and set your name in Properties. Select the QR
+2. Select the Text feature and set your name in Properties. It uses
+   Archivo Black so the letters print with a 0.4 mm nozzle. Select the QR
    Code feature and set its content to your LinkedIn or website URL. Both
    read expressions `card_t` (card thickness) and `emboss` (relief height)
    from the Expressions panel.

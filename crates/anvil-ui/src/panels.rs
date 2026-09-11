@@ -9,6 +9,10 @@ pub struct PanelState {
     pub selected: Option<usize>,
     /// Set when the user double-clicks a feature in the navigator.
     pub open_requested: Option<usize>,
+    /// Filter text in the font dropdown.
+    pub font_search: String,
+    /// Custom font file path typed in the font dropdown.
+    pub font_path_draft: String,
     /// Last navigator message, for example a refused move.
     pub message: String,
     /// Text being edited, keyed by (feature index, param name).
@@ -105,6 +109,11 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
     }
     let params = doc.features[idx].feature.params();
     ui.label(doc.features[idx].feature.name());
+    if let Some(note) = doc.features[idx].output.as_ref().and_then(|o| o.note.as_ref()) {
+        let warn = note.contains("needs about");
+        let color = if warn { egui::Color32::from_rgb(200, 110, 20) } else { egui::Color32::from_rgb(60, 120, 70) };
+        ui.colored_label(color, note);
+    }
     if let Some(e) = &doc.features[idx].error {
         ui.colored_label(egui::Color32::from_rgb(220, 80, 60), e);
     }
@@ -119,6 +128,59 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                     if resp.lost_focus() && draft != cur {
                         pending = Some((p.name, ParamValue::Expr(draft.clone())));
                     }
+                }
+                (ParamKind::Font, ParamValue::Expr(cur)) => {
+                    let current = anvil_feature::fonts::display_name(cur);
+                    egui::ComboBox::from_id_salt((idx, p.name, "font"))
+                        .width(180.0)
+                        .height(380.0)
+                        .selected_text(current)
+                        .show_ui(ui, |ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut st.font_search)
+                                    .hint_text("Search fonts")
+                                    .desired_width(220.0),
+                            );
+                            let cat = anvil_feature::fonts::catalogue();
+                            let q = st.font_search.to_lowercase();
+                            let hits: Vec<&anvil_feature::fonts::FontEntry> =
+                                cat.iter().filter(|f| q.is_empty() || f.label().to_lowercase().contains(&q)).collect();
+                            ui.label(
+                                egui::RichText::new(format!("{} of {} fonts", hits.len(), cat.len())).small().weak(),
+                            );
+                            ui.separator();
+                            let mut shown_system = false;
+                            for f in hits.iter().take(500) {
+                                if !f.builtin && !shown_system {
+                                    ui.label(egui::RichText::new("Installed on this computer").small().weak());
+                                    shown_system = true;
+                                }
+                                let selected =
+                                    f.source == *cur || (cur.trim().is_empty() && f.source == "builtin:DejaVu Sans");
+                                let text = if f.builtin { format!("{}  (bundled)", f.label()) } else { f.label() };
+                                let r = ui.selectable_label(selected, text);
+                                if r.clicked() {
+                                    pending = Some((p.name, ParamValue::Expr(f.source.clone())));
+                                }
+                                r.on_hover_text(if f.builtin {
+                                    "Bundled with Anvil: opens the same on every computer".to_string()
+                                } else {
+                                    f.source.clone()
+                                });
+                            }
+                            ui.separator();
+                            ui.label(egui::RichText::new("Or a font file (.ttf or .otf)").small().weak());
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut st.font_path_draft)
+                                        .hint_text("C:\\path\\font.ttf")
+                                        .desired_width(170.0),
+                                );
+                                if ui.button("Use").clicked() && !st.font_path_draft.trim().is_empty() {
+                                    pending = Some((p.name, ParamValue::Expr(st.font_path_draft.trim().to_string())));
+                                }
+                            });
+                        });
                 }
                 (ParamKind::Bool, ParamValue::Bool(b)) => {
                     let mut v = *b;

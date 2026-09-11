@@ -288,3 +288,29 @@ fn fillet_and_chamfer_on_picked_edges() {
     let back = Document::from_json(&json).unwrap();
     assert!((back.bodies()[0].volume() - v).abs() < 1e-6);
 }
+
+#[test]
+fn stroke_note_prefers_heavy_fonts() {
+    use anvil_feature::features::emboss::TextFeature;
+    let width = |font: &str, thicken: &str| -> f64 {
+        let mut doc = Document::new("t");
+        doc.add_feature(Box::new(TextFeature {
+            text: "Alex Goldman".into(),
+            size: "7".into(),
+            height: "0.6".into(),
+            font_path: font.into(),
+            thicken: thicken.into(),
+            ..Default::default()
+        }));
+        let note = doc.features[0].output.as_ref().unwrap().note.clone().unwrap();
+        eprintln!("{font} thicken {thicken}: {note}");
+        note.split_whitespace().find_map(|w| w.parse::<f64>().ok()).unwrap()
+    };
+    let regular = width("", "0");
+    let black = width("builtin:Archivo Black", "0");
+    let bold = width("builtin:Liberation Sans Bold", "0");
+    let thick = width("", "0.15");
+    assert!(black > regular * 1.4, "{black} vs {regular}");
+    assert!(bold > regular);
+    assert!(thick > regular + 0.2, "{thick} vs {regular}");
+}

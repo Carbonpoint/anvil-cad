@@ -29,6 +29,8 @@ pub enum ParamKind {
         options: Vec<&'static str>,
     },
     Text,
+    /// A font: stored as `builtin:<name>`, a file path, or empty for the default.
+    Font,
 }
 
 #[derive(Clone, Debug, PartialEq)]
