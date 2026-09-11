@@ -12,6 +12,7 @@
 
 mod app;
 mod camera;
+mod dxf;
 mod panels;
 mod raster;
 mod ribbon;

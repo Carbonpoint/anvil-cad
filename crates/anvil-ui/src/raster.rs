@@ -25,6 +25,8 @@ pub struct Style {
     pub edge: Color32,
     pub light: DVec3,
     pub draw_edges: bool,
+    /// Section view: keep only the side where `normal . p <= w`.
+    pub section: Option<(DVec3, f64)>,
 }
 
 impl Default for Style {
@@ -37,6 +39,7 @@ impl Default for Style {
             edge: Color32::from_rgb(35, 45, 60),
             light: DVec3::new(0.35, -0.45, 0.82).normalize(),
             draw_edges: true,
+            section: None,
         }
     }
 }
@@ -109,9 +112,17 @@ impl Framebuffer {
             let pb = mesh.positions[idx[1] as usize];
             let pc = mesh.positions[idx[2] as usize];
             let n = (pb - pa).cross(pc - pa).normalize_or_zero();
-            // Back-face cull against the view direction at the triangle.
+            let dist = style.section.map(|(sn, w)| (sn.dot(pa) - w, sn.dot(pb) - w, sn.dot(pc) - w));
+            if let Some((da, db, dc)) = dist {
+                if da > 0.0 && db > 0.0 && dc > 0.0 {
+                    continue;
+                }
+            }
+            // Back-face cull against the view direction at the triangle. In a
+            // section view back faces show the inside of the cut, tinted.
             let view_dir = if proj.ortho { proj.fwd } else { ((pa + pb + pc) / 3.0 - proj.eye).normalize() };
-            if n.dot(view_dir) >= 0.0 {
+            let back = n.dot(view_dir) >= 0.0;
+            if back && dist.is_none() {
                 continue;
             }
             let body = scene.tri_body[t];
@@ -129,18 +140,79 @@ impl Framebuffer {
             } else {
                 style.body
             };
-            let shade = 0.30 + 0.70 * n.dot(style.light).max(0.0);
+            let (base, shade) = if back {
+                (Color32::from_rgb(200, 70, 60), 0.75)
+            } else {
+                (base, 0.30 + 0.70 * n.dot(style.light).max(0.0))
+            };
             let color = Color32::from_rgb(
                 (base.r() as f64 * shade) as u8,
                 (base.g() as f64 * shade) as u8,
                 (base.b() as f64 * shade) as u8,
             );
-            self.triangle(a, b, c, color, t as u32 + 1);
+            self.triangle_clipped(a, b, c, color, t as u32 + 1, dist);
         }
         if style.draw_edges {
             for (_, [p, q]) in &scene.edges {
+                if let Some((sn, w)) = style.section {
+                    if sn.dot(*p) - w > 0.0 || sn.dot(*q) - w > 0.0 {
+                        continue;
+                    }
+                }
                 if let (Some(a), Some(b)) = (proj.project(*p), proj.project(*q)) {
                     self.line(a, b, style.edge, 0.9985);
+                }
+            }
+        }
+    }
+
+    /// Fill a triangle, discarding pixels on the far side of the section
+    /// plane. `dist` is the signed plane distance at each vertex.
+    #[allow(clippy::too_many_arguments)]
+    pub fn triangle_clipped(
+        &mut self,
+        a: (f64, f64, f64),
+        b: (f64, f64, f64),
+        c: (f64, f64, f64),
+        color: Color32,
+        id: u32,
+        dist: Option<(f64, f64, f64)>,
+    ) {
+        let Some((da, db, dc)) = dist else {
+            self.triangle(a, b, c, color, id);
+            return;
+        };
+        let min_x = a.0.min(b.0).min(c.0).floor().max(0.0) as i64;
+        let max_x = a.0.max(b.0).max(c.0).ceil().min(self.width as f64 - 1.0) as i64;
+        let min_y = a.1.min(b.1).min(c.1).floor().max(0.0) as i64;
+        let max_y = a.1.max(b.1).max(c.1).ceil().min(self.height as f64 - 1.0) as i64;
+        if min_x > max_x || min_y > max_y {
+            return;
+        }
+        let area = (b.0 - a.0) * (c.1 - a.1) - (b.1 - a.1) * (c.0 - a.0);
+        if area.abs() < 1e-12 {
+            return;
+        }
+        let inv = 1.0 / area;
+        for y in min_y..=max_y {
+            let py = y as f64 + 0.5;
+            for x in min_x..=max_x {
+                let px = x as f64 + 0.5;
+                let w0 = ((b.0 - px) * (c.1 - py) - (b.1 - py) * (c.0 - px)) * inv;
+                let w1 = ((c.0 - px) * (a.1 - py) - (c.1 - py) * (a.0 - px)) * inv;
+                let w2 = 1.0 - w0 - w1;
+                if w0 < 0.0 || w1 < 0.0 || w2 < 0.0 {
+                    continue;
+                }
+                if w0 * da + w1 * db + w2 * dc > 0.0 {
+                    continue;
+                }
+                let z = (w0 * a.2 + w1 * b.2 + w2 * c.2) as f32;
+                let i = y as usize * self.width + x as usize;
+                if z < self.depth[i] {
+                    self.depth[i] = z;
+                    self.color[i] = color;
+                    self.id[i] = id;
                 }
             }
         }

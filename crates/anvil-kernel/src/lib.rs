@@ -14,6 +14,7 @@
 //! (truck, OpenCASCADE via FFI). Everything above the kernel talks to the
 //! trait, not to the structs directly.
 
+pub mod blend;
 pub mod csg;
 pub mod mesh;
 pub mod ops;
@@ -64,6 +65,14 @@ pub trait Kernel {
     fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
     fn shell(&self, solid: &Solid, thickness: f64) -> KernelResult<Solid>;
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)>;
+    /// Round (fillet) or bevel (chamfer) straight edges given by end points.
+    fn blend_edges(
+        &self,
+        solid: &Solid,
+        edges: &[[DVec3; 2]],
+        size: f64,
+        kind: blend::BlendKind,
+    ) -> KernelResult<Solid>;
     fn extrude_with_holes(
         &self,
         plane: &Plane,
@@ -126,6 +135,15 @@ impl Kernel for NativeKernel {
     }
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
         ops::split_by_plane(solid, plane)
+    }
+    fn blend_edges(
+        &self,
+        solid: &Solid,
+        edges: &[[DVec3; 2]],
+        size: f64,
+        kind: blend::BlendKind,
+    ) -> KernelResult<Solid> {
+        blend::blend_edges(solid, edges, size, kind)
     }
     fn extrude_with_holes(
         &self,

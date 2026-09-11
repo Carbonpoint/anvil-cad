@@ -51,3 +51,7 @@ codegen-units = 4
 opt-level = 1
 [profile.dev.package."*"]
 opt-level = 3
+
+# The kernel runs booleans in tests and in the debug app; optimise it.
+[profile.dev.package.anvil-kernel]
+opt-level = 3

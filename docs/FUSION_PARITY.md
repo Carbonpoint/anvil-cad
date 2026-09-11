@@ -268,7 +268,9 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 
 | Command | Status | Note |
 |---|---|---|
-| Fillet, Chamfer, Shell, Combine, Hole | Partial | On the ribbon, returns unsupported |
+| Fillet, Chamfer | Done | Straight edges between flat faces, outside and inside corners |
+| Combine, Hole | Done | CSG booleans; Hole has counterbore |
+| Shell | Partial | On the ribbon, returns unsupported |
 | Scale, Move/Copy | Done | |
 | Split Body | Done | Plane only; face and sketch-curve splitting not supported |
 | Change Parameters, Appearance, Physical Material, Bill of Materials, Delete, Compute All, undo/redo | Done | |
@@ -291,7 +293,8 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 
 | Command | Status | Note |
 |---|---|---|
-| Measure, Center of Mass | Done | |
+| Measure, Center of Mass, Interference | Done | |
+| Section Analysis | Done | Axis-aligned plane with offset |
 | Everything else in Inspect | Missing | |
 
 ### Solid > Insert
@@ -300,7 +303,8 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 |---|---|---|
 | Insert Mesh (STL) | Done | |
 | QR Code | Done | Bundled generator, not an installed add-in |
-| Canvas, Decal, Insert SVG, Insert DXF, Insert McMaster-Carr Component | Missing | |
+| Insert DXF | Done | Into the active sketch |
+| Canvas, Decal, Insert SVG, Insert McMaster-Carr Component | Missing | |
 
 ### Solid > Select
 
@@ -321,7 +325,7 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 | Line | Done | Includes a Midpoint Line variant |
 | Rectangle (2-pt, center, 3-pt) | Done | |
 | Circle (center, 2-pt, 3-pt) | Done | Tangent circle Missing |
-| Arc (3-pt, center) | Done | Tangent arc Missing |
+| Arc (3-pt, center, tangent) | Done | |
 | Polygon (circumscribed, inscribed, edge) | Done | |
 | Ellipse | Done | |
 | Slot (center-to-center, center point) | Done | Overall and three-point arc slot Missing |
@@ -337,7 +341,8 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 |---|---|---|
 | Fillet, Trim, Extend, Offset, Mirror, Move/Copy, Sketch Scale, Rectangular Pattern, Circular Pattern | Done | |
 | Change Parameters | Done | Shared with the Solid tab |
-| Chamfer (sketch), Break, Blend Curve | Missing | |
+| Chamfer (sketch) | Done | |
+| Break, Blend Curve | Missing | |
 
 ### Sketch > Constraints
 

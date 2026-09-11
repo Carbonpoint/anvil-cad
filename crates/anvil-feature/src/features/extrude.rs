@@ -47,6 +47,14 @@ pub(crate) fn apply_operation(
         for tool in &tools {
             acc = ctx.kernel.boolean(&acc, tool, op)?;
         }
+        if op == BooleanOp::Subtract {
+            let (before, after) = (t.volume(), acc.volume());
+            if (before - after).abs() <= 1e-9 * before.abs().max(1.0) {
+                return Err(RegenError::Other(
+                    "the cut does not touch the target body; try the opposite distance sign".into(),
+                ));
+            }
+        }
         bodies.push(acc);
     }
     Ok(FeatureOutput { bodies, consumes: vec![target], ..Default::default() })
@@ -93,7 +101,7 @@ impl Feature for ExtrudeFeature {
         let mut plane = *plane;
         let mut dist = d;
         if self.symmetric {
-            plane.origin -= plane.normal() * (d / 2.0);
+            plane.origin -= plane.normal() * (d.abs() / 2.0);
             dist = d.abs();
         }
         let loops: Vec<Vec<anvil_math::DVec2>> = profiles.iter().map(|p| p.points.clone()).collect();

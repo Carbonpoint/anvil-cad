@@ -65,6 +65,52 @@ downstream regenerates.
   selects entities fully inside; right to left selects anything touched.
 * Right-click in a sketch for the common tools and Finish Sketch.
 
+## Fillet, chamfer, and edges
+
+1. Click an edge in the viewport. It turns orange. Ctrl+click adds more
+   edges. The Select filter in the status bar can limit clicks to edges.
+2. Press F, or Solid > Fillet or Chamfer. The feature uses the selected
+   edges and their body. Set the radius or distance in Properties.
+3. To change the edges later, select the Fillet feature, click new edges,
+   and press **Use selected edges** in Properties.
+
+Fillet and Chamfer work on straight edges between flat faces, on outside
+and inside corners. Edges on curved facets are refused with a message.
+
+## Placing features on a face
+
+Click a face, then Hole, Text, QR Code, or Texture. The feature is placed
+on that face with its origin at the face centre, and Hole and Text target
+that body. A Hole or cut that removes nothing shows an error instead of
+silently succeeding.
+
+## Inspecting
+
+* **Section** (status bar): cuts the view along X, Y, or Z at an offset.
+  Inside faces show in red.
+* **Interference** (Solid > Inspect): select one feature, Ctrl+click a
+  second, and press Interference for the overlap volume.
+* View buttons in the viewport corner: Top, Front, Right, Iso, Fit.
+* The bottom-left corner names the face or edge under the cursor.
+
+## History
+
+* The ^ and v buttons in the Part Navigator move a feature earlier or
+  later. A move that would put a feature before its inputs is refused.
+* Deleting a feature renumbers later references. Features that used the
+  deleted one show a red mark and an error that says what to choose.
+
+## Sketch additions
+
+* Dimension values accept expressions: type `card_w / 2` instead of a
+  number. The label shows the expression and its value, and it follows
+  changes in the Expressions panel.
+* **Chamfer** (sketch Modify): click two lines that share a corner.
+* **Tangent Arc** (Arc menu): click the end of a line or arc, then the
+  arc end.
+* **Import DXF**: type a path and press the button. Lines, arcs, circles,
+  and polylines are added in millimetres.
+
 ## Business card for multi-colour printing
 
 1. File > Samples > **Business card**. The document has four features: the

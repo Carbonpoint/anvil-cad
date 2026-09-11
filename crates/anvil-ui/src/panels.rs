@@ -9,6 +9,8 @@ pub struct PanelState {
     pub selected: Option<usize>,
     /// Set when the user double-clicks a feature in the navigator.
     pub open_requested: Option<usize>,
+    /// Last navigator message, for example a refused move.
+    pub message: String,
     /// Text being edited, keyed by (feature index, param name).
     pub drafts: HashMap<(usize, &'static str), String>,
     pub new_expr_name: String,
@@ -20,9 +22,13 @@ pub struct PanelState {
 pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState) -> bool {
     let mut changed = false;
     ui.heading("Part Navigator");
+    if !st.message.is_empty() {
+        ui.colored_label(egui::Color32::from_rgb(200, 90, 40), &st.message);
+    }
     ui.separator();
     let mut to_remove = None;
     let mut to_toggle = None;
+    let mut to_move: Option<(usize, usize)> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (i, node) in doc.features.iter().enumerate() {
             ui.horizontal(|ui| {
@@ -49,7 +55,13 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                 if ui.small_button(if node.suppressed { "unsuppress" } else { "suppress" }).clicked() {
                     to_toggle = Some(i);
                 }
-                if ui.small_button("x").clicked() {
+                if ui.small_button("^").on_hover_text("Move earlier in the history").clicked() && i > 0 {
+                    to_move = Some((i, i - 1));
+                }
+                if ui.small_button("v").on_hover_text("Move later in the history").clicked() {
+                    to_move = Some((i, i + 1));
+                }
+                if ui.small_button("x").on_hover_text("Delete").clicked() {
                     to_remove = Some(i);
                 }
             });
@@ -59,6 +71,17 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
         let s = doc.features[i].suppressed;
         doc.set_suppressed(i, !s);
         changed = true;
+    }
+    if let Some((from, to)) = to_move {
+        if to < doc.features.len() {
+            match doc.move_feature(from, to) {
+                Ok(()) => {
+                    st.selected = Some(to);
+                    changed = true;
+                }
+                Err(e) => st.message = e,
+            }
+        }
     }
     if let Some(i) = to_remove {
         doc.remove_feature(i);

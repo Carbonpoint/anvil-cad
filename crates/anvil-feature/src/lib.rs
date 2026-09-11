@@ -82,6 +82,41 @@ pub trait Feature: Send + Sync + std::fmt::Debug + std::any::Any {
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError>;
     /// Needed because `Box<dyn Feature>` cannot derive Clone.
     fn clone_box(&self) -> Box<dyn Feature>;
+
+    /// Put this feature on a picked face. `body` is the feature that made
+    /// the face. Returns false if the feature has no placement.
+    fn place_on_face(&mut self, _plane: anvil_math::Plane, _body: usize) -> bool {
+        false
+    }
+
+    /// Take the edges picked in the viewport (world end points) and the
+    /// feature that owns them. Returns false if the feature has no edges.
+    fn set_edges(&mut self, _edges: Vec<[anvil_math::DVec3; 2]>, _body: usize) -> bool {
+        false
+    }
+
+    /// Rewrite references to other features after the history changes.
+    /// `map(old)` returns the new index, or `None` if the target was
+    /// deleted. The default walks `params()` for feature references.
+    /// Returns the names of references that now point at nothing.
+    fn remap_refs(&mut self, map: &dyn Fn(usize) -> Option<usize>) -> Vec<&'static str> {
+        let mut broken = Vec::new();
+        for p in self.params() {
+            if let ParamValue::FeatureRef(old) = p.value {
+                match map(old) {
+                    Some(new) if new != old => {
+                        let _ = self.set_param(p.name, ParamValue::FeatureRef(new));
+                    }
+                    Some(_) => {}
+                    None => {
+                        broken.push(p.name);
+                        let _ = self.set_param(p.name, ParamValue::FeatureRef(usize::MAX));
+                    }
+                }
+            }
+        }
+        broken
+    }
 }
 
 impl Clone for Box<dyn Feature> {

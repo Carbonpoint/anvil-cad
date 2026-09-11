@@ -244,6 +244,98 @@ impl Sketch {
         Ok(arc)
     }
 
+    /// Chamfer the corner where two lines meet: trims both lines back by
+    /// `d` and joins the new ends with a line. Returns the new line.
+    pub fn chamfer_lines(&mut self, l1: EntityId, l2: EntityId, d: f64) -> Result<EntityId, String> {
+        let ends = |s: &Sketch, id: EntityId| match s.entities.get(id) {
+            Some(Entity::Line { a, b, .. }) => Some((*a, *b)),
+            _ => None,
+        };
+        let (a1, b1) = ends(self, l1).ok_or("first pick is not a line")?;
+        let (a2, b2) = ends(self, l2).ok_or("second pick is not a line")?;
+        let pairs = [(a1, a2), (a1, b2), (b1, a2), (b1, b2)];
+        let (c1, c2) = pairs
+            .iter()
+            .find(|(p, q)| p == q || (self.point(*p) - self.point(*q)).length() < 1e-6)
+            .copied()
+            .ok_or("lines do not meet at a corner")?;
+        let far1 = if c1 == a1 { b1 } else { a1 };
+        let far2 = if c2 == a2 { b2 } else { a2 };
+        let p = self.point(c1);
+        let v1 = self.point(far1) - p;
+        let v2 = self.point(far2) - p;
+        if d <= 0.0 || d >= v1.length() || d >= v2.length() {
+            return Err("chamfer distance must be positive and shorter than both lines".into());
+        }
+        let t1 = p + v1.normalize() * d;
+        let t2 = p + v2.normalize() * d;
+        let n1 = self.add_point(t1.x, t1.y);
+        let n2 = self.add_point(t2.x, t2.y);
+        if let Some(Entity::Line { a, b, .. }) = self.entities.get_mut(l1) {
+            if *a == c1 {
+                *a = n1
+            } else {
+                *b = n1
+            }
+        }
+        if let Some(Entity::Line { a, b, .. }) = self.entities.get_mut(l2) {
+            if *a == c2 {
+                *a = n2
+            } else {
+                *b = n2
+            }
+        }
+        let used = self.entities.values().any(|e| e.point_refs().contains(&c1) || e.point_refs().contains(&c2));
+        if !used {
+            self.entities.remove(c1);
+            if c2 != c1 {
+                self.entities.remove(c2);
+            }
+            self.constraints.retain(|_, c| !c.refs().contains(&c1) && !c.refs().contains(&c2));
+        }
+        Ok(self.add_line(n1, n2))
+    }
+
+    /// Arc that starts at an existing end point, tangent to the line or arc
+    /// that ends there, and finishes at `end`.
+    pub fn add_tangent_arc(&mut self, start: EntityId, end: DVec2) -> Result<EntityId, String> {
+        let s0 = self.point(start);
+        // Incoming direction at `start`, pointing along the curve into the point.
+        let mut dir: Option<DVec2> = None;
+        for e in self.entities.values() {
+            match e {
+                Entity::Line { a, b, .. } if *a == start => dir = Some(s0 - self.point(*b)),
+                Entity::Line { a, b, .. } if *b == start => dir = Some(s0 - self.point(*a)),
+                Entity::Arc { center, start: st, end: en } if *en == start => {
+                    let r = s0 - self.point(*center);
+                    dir = Some(DVec2::new(-r.y, r.x));
+                    let _ = st;
+                }
+                Entity::Arc { center, start: st, .. } if *st == start => {
+                    let r = s0 - self.point(*center);
+                    dir = Some(DVec2::new(r.y, -r.x));
+                }
+                _ => {}
+            }
+            if dir.is_some() {
+                break;
+            }
+        }
+        let t = dir.ok_or("the start point is not the end of a line or arc")?.normalize_or_zero();
+        let chord = end - s0;
+        let nrm = DVec2::new(-t.y, t.x);
+        let denom = 2.0 * chord.dot(nrm);
+        if denom.abs() < 1e-12 {
+            return Err("the end point is straight ahead; use a line".into());
+        }
+        let r = chord.length_squared() / denom; // signed radius along nrm
+        let c = s0 + nrm * r;
+        let cp = self.add_point(c.x, c.y);
+        let ep = self.add_point(end.x, end.y);
+        // Counter-clockwise when the centre is to the left of the tangent.
+        Ok(if r > 0.0 { self.add_arc(cp, start, ep) } else { self.add_arc(cp, ep, start) })
+    }
+
     /// Parameters along line `id` (0..1) where other entities cross it.
     fn crossings(&self, id: EntityId) -> Vec<f64> {
         let (a, b) = match &self.entities[id] {
@@ -510,7 +602,13 @@ impl Sketch {
             };
             let ia = node(a, self);
             let ib = node(b, self);
-            self.add_line(ia, ib);
+            // Projected edges are reference geometry: they snap and
+            // constrain but do not form profiles. Toggle Construction on
+            // a projected line to use it in a profile.
+            let l = self.add_line(ia, ib);
+            if let Entity::Line { construction, .. } = &mut self.entities[l] {
+                *construction = true;
+            }
             count += 1;
         }
         count
@@ -648,5 +746,25 @@ mod tests {
             (p[0].signed_area().abs() - std::f64::consts::PI * 50.0).abs() < 1.0
                 || (p[1].signed_area().abs() - std::f64::consts::PI * 50.0).abs() < 1.0
         );
+    }
+
+    #[test]
+    fn chamfer_and_tangent_arc() {
+        let mut s = Sketch::new(Plane::XY);
+        let [l0, l1, ..] = s.add_rectangle(0.0, 0.0, 10.0, 10.0);
+        s.chamfer_lines(l0, l1, 2.0).unwrap();
+        let p = s.profiles();
+        assert_eq!(p.len(), 1);
+        assert!((p[0].signed_area() - 98.0).abs() < 1e-9, "{}", p[0].signed_area());
+
+        let mut s = Sketch::new(Plane::XY);
+        let a = s.add_point(0.0, 0.0);
+        let b = s.add_point(10.0, 0.0);
+        s.add_line(a, b);
+        let arc = s.add_tangent_arc(b, DVec2::new(10.0, 10.0)).unwrap();
+        match s.entities[arc] {
+            Entity::Arc { center, .. } => assert!((s.point(center) - DVec2::new(10.0, 5.0)).length() < 1e-9),
+            _ => panic!(),
+        }
     }
 }

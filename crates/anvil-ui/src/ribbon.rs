@@ -36,6 +36,8 @@ pub enum RibbonAction {
     ExportStlParts,
     SampleCard,
     PressPull,
+    Workbook(u8),
+    Interference,
 }
 
 pub struct RibbonButton {
@@ -221,6 +223,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             },
         ),
         (
+            "Solid",
+            "Inspect",
+            RibbonButton {
+                label: "Interference",
+                tooltip: "Overlap volume between two selected features (Ctrl+click the second)",
+                order: 2,
+                kind: A(Interference),
+            },
+        ),
+        (
             "CAM",
             "Output",
             RibbonButton {
@@ -276,6 +288,19 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
     };
     for (tab, group, b) in app_actions() {
         place(tab, group, b);
+    }
+    const WB: [&str; 6] = ["WB 1 Plate", "WB 2 Bracket", "WB 3 Shaft", "WB 4 Nut", "WB 5 Elbow", "WB 6 Adapter"];
+    for (i, label) in WB.iter().enumerate() {
+        place(
+            "File",
+            "Samples",
+            RibbonButton {
+                label,
+                tooltip: "Workbook exercise, see docs/WORKBOOK.md",
+                order: 10 + i as u32,
+                kind: ButtonKind::Action(RibbonAction::Workbook(i as u8)),
+            },
+        );
     }
     for d in descriptors() {
         place(

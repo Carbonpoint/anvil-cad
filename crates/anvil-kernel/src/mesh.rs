@@ -90,6 +90,76 @@ fn tessellate_face(solid: &Solid, id: FaceId, f: &Face) -> TriMesh {
 /// Ear clipping for a simple polygon. Input is any winding; output triangles
 /// are counter-clockwise in the given 2D frame. O(n^2), fine for CAD facets.
 pub fn ear_clip(poly: &[DVec2]) -> Vec<usize> {
+    // Vertices on a straight run (collinear with their neighbours) stall
+    // ear clipping. Set them aside, clip the rest, then split the triangle
+    // edges they lie on, so neighbouring faces still share every vertex.
+    let n = poly.len();
+    if n < 4 {
+        return ear_clip_core(poly, &(0..n).collect::<Vec<_>>());
+    }
+    let scale = poly.iter().fold(0.0f64, |m, p| m.max(p.x.abs()).max(p.y.abs())).max(1.0);
+    // Cross product tolerance (area-like) and squared distance tolerance.
+    let tol = 1e-12 * scale * scale;
+    let dist2 = (1e-9 * scale).powi(2);
+    let mut keep: Vec<usize> = (0..n).collect();
+    let mut removed: Vec<usize> = Vec::new();
+    loop {
+        let m = keep.len();
+        if m <= 3 {
+            break;
+        }
+        let mut hit = None;
+        for k in 0..m {
+            let (a, b, c) = (poly[keep[(k + m - 1) % m]], poly[keep[k]], poly[keep[(k + 1) % m]]);
+            if (b - a).perp_dot(c - b).abs() <= tol && (b - a).dot(c - b) > 0.0 {
+                hit = Some(k);
+                break;
+            }
+        }
+        match hit {
+            Some(k) => removed.push(keep.remove(k)),
+            None => break,
+        }
+    }
+    let mut tris = ear_clip_core(poly, &keep);
+    for r in removed {
+        let p = poly[r];
+        let mut split = None;
+        'find: for (t, tri) in tris.chunks(3).enumerate() {
+            for e in 0..3 {
+                let (i, j) = (tri[e], tri[(e + 1) % 3]);
+                let (a, b) = (poly[i], poly[j]);
+                let ab = b - a;
+                let len2 = ab.length_squared();
+                if len2 < 1e-24 {
+                    continue;
+                }
+                let u = (p - a).dot(ab) / len2;
+                if u > 1e-12 && u < 1.0 - 1e-12 && (p - (a + ab * u)).length_squared() <= dist2 {
+                    split = Some((t, e));
+                    break 'find;
+                }
+            }
+        }
+        if let Some((t, e)) = split {
+            let tri = [tris[t * 3], tris[t * 3 + 1], tris[t * 3 + 2]];
+            let (i, j, k) = (tri[e], tri[(e + 1) % 3], tri[(e + 2) % 3]);
+            tris[t * 3] = i;
+            tris[t * 3 + 1] = r;
+            tris[t * 3 + 2] = k;
+            tris.extend_from_slice(&[r, j, k]);
+        }
+    }
+    tris
+}
+
+/// Ear clipping over the subset `sub` of `poly` (indices in order).
+fn ear_clip_core(poly: &[DVec2], sub: &[usize]) -> Vec<usize> {
+    let pts: Vec<DVec2> = sub.iter().map(|&i| poly[i]).collect();
+    ear_clip_plain(&pts).into_iter().map(|k| sub[k]).collect()
+}
+
+fn ear_clip_plain(poly: &[DVec2]) -> Vec<usize> {
     let n = poly.len();
     if n < 3 {
         return Vec::new();
@@ -165,14 +235,38 @@ pub fn ear_clip_with_holes(pts: &[DVec2], outer_n: usize, holes: &[Vec<usize>]) 
                 .enumerate()
                 .fold((0, f64::NEG_INFINITY), |acc, (k, &i)| if pts[i].x > acc.1 { (k, pts[i].x) } else { acc });
         let hp = pts[h[hk]];
-        let (mi, _) = merged.iter().enumerate().fold((0, f64::INFINITY), |acc, (k, &i)| {
-            let d = (pts[i] - hp).length_squared();
-            if d < acc.1 {
-                (k, d)
-            } else {
-                acc
-            }
+        // Nearest merged vertex whose bridge does not cross any edge.
+        let crosses = |a: DVec2, b: DVec2, loop_idx: &[usize]| -> bool {
+            let n = loop_idx.len();
+            (0..n).any(|e| {
+                let (c, d) = (pts[loop_idx[e]], pts[loop_idx[(e + 1) % n]]);
+                if (c - a).length() < 1e-12
+                    || (d - a).length() < 1e-12
+                    || (c - b).length() < 1e-12
+                    || (d - b).length() < 1e-12
+                {
+                    return false;
+                }
+                let r = b - a;
+                let q = d - c;
+                let den = r.perp_dot(q);
+                if den.abs() < 1e-18 {
+                    return false;
+                }
+                let t = (c - a).perp_dot(q) / den;
+                let u = (c - a).perp_dot(r) / den;
+                t > 1e-9 && t < 1.0 - 1e-9 && u > 1e-9 && u < 1.0 - 1e-9
+            })
+        };
+        let mut order: Vec<usize> = (0..merged.len()).collect();
+        order.sort_by(|&a, &b| {
+            (pts[merged[a]] - hp).length_squared().partial_cmp(&(pts[merged[b]] - hp).length_squared()).unwrap()
         });
+        let mi = order
+            .iter()
+            .copied()
+            .find(|&k| !crosses(hp, pts[merged[k]], &merged) && !crosses(hp, pts[merged[k]], &h))
+            .unwrap_or(order[0]);
         let mut new_loop = Vec::with_capacity(merged.len() + h.len() + 2);
         new_loop.extend_from_slice(&merged[..=mi]);
         for k in 0..h.len() {
@@ -221,5 +315,31 @@ mod tests {
         let tris = ear_clip_with_holes(&pts, 4, &[vec![4, 5, 6, 7]]);
         let area: f64 = tris.chunks(3).map(|t| (pts[t[1]] - pts[t[0]]).perp_dot(pts[t[2]] - pts[t[0]]) * 0.5).sum();
         assert!((area - 84.0).abs() < 1e-9, "{area}");
+    }
+
+    #[test]
+    fn ear_clip_rectangle_with_extra_edge_vertices() {
+        // A rectangle whose edges carry extra vertices, as left by booleans.
+        let pts = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(5.0, 0.0),
+            DVec2::new(10.0, 0.0),
+            DVec2::new(10.0, 4.0),
+            DVec2::new(10.0, 10.0),
+            DVec2::new(3.0, 10.0),
+            DVec2::new(0.0, 10.0),
+            DVec2::new(0.0, 6.0),
+        ];
+        let tris = ear_clip(&pts);
+        let mut area = 0.0;
+        for t in tris.chunks(3) {
+            let a = (pts[t[1]] - pts[t[0]]).perp_dot(pts[t[2]] - pts[t[0]]) * 0.5;
+            assert!(a > -1e-12, "no inverted triangles");
+            area += a;
+        }
+        assert!((area - 100.0).abs() < 1e-9, "{area}");
+        for v in 0..pts.len() {
+            assert!(tris.contains(&v), "vertex {v} is used");
+        }
     }
 }

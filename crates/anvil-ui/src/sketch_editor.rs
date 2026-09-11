@@ -41,6 +41,8 @@ pub enum Tool {
     PatternRect,
     PatternCirc,
     Dimension,
+    Chamfer,
+    TangentArc,
 }
 
 impl Tool {
@@ -74,6 +76,8 @@ impl Tool {
             Tool::PatternRect => "Rectangular Pattern",
             Tool::PatternCirc => "Circular Pattern",
             Tool::Dimension => "Dimension",
+            Tool::Chamfer => "Chamfer",
+            Tool::TangentArc => "Tangent Arc",
         }
     }
     pub fn hint(self) -> &'static str {
@@ -107,6 +111,8 @@ impl Tool {
                 "Select entities, click the end of the first step, then the end of the second. Counts in the ribbon"
             }
             Tool::PatternCirc => "Select entities, then click the pattern centre. Count and angle in the ribbon",
+            Tool::Chamfer => "Click two lines that share a corner. Distance from the chamfer field",
+            Tool::TangentArc => "Click the end of a line or arc, then the arc end point",
             Tool::Dimension => "Click a line, a circle, two points, or two lines; then type the value and press Enter. Click a label to edit it",
         }
     }
@@ -115,14 +121,15 @@ impl Tool {
         ("Line", &[Tool::Line, Tool::MidpointLine]),
         ("Rectangle", &[Tool::Rect2, Tool::RectCenter, Tool::Rect3]),
         ("Circle", &[Tool::CircleCenter, Tool::Circle2, Tool::Circle3]),
-        ("Arc", &[Tool::Arc3, Tool::ArcCenter]),
+        ("Arc", &[Tool::Arc3, Tool::ArcCenter, Tool::TangentArc]),
         ("Polygon", &[Tool::Polygon, Tool::PolygonInscribed, Tool::PolygonEdge]),
         ("Slot", &[Tool::Slot, Tool::SlotCenter]),
         ("Curve", &[Tool::Ellipse, Tool::Spline]),
         ("Point", &[Tool::Point]),
     ];
-    pub const MODIFY: [Tool; 8] = [
+    pub const MODIFY: [Tool; 9] = [
         Tool::Fillet,
+        Tool::Chamfer,
         Tool::Trim,
         Tool::Extend,
         Tool::Mirror,
@@ -215,6 +222,12 @@ pub struct SketchEditor {
     pub copy: bool,
     /// Dimension label being edited (value in `dim_value`).
     pub editing: Option<anvil_sketch::ConstraintId>,
+    /// Dimensions driven by expressions, saved with the sketch feature.
+    pub dim_exprs: Vec<(anvil_sketch::ConstraintId, String)>,
+    /// DXF file path for Import DXF.
+    pub dxf_path: String,
+    /// Chamfer distance for the sketch chamfer tool.
+    pub chamfer: f64,
     /// Drag-box selection in sketch coordinates: (start, current).
     pub box_select: Option<(DVec2, DVec2)>,
     /// Where the cursor snapped and what kind: "point", "mid", "center", "curve", "grid".
@@ -236,14 +249,21 @@ const PICK_TOL_PX: f64 = 8.0;
 impl SketchEditor {
     pub fn open(doc: &Document, feature: usize) -> Option<Self> {
         let f = doc.features.get(feature)?.feature.downcast_ref::<SketchFeature>()?;
+        let dim_exprs = f.dim_exprs.clone();
         let mut sketch = f.sketch.clone();
         if let Some(out) = &doc.features[feature].output {
             if let Some(p) = out.plane {
                 sketch.plane = p;
             }
         }
+        for (cid, expr) in &dim_exprs {
+            if let (Ok(v), Some(c)) = (doc.exprs.eval_str(expr), sketch.constraints.get_mut(*cid)) {
+                c.set_value(v);
+            }
+        }
         let report = sketch.solve();
         Some(SketchEditor {
+            dim_exprs,
             feature,
             sketch,
             tool: Tool::Line,
@@ -261,6 +281,8 @@ impl SketchEditor {
             pattern_angle: 360.0,
             copy: true,
             editing: None,
+            dxf_path: "logo.dxf".into(),
+            chamfer: 1.0,
             box_select: None,
             snap_kind: "",
             show_points: true,
@@ -282,9 +304,12 @@ impl SketchEditor {
             return;
         }
         let s = self.sketch.clone();
+        self.dim_exprs.retain(|(cid, _)| s.constraints.contains_key(*cid));
+        let exprs = self.dim_exprs.clone();
         doc.edit_feature(self.feature, |f| {
             if let Some(sf) = f.downcast_mut::<SketchFeature>() {
                 sf.sketch = s;
+                sf.dim_exprs = exprs;
             }
         });
         self.dirty = false;
@@ -376,8 +401,8 @@ impl SketchEditor {
     }
 
     fn snap(&self, p: DVec2, proj: &Projector) -> (DVec2, Option<EntityId>) {
-        let (q, id, _) = self.snap_full(p, proj);
-        if id.is_some() {
+        let (q, id, kind) = self.snap_full(p, proj);
+        if id.is_some() || !kind.is_empty() {
             return (q, id);
         }
         if self.snap_grid && self.grid > 0.0 {
@@ -441,15 +466,46 @@ impl SketchEditor {
         }
     }
 
+    /// Read the value field as a number, or as an expression over the
+    /// document parameters. Returns (value, Some(expression) if not a plain number).
+    fn value_or_expr(&mut self, doc: &Document) -> Option<(f64, Option<String>)> {
+        let text = self.dim_value.trim().to_string();
+        if let Ok(v) = text.parse::<f64>() {
+            return Some((v, None));
+        }
+        match doc.exprs.eval_str(&text) {
+            Ok(v) => Some((v, Some(text))),
+            Err(e) => {
+                self.message = format!("Not a number or expression: {e}");
+                None
+            }
+        }
+    }
+
+    /// Import LINE, CIRCLE, ARC, and LWPOLYLINE entities from a DXF file,
+    /// placed at the sketch origin in drawing units (assumed mm).
+    pub fn import_dxf(&mut self, doc: &mut Document) {
+        match std::fs::read_to_string(self.dxf_path.trim()) {
+            Err(e) => self.message = format!("DXF: {e}"),
+            Ok(text) => {
+                let n = crate::dxf::import(&text, &mut self.sketch);
+                self.solve();
+                self.commit(doc);
+                self.message = format!("Imported {n} entities from {}", self.dxf_path.trim());
+            }
+        }
+    }
+
     /// Apply the value field to the dimension being edited.
     pub fn commit_edit(&mut self, doc: &mut Document) {
         let Some(cid) = self.editing else { return };
-        let Ok(v) = self.dim_value.trim().parse::<f64>() else {
-            self.message = "Enter a number".into();
-            return;
-        };
+        let Some((v, expr)) = self.value_or_expr(doc) else { return };
         if let Some(c) = self.sketch.constraints.get_mut(cid) {
             c.set_value(v);
+        }
+        self.dim_exprs.retain(|(c, _)| *c != cid);
+        if let Some(e) = expr {
+            self.dim_exprs.push((cid, e));
         }
         self.editing = None;
         self.solve();
@@ -641,6 +697,29 @@ impl SketchEditor {
                 }
                 return;
             }
+            Tool::Chamfer => {
+                let hit = self.sketch.pick(p, self.tol(proj));
+                let Some(id) = hit.filter(|&i| matches!(self.sketch.entities[i], Entity::Line { .. })) else {
+                    self.message = "Click a line".into();
+                    return;
+                };
+                if !self.selection.contains(&id) {
+                    self.selection.push(id);
+                }
+                if self.selection.len() >= 2 {
+                    let (l1, l2) = (self.selection[0], self.selection[1]);
+                    match self.sketch.chamfer_lines(l1, l2, self.chamfer) {
+                        Ok(_) => {
+                            self.solve();
+                            self.commit(doc);
+                            self.message = "Chamfer added".into();
+                        }
+                        Err(e) => self.message = e,
+                    }
+                    self.selection.clear();
+                }
+                return;
+            }
             Tool::Mirror => {
                 let hit = self.sketch.pick(p, self.tol(proj));
                 match hit.and_then(|i| match self.sketch.entities[i] {
@@ -752,6 +831,20 @@ impl SketchEditor {
             Tool::Polygon if n == 2 => {
                 let d = c[1] - c[0];
                 self.sketch.add_polygon(c[0], d.length().max(1e-6), self.polygon_sides, d.y.atan2(d.x));
+                finished = true;
+            }
+            Tool::TangentArc if n == 1 && cp[0].is_none() => {
+                self.message = "Start the tangent arc on the end of a line or arc".into();
+                self.clicks.clear();
+                self.click_points.clear();
+            }
+            Tool::TangentArc if n == 2 => {
+                if let Some(start) = cp[0] {
+                    match self.sketch.add_tangent_arc(start, c[1]) {
+                        Ok(_) => {}
+                        Err(e) => self.message = e,
+                    }
+                }
                 finished = true;
             }
             Tool::Slot if n == 2 => {
@@ -975,10 +1068,7 @@ impl SketchEditor {
     }
 
     pub fn apply_dimension(&mut self, t: DimensionTool, doc: &mut Document) {
-        let Ok(v) = self.dim_value.trim().parse::<f64>() else {
-            self.message = "Enter a number in the value field".into();
-            return;
-        };
+        let Some((v, expr)) = self.value_or_expr(doc) else { return };
         let sel = self.selection.clone();
         let kinds: Vec<&str> = sel.iter().map(|&i| self.kind(i)).collect();
         let t = if t == DimensionTool::Smart {
@@ -999,7 +1089,10 @@ impl SketchEditor {
         };
         match c {
             Some(c) => {
-                self.sketch.constrain(c);
+                let cid = self.sketch.constrain(c);
+                if let Some(e) = expr {
+                    self.dim_exprs.push((cid, e));
+                }
                 self.solve();
                 self.commit(doc);
                 self.message = "Dimension added".into();
@@ -1126,7 +1219,10 @@ impl SketchEditor {
                     Constraint::Tangent(..) => "tan".to_string(),
                     Constraint::Coincident(..) => "o".to_string(),
                     Constraint::Fix(_) => String::new(),
-                    other => other.value().map(|v| format!("{v:.2}")).unwrap_or_else(|| other.label()),
+                    other => match self.dim_exprs.iter().find(|(c, _)| *c == cid) {
+                        Some((_, e)) => format!("{e} = {:.2}", other.value().unwrap_or(0.0)),
+                        None => other.value().map(|v| format!("{v:.2}")).unwrap_or_else(|| other.label()),
+                    },
                 };
                 if !glyph.is_empty() {
                     let col = if editing { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(150, 60, 20) };
@@ -1346,6 +1442,7 @@ mod tests {
             sketch: 0,
             distance: "5".into(),
             symmetric: false,
+            ..Default::default()
         }));
         assert!((doc.bodies()[0].volume() - 1000.0).abs() < 1e-6);
     }

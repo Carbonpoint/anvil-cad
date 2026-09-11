@@ -48,6 +48,24 @@ pub struct AnvilApp {
     hovered_face: Option<(u32, anvil_kernel::FaceId)>,
     /// Model-mode box select in screen pixels.
     box_select: Option<(Pos2, Pos2)>,
+    /// Edge under the cursor: (body index in scene, end points).
+    hovered_edge: Option<(u32, [DVec3; 2])>,
+    /// Picked edges for Fillet and Chamfer.
+    selected_edges: Vec<(u32, [DVec3; 2])>,
+    filter: SelectFilter,
+    section_on: bool,
+    section_axis: usize,
+    section_offset: f64,
+    section_flip: bool,
+}
+
+/// What a click in the model viewport may select.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SelectFilter {
+    All,
+    Body,
+    Face,
+    Edge,
 }
 
 const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ", Plane::YZ)];
@@ -80,6 +98,13 @@ impl AnvilApp {
             selected_face: None,
             hovered_face: None,
             box_select: None,
+            hovered_edge: None,
+            selected_edges: Vec::new(),
+            filter: SelectFilter::All,
+            section_on: false,
+            section_axis: 0,
+            section_offset: 0.0,
+            section_flip: false,
         };
         app.load_demo();
         app
@@ -321,14 +346,22 @@ impl AnvilApp {
                 if all.is_empty() {
                     self.status = "Select a feature to delete".into();
                 } else {
+                    let mut broken = 0;
                     for &i in all.iter().rev() {
-                        self.doc.remove_feature(i);
+                        broken += self.doc.remove_feature(i).len();
                     }
                     self.panels.selected = None;
                     self.multi.clear();
                     self.selected_face = None;
                     self.invalidate();
-                    self.status = format!("Deleted {} feature(s)", all.len());
+                    self.status = if broken > 0 {
+                        format!(
+                            "Deleted {} feature(s). {broken} later feature(s) lost an input; see the red marks.",
+                            all.len()
+                        )
+                    } else {
+                        format!("Deleted {} feature(s)", all.len())
+                    };
                 }
             }
             RibbonAction::ComputeAll => {
@@ -414,6 +447,48 @@ impl AnvilApp {
                 self.status = "Business card loaded. Edit the Text and QR features, then File > 3MF (parts).".into();
             }
             RibbonAction::PressPull => self.press_pull(),
+            RibbonAction::Interference => {
+                let pair = match (self.panels.selected, self.multi.first()) {
+                    (Some(a), Some(&b)) if a != b => Some((a, b)),
+                    _ => None,
+                };
+                match pair {
+                    None => self.status = "Select one feature, then Ctrl+click a second, then Interference".into(),
+                    Some((a, b)) => {
+                        let bodies = |i: usize| {
+                            self.doc.features[i].output.as_ref().map(|o| o.bodies.clone()).unwrap_or_default()
+                        };
+                        let kernel = anvil_kernel::NativeKernel;
+                        let mut vol = 0.0;
+                        for x in bodies(a) {
+                            for y in bodies(b) {
+                                if let Ok(i) =
+                                    anvil_kernel::Kernel::boolean(&kernel, &x, &y, anvil_kernel::BooleanOp::Intersect)
+                                {
+                                    vol += i.volume().max(0.0);
+                                }
+                            }
+                        }
+                        self.status = if vol > 1e-6 {
+                            format!("Interference between features {a} and {b}: {}", self.doc.fmt_volume(vol))
+                        } else {
+                            format!("No interference between features {a} and {b}")
+                        };
+                    }
+                }
+            }
+            RibbonAction::Workbook(i) => {
+                let (name, build) = anvil_io::workbook::EXERCISES[i as usize % 6];
+                self.doc = build();
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.camera.fit(&self.scene.bounds);
+                self.file_path = format!("workbook_{}.anvil", &name[..2]);
+                self.status = format!("Workbook {name} loaded. Steps in docs/WORKBOOK.md.");
+            }
             RibbonAction::ToggleUnits => {
                 self.doc.unit = if self.doc.unit == "mm" { "in".into() } else { "mm".into() };
                 self.status = format!("Display unit: {}", self.doc.unit);
@@ -464,7 +539,26 @@ impl AnvilApp {
                     }
                 }
             }
+            let mut placed = false;
+            if !self.selected_edges.is_empty() {
+                let body_fi = self.scene.bodies[self.selected_edges[0].0 as usize].0;
+                let edges: Vec<[DVec3; 2]> = self.selected_edges.iter().map(|(_, e)| *e).collect();
+                if f.set_edges(edges, body_fi) {
+                    placed = true;
+                    self.selected_edges.clear();
+                }
+            }
+            if let (false, Some((_, _, tri))) = (placed, self.selected_face) {
+                if let (Some(plane), Some((body_fi, _))) =
+                    (self.scene.face_plane(&self.doc, tri), self.scene.body_of_tri(tri))
+                {
+                    placed = f.place_on_face(plane, body_fi);
+                }
+            }
             let idx = self.doc.add_feature(f);
+            if placed {
+                self.selected_face = None;
+            }
             self.panels.selected = Some(idx);
             self.invalidate();
             self.status = match &self.doc.features[idx].error {
@@ -572,6 +666,7 @@ impl AnvilApp {
         let mut offset = false;
         let mut project = false;
         let mut look_at = false;
+        let mut import_dxf = false;
         let Mode::Sketch(ed) = &mut self.mode else { return };
         ui.horizontal(|ui| {
             if ui.button("Undo").clicked() {
@@ -641,6 +736,8 @@ impl AnvilApp {
                             new_tool = Some(t);
                         }
                     }
+                    ui.label("chamfer");
+                    ui.add(egui::DragValue::new(&mut ed.chamfer).range(0.01..=1000.0).speed(0.1));
                     if ui.button("Offset").on_hover_text("Offset the selection by the value field").clicked() {
                         offset = true;
                     }
@@ -707,6 +804,14 @@ impl AnvilApp {
             ui.separator();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut ed.dxf_path).desired_width(110.0).hint_text("file.dxf"));
+                    if ui
+                        .button("Import DXF")
+                        .on_hover_text("Add lines, arcs, circles, and polylines from a DXF file (mm)")
+                        .clicked()
+                    {
+                        import_dxf = true;
+                    }
                     if ui.button("Look At").clicked() {
                         look_at = true;
                     }
@@ -752,6 +857,10 @@ impl AnvilApp {
             ed.project(&segs, &mut self.doc);
             self.scene_dirty = true;
         }
+        if import_dxf {
+            ed.import_dxf(&mut self.doc);
+            self.scene_dirty = true;
+        }
         if look_at {
             let plane = ed.sketch.plane;
             self.camera.look_at_plane(&plane, self.camera.ortho_height.unwrap_or(100.0));
@@ -786,8 +895,10 @@ impl AnvilApp {
         let proj = Projector::new(&self.camera, w as f64, h as f64);
         let pointer = resp.hover_pos().map(|p| ((p.x - rect.left()) as f64, (p.y - rect.top()) as f64));
         let shift = ui.input(|i| i.modifiers.shift);
-        let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
-        let del = ui.input(|i| i.key_pressed(egui::Key::Delete));
+        // Shortcuts are ignored while a text field has keyboard focus.
+        let typing = ui.ctx().wants_keyboard_input();
+        let esc = !typing && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let del = !typing && ui.input(|i| i.key_pressed(egui::Key::Delete));
         let secondary_clicked = resp.secondary_clicked();
 
         // Camera navigation (all modes). Left drag orbits only in Model mode
@@ -818,6 +929,38 @@ impl AnvilApp {
             self.hovered_tri.and_then(|t| Some((self.scene.tri_body.get(t).copied()?, self.scene.face_of_tri(t)?)));
         self.hovered_datum = None;
         let ctrl = ui.input(|i| i.modifiers.command);
+        // Edge under the cursor: nearest visible feature edge within 6 px.
+        self.hovered_edge = None;
+        if matches!(self.mode, Mode::Model) && matches!(self.filter, SelectFilter::All | SelectFilter::Edge) {
+            if let Some((px, py)) = pointer {
+                let mut best: Option<(f64, u32, [DVec3; 2])> = None;
+                for (body, [p, q]) in &self.scene.edges {
+                    let (Some(a), Some(b)) = (proj.project(*p), proj.project(*q)) else { continue };
+                    let (ax, ay, bx, by) = (a.0, a.1, b.0, b.1);
+                    let (dx, dy) = (bx - ax, by - ay);
+                    let len2 = dx * dx + dy * dy;
+                    let t = if len2 < 1e-9 { 0.0 } else { (((px - ax) * dx + (py - ay) * dy) / len2).clamp(0.0, 1.0) };
+                    let (cx, cy) = (ax + dx * t, ay + dy * t);
+                    let d = ((px - cx).powi(2) + (py - cy).powi(2)).sqrt();
+                    if d > 6.0 {
+                        continue;
+                    }
+                    // Visible if nothing in the depth buffer is clearly in front.
+                    let (ix, iy) = (cx as usize, cy as usize);
+                    if ix < self.fb.width && iy < self.fb.height {
+                        let zb = self.fb.depth[iy * self.fb.width + ix];
+                        let ze = (a.2 + (b.2 - a.2) * t) as f32;
+                        if zb.is_finite() && ze > zb * 1.01 + 0.05 {
+                            continue;
+                        }
+                    }
+                    if best.is_none_or(|(bd, _, _)| d < bd) {
+                        best = Some((d, *body, [*p, *q]));
+                    }
+                }
+                self.hovered_edge = best.map(|(_, b, e)| (b, e));
+            }
+        }
 
         let selected_body = self
             .panels
@@ -830,7 +973,13 @@ impl AnvilApp {
                 if del && resp.hovered() && (self.panels.selected.is_some() || !self.multi.is_empty()) {
                     self.run_action(RibbonAction::DeleteFeature);
                 }
-                if ui.input(|i| i.key_pressed(egui::Key::Q)) && self.selected_face.is_some() {
+                if !typing
+                    && ui.input(|i| i.key_pressed(egui::Key::F) && !i.modifiers.any())
+                    && !self.selected_edges.is_empty()
+                {
+                    self.add_feature_by_id("fillet");
+                }
+                if !typing && ui.input(|i| i.key_pressed(egui::Key::Q)) && self.selected_face.is_some() {
                     self.press_pull();
                 }
                 if resp.drag_started_by(egui::PointerButton::Primary) && shift {
@@ -887,7 +1036,28 @@ impl AnvilApp {
                         }
                     }
                 }
-                if resp.clicked() {
+                if let (true, Some((b, e))) = (resp.clicked(), self.hovered_edge) {
+                    let same = |x: &(u32, [DVec3; 2])| {
+                        x.0 == b && (x.1[0] - e[0]).length() < 1e-9 && (x.1[1] - e[1]).length() < 1e-9
+                    };
+                    if let Some(k) = self.selected_edges.iter().position(same) {
+                        self.selected_edges.remove(k);
+                    } else {
+                        if !ctrl && !shift {
+                            self.selected_edges.clear();
+                        }
+                        self.selected_edges.push((b, e));
+                    }
+                    self.selected_face = None;
+                    self.panels.selected = Some(self.scene.bodies[b as usize].0);
+                    self.status = format!(
+                        "{} edge(s) selected. Ctrl+click adds edges. Fillet (F) or Chamfer uses them.",
+                        self.selected_edges.len()
+                    );
+                } else if resp.clicked() {
+                    if !ctrl {
+                        self.selected_edges.clear();
+                    }
                     match self.hovered_body {
                         Some(b) => {
                             let (fi, _) = self.scene.bodies[b as usize];
@@ -906,8 +1076,11 @@ impl AnvilApp {
                                 self.panels.selected = Some(fi);
                                 self.multi.clear();
                             }
-                            self.selected_face =
-                                self.hovered_tri.and_then(|t| Some((b, self.scene.face_of_tri(t)?, t)));
+                            self.selected_face = if self.filter == SelectFilter::Body {
+                                None
+                            } else {
+                                self.hovered_tri.and_then(|t| Some((b, self.scene.face_of_tri(t)?, t)))
+                            };
                         }
                         None => {
                             if !ctrl {
@@ -1021,7 +1194,7 @@ impl AnvilApp {
                     ed.delete_selection(&mut self.doc);
                     self.scene_dirty = true;
                 }
-                let key = |k: egui::Key| ui.input(|i| i.key_pressed(k) && !i.modifiers.any());
+                let key = |k: egui::Key| !typing && ui.input(|i| i.key_pressed(k) && !i.modifiers.any());
                 if key(egui::Key::L) {
                     ed.set_tool(Tool::Line);
                 }
@@ -1093,6 +1266,14 @@ impl AnvilApp {
         }
 
         // Render.
+        self.style.section = if self.section_on {
+            let n = [DVec3::X, DVec3::Y, DVec3::Z][self.section_axis.min(2)];
+            let n = if self.section_flip { -n } else { n };
+            let w = n.dot([DVec3::X, DVec3::Y, DVec3::Z][self.section_axis.min(2)] * self.section_offset);
+            Some((n, w))
+        } else {
+            None
+        };
         self.fb.clear(self.style.background);
         let in_model = matches!(self.mode, Mode::Model | Mode::PickPlane);
         let hovered = if in_model { self.hovered_body } else { None };
@@ -1211,7 +1392,65 @@ impl AnvilApp {
                 );
             }
         }
+        for (_, [p, q]) in &self.selected_edges {
+            if let (Some(a), Some(b)) = (to_screen(*p), to_screen(*q)) {
+                painter.line_segment([a, b], Stroke::new(3.5f32, Color32::from_rgb(240, 150, 30)));
+            }
+        }
+        if let Some((_, [p, q])) = self.hovered_edge {
+            if let (Some(a), Some(b)) = (to_screen(p), to_screen(q)) {
+                painter.line_segment([a, b], Stroke::new(3.0f32, Color32::from_rgb(60, 160, 240)));
+            }
+        }
+        // What is under the cursor.
+        if matches!(self.mode, Mode::Model | Mode::PickPlane) {
+            let label = if let Some((b, [p, q])) = self.hovered_edge {
+                let fi = self.scene.bodies[b as usize].0;
+                Some(format!(
+                    "Edge {} long, {}",
+                    self.doc.fmt_length((q - p).length()),
+                    self.doc.features[fi].feature.name()
+                ))
+            } else if let Some(b) = self.hovered_body {
+                let fi = self.scene.bodies[b as usize].0;
+                Some(format!("Face of {}", self.doc.features[fi].feature.name()))
+            } else {
+                None
+            };
+            if let Some(label) = label {
+                painter.text(
+                    rect.left_bottom() + egui::vec2(10.0, -10.0),
+                    egui::Align2::LEFT_BOTTOM,
+                    label,
+                    egui::FontId::proportional(13.0),
+                    Color32::from_rgb(50, 55, 65),
+                );
+            }
+        }
         self.draw_triad(&painter, rect);
+        // View buttons in the top right corner, like a simplified ViewCube.
+        if !matches!(self.mode, Mode::Sketch(_)) {
+            let views = [
+                ("Top", RibbonAction::ViewTop),
+                ("Front", RibbonAction::ViewFront),
+                ("Right", RibbonAction::ViewRight),
+                ("Iso", RibbonAction::ViewIso),
+                ("Fit", RibbonAction::FitView),
+            ];
+            let mut clicked = None;
+            for (k, (label, act)) in views.iter().enumerate() {
+                let r = egui::Rect::from_min_size(
+                    Pos2::new(rect.right() - 60.0, rect.top() + 8.0 + k as f32 * 26.0),
+                    egui::vec2(52.0, 22.0),
+                );
+                if ui.put(r, egui::Button::new(*label).small()).clicked() {
+                    clicked = Some(*act);
+                }
+            }
+            if let Some(a) = clicked {
+                self.run_action(a);
+            }
+        }
     }
 
     fn draw_triad(&self, painter: &egui::Painter, rect: egui::Rect) {
@@ -1235,13 +1474,14 @@ use anvil_feature::Feature;
 
 impl eframe::App for AnvilApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {
             (i.modifiers.command && i.key_pressed(egui::Key::Z), i.modifiers.command && i.key_pressed(egui::Key::Y))
         });
-        if undo {
+        if undo && !typing {
             self.run_action(RibbonAction::Undo);
         }
-        if redo {
+        if redo && !typing {
             self.run_action(RibbonAction::Redo);
         }
         if let Some(i) = self.panels.open_requested.take() {
@@ -1260,6 +1500,30 @@ impl eframe::App for AnvilApp {
                 ui.add(egui::TextEdit::singleline(&mut self.file_path).desired_width(200.0));
                 ui.separator();
                 ui.label(format!("{} tris", self.scene.mesh.triangle_count()));
+                ui.separator();
+                ui.label("Select:");
+                for (f, label) in [
+                    (SelectFilter::All, "All"),
+                    (SelectFilter::Body, "Body"),
+                    (SelectFilter::Face, "Face"),
+                    (SelectFilter::Edge, "Edge"),
+                ] {
+                    ui.selectable_value(&mut self.filter, f, label);
+                }
+                ui.separator();
+                ui.checkbox(&mut self.section_on, "Section");
+                if self.section_on {
+                    egui::ComboBox::from_id_salt("section_axis")
+                        .width(40.0)
+                        .selected_text(["X", "Y", "Z"][self.section_axis.min(2)])
+                        .show_ui(ui, |ui| {
+                            for (k, l) in ["X", "Y", "Z"].iter().enumerate() {
+                                ui.selectable_value(&mut self.section_axis, k, *l);
+                            }
+                        });
+                    ui.add(egui::DragValue::new(&mut self.section_offset).speed(0.5).suffix(" mm"));
+                    ui.checkbox(&mut self.section_flip, "flip");
+                }
             });
         });
 
@@ -1280,6 +1544,38 @@ impl eframe::App for AnvilApp {
                 self.invalidate();
             }
             if let Some(sel) = self.panels.selected {
+                let takes_edges =
+                    self.doc.features.get(sel).map(|f| f.feature.clone_box().set_edges(Vec::new(), 0)).unwrap_or(false);
+                if takes_edges {
+                    ui.separator();
+                    let n = self.selected_edges.len();
+                    let btn = ui
+                        .add_enabled(n > 0, egui::Button::new(format!("Use selected edges ({n})")))
+                        .on_hover_text("Click edges in the viewport (Ctrl+click for more), then press this");
+                    if btn.clicked() {
+                        let edges: Vec<[DVec3; 2]> = self.selected_edges.iter().map(|(_, e)| *e).collect();
+                        let picked = self.scene.bodies[self.selected_edges[0].0 as usize].0;
+                        // Edges picked on this feature's own result belong to its input body.
+                        let body = if picked == sel {
+                            self.doc.features[sel]
+                                .feature
+                                .params()
+                                .iter()
+                                .find_map(|p| match p.value {
+                                    anvil_feature::ParamValue::FeatureRef(i) => Some(i),
+                                    _ => None,
+                                })
+                                .unwrap_or(picked)
+                        } else {
+                            picked
+                        };
+                        self.doc.edit_feature(sel, |f| {
+                            f.set_edges(edges, body);
+                        });
+                        self.selected_edges.clear();
+                        self.scene_dirty = true;
+                    }
+                }
                 if self
                     .doc
                     .features

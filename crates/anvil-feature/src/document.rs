@@ -8,13 +8,21 @@ use thiserror::Error;
 
 pub type FeatureId = usize;
 
+fn bad_ref_text(me: &FeatureId, target: &FeatureId, what: &str) -> String {
+    if *target == usize::MAX {
+        format!("feature {me} uses a feature that was deleted; choose a new {what} in Properties")
+    } else {
+        format!("feature {me} uses feature {target}, which has no {what}")
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum RegenError {
     #[error("{0}")]
     Kernel(#[from] KernelError),
     #[error("expression error: {0}")]
     Expr(#[from] anvil_expr::ExprError),
-    #[error("feature {0} references feature {1}, which has no {2}")]
+    #[error("{}", bad_ref_text(.0, .1, .2))]
     BadReference(FeatureId, FeatureId, &'static str),
     #[error("{0}")]
     Other(String),
@@ -207,25 +215,98 @@ impl Document {
         self.features.len() - 1
     }
 
-    pub fn remove_feature(&mut self, idx: FeatureId) {
-        if idx < self.features.len() {
-            self.snapshot();
-            self.features.remove(idx);
-            fn shift<V>(m: &mut std::collections::HashMap<usize, V>, idx: usize) {
-                let mut nm = std::collections::HashMap::new();
-                for (k, v) in m.drain() {
-                    if k < idx {
-                        nm.insert(k, v);
-                    } else if k > idx {
-                        nm.insert(k - 1, v);
-                    }
-                }
-                *m = nm;
-            }
-            shift(&mut self.appearance, idx);
-            shift(&mut self.material, idx);
-            self.regenerate();
+    /// Remove a feature. References from later features are renumbered.
+    /// References to the removed feature are marked broken, and the
+    /// affected features report an error until the user fixes them.
+    /// Returns the indices (after removal) of features with broken references.
+    pub fn remove_feature(&mut self, idx: FeatureId) -> Vec<FeatureId> {
+        if idx >= self.features.len() {
+            return Vec::new();
         }
+        self.snapshot();
+        self.features.remove(idx);
+        let map = |old: usize| -> Option<usize> {
+            if old == usize::MAX || old < idx {
+                Some(old)
+            } else if old == idx {
+                None
+            } else {
+                Some(old - 1)
+            }
+        };
+        let broken = self.remap_all(&map);
+        self.remap_maps(&map);
+        self.regenerate();
+        broken
+    }
+
+    /// Move a feature from `from` to `to`, renumbering references. A move
+    /// that would put a feature before something it depends on is refused.
+    pub fn move_feature(&mut self, from: FeatureId, to: FeatureId) -> Result<(), String> {
+        let n = self.features.len();
+        if from >= n || to >= n || from == to {
+            return Ok(());
+        }
+        let map = |old: usize| -> Option<usize> {
+            if old == usize::MAX {
+                return Some(old);
+            }
+            Some(if old == from {
+                to
+            } else if from < to && old > from && old <= to {
+                old - 1
+            } else if to < from && old >= to && old < from {
+                old + 1
+            } else {
+                old
+            })
+        };
+        // Dependency check on a scratch copy.
+        let mut trial: Vec<FeatureNode> = self.features.clone();
+        let node = trial.remove(from);
+        trial.insert(to, node);
+        for (i, f) in trial.iter_mut().enumerate() {
+            let refs = std::cell::RefCell::new(Vec::new());
+            let _ = f.feature.remap_refs(&|old| {
+                let m = map(old);
+                if let Some(v) = m {
+                    refs.borrow_mut().push(v);
+                }
+                m
+            });
+            let refs = refs.into_inner();
+            if refs.iter().any(|&r| r != usize::MAX && r >= i) {
+                return Err(format!("{} would come before a feature it uses", f.feature.name()));
+            }
+        }
+        self.snapshot();
+        self.features = trial;
+        self.remap_maps(&map);
+        self.regenerate();
+        Ok(())
+    }
+
+    fn remap_all(&mut self, map: &dyn Fn(usize) -> Option<usize>) -> Vec<FeatureId> {
+        let mut broken = Vec::new();
+        for (i, f) in self.features.iter_mut().enumerate() {
+            if !f.feature.remap_refs(map).is_empty() {
+                broken.push(i);
+            }
+        }
+        broken
+    }
+
+    fn remap_maps(&mut self, map: &dyn Fn(usize) -> Option<usize>) {
+        fn remap<V>(m: &mut std::collections::HashMap<usize, V>, map: &dyn Fn(usize) -> Option<usize>) {
+            let old = std::mem::take(m);
+            for (k, v) in old {
+                if let Some(n) = map(k) {
+                    m.insert(n, v);
+                }
+            }
+        }
+        remap(&mut self.appearance, map);
+        remap(&mut self.material, map);
     }
 
     /// Edit a feature in place through a closure, with undo.
@@ -334,6 +415,9 @@ impl Document {
     pub fn insert_feature(&mut self, at: FeatureId, feature: Box<dyn Feature>) -> FeatureId {
         self.snapshot();
         let at = at.min(self.features.len());
+        let map = |old: usize| -> Option<usize> { Some(if old != usize::MAX && old >= at { old + 1 } else { old }) };
+        self.remap_all(&map);
+        self.remap_maps(&map);
         self.features.insert(at, FeatureNode { feature, suppressed: false, output: None, error: None });
         self.regenerate();
         at

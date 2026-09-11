@@ -15,6 +15,18 @@ fn text_param(name: &'static str, label: &'static str, v: &str) -> ParamSpec {
     ParamSpec { name, label, kind: crate::param::ParamKind::Text, value: ParamValue::Expr(v.to_string()) }
 }
 
+pub(crate) fn resolve_plane_face(
+    plane: &str,
+    feature: Option<usize>,
+    face: Option<Plane>,
+    ctx: &RegenContext,
+) -> Result<Plane, RegenError> {
+    if plane == "Face" {
+        return face.ok_or_else(|| RegenError::Other("no face stored; select a face and add the feature again".into()));
+    }
+    resolve_plane(plane, feature, ctx)
+}
+
 fn resolve_plane(plane: &str, feature: Option<usize>, ctx: &RegenContext) -> Result<Plane, RegenError> {
     match (plane, feature) {
         ("Feature", Some(i)) => ctx.plane_of(i),
@@ -41,9 +53,17 @@ fn point_in_poly(p: DVec2, poly: &[DVec2]) -> bool {
 /// even depth are outers; loops at odd depth are holes of their parent.
 pub fn nest_loops(loops: &[Vec<DVec2>]) -> Vec<(Vec<DVec2>, Vec<Vec<DVec2>>)> {
     let n = loops.len();
-    let depth: Vec<usize> = (0..n)
-        .map(|i| (0..n).filter(|&j| j != i && loops[j].len() >= 3 && point_in_poly(loops[i][0], &loops[j])).count())
-        .collect();
+    // A loop counts as inside another when most of its sample vertices are,
+    // so a hole that touches the outer loop at one vertex still nests.
+    let inside = |i: usize, j: usize| -> bool {
+        let li = &loops[i];
+        let step = (li.len() / 5).max(1);
+        let samples: Vec<DVec2> = li.iter().step_by(step).take(5).copied().collect();
+        let hits = samples.iter().filter(|&&p| point_in_poly(p, &loops[j])).count();
+        hits * 2 > samples.len()
+    };
+    let depth: Vec<usize> =
+        (0..n).map(|i| (0..n).filter(|&j| j != i && loops[j].len() >= 3 && inside(i, j)).count()).collect();
     let mut out: Vec<(usize, Vec<DVec2>, Vec<Vec<DVec2>>)> = Vec::new();
     for i in 0..n {
         if depth[i].is_multiple_of(2) {
@@ -55,7 +75,8 @@ pub fn nest_loops(loops: &[Vec<DVec2>]) -> Vec<(Vec<DVec2>, Vec<Vec<DVec2>>)> {
             // Parent: the outer at depth[i]-1 that contains it, smallest area.
             let mut best: Option<(usize, f64)> = None;
             for (k, (oi, o, _)) in out.iter().enumerate() {
-                if depth[*oi] + 1 == depth[i] && point_in_poly(loops[i][0], o) {
+                if depth[*oi] + 1 == depth[i] && inside(i, *oi) {
+                    let _ = o;
                     let area = polygon_area(o).abs();
                     if best.is_none_or(|(_, a)| area < a) {
                         best = Some((k, area));
@@ -170,12 +191,20 @@ pub struct TextFeature {
     pub font_path: String,
     pub plane: String,
     pub plane_feature: Option<usize>,
+    /// Plane of a picked face when `plane` is "Face".
+    #[serde(default)]
+    pub face_plane: Option<Plane>,
     pub x: String,
     pub y: String,
     pub z: String,
     pub size: String,
     pub height: String,
     pub center: bool,
+    /// "new" (separate bodies), "join", or "cut" into `target`.
+    #[serde(default = "crate::features::extrude::default_op")]
+    pub operation: String,
+    #[serde(default)]
+    pub target: usize,
 }
 
 impl Default for TextFeature {
@@ -185,12 +214,15 @@ impl Default for TextFeature {
             font_path: String::new(),
             plane: "XY".into(),
             plane_feature: None,
+            face_plane: None,
             x: "0".into(),
             y: "0".into(),
             z: "0".into(),
             size: "8".into(),
             height: "1".into(),
             center: true,
+            operation: "new".into(),
+            target: 0,
         }
     }
 }
@@ -207,14 +239,18 @@ impl Feature for TextFeature {
         let mut v = vec![
             text_param("text", "Text", &self.text),
             text_param("font_path", "Font file (blank = DejaVu Sans)", &self.font_path),
-            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature"], &self.plane),
+            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature", "Face"], &self.plane),
             ParamSpec::length("x", "X on plane", &self.x),
             ParamSpec::length("y", "Y on plane", &self.y),
             ParamSpec::length("z", "Offset along normal", &self.z),
             ParamSpec::length("size", "Font size (em)", &self.size),
             ParamSpec::length("height", "Emboss height", &self.height),
             ParamSpec::boolean("center", "Centre horizontally", self.center),
+            ParamSpec::choice("operation", "Operation", vec!["new", "join", "cut"], &self.operation),
         ];
+        if self.operation != "new" {
+            v.push(ParamSpec::feature_ref("target", "Target body", crate::BODY_TYPES.to_vec(), self.target));
+        }
         if self.plane == "Feature" {
             v.push(ParamSpec::feature_ref(
                 "plane_feature",
@@ -227,6 +263,8 @@ impl Feature for TextFeature {
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
+            ("operation", ParamValue::Choice(o)) => self.operation = o,
+            ("target", ParamValue::FeatureRef(i)) => self.target = i,
             ("text", ParamValue::Expr(s)) => self.text = s,
             ("font_path", ParamValue::Expr(s)) => self.font_path = s,
             ("plane", ParamValue::Choice(p)) => self.plane = p,
@@ -242,7 +280,7 @@ impl Feature for TextFeature {
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let mut plane = resolve_plane(&self.plane, self.plane_feature, ctx)?;
+        let mut plane = resolve_plane_face(&self.plane, self.plane_feature, self.face_plane, ctx)?;
         plane.origin += plane.normal() * ctx.eval(&self.z)?;
         let off = DVec2::new(ctx.eval(&self.x)?, ctx.eval(&self.y)?);
         let size = ctx.eval(&self.size)?;
@@ -266,7 +304,18 @@ impl Feature for TextFeature {
         if bodies.is_empty() {
             return Err(RegenError::Other("no printable glyphs".into()));
         }
-        Ok(FeatureOutput { bodies, ..Default::default() })
+        crate::features::extrude::apply_operation(ctx, &self.operation, self.target, bodies)
+    }
+    fn place_on_face(&mut self, plane: Plane, body: usize) -> bool {
+        self.plane = "Face".into();
+        self.face_plane = Some(plane);
+        self.z = "0".into();
+        self.x = "0".into();
+        self.y = "0".into();
+        self.operation = "join".into();
+        self.target = body;
+        let _ = body;
+        true
     }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())
@@ -280,6 +329,9 @@ pub struct QrFeature {
     pub data: String,
     pub plane: String,
     pub plane_feature: Option<usize>,
+    /// Plane of a picked face when `plane` is "Face".
+    #[serde(default)]
+    pub face_plane: Option<Plane>,
     pub x: String,
     pub y: String,
     pub z: String,
@@ -294,6 +346,7 @@ impl Default for QrFeature {
             data: "https://example.com".into(),
             plane: "XY".into(),
             plane_feature: None,
+            face_plane: None,
             x: "0".into(),
             y: "0".into(),
             z: "0".into(),
@@ -315,7 +368,7 @@ impl Feature for QrFeature {
     fn params(&self) -> Vec<ParamSpec> {
         let mut v = vec![
             text_param("data", "Content (URL or text)", &self.data),
-            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature"], &self.plane),
+            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature", "Face"], &self.plane),
             ParamSpec::length("x", "Corner X on plane", &self.x),
             ParamSpec::length("y", "Corner Y on plane", &self.y),
             ParamSpec::length("z", "Offset along normal", &self.z),
@@ -349,7 +402,7 @@ impl Feature for QrFeature {
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let mut plane = resolve_plane(&self.plane, self.plane_feature, ctx)?;
+        let mut plane = resolve_plane_face(&self.plane, self.plane_feature, self.face_plane, ctx)?;
         plane.origin += plane.normal() * ctx.eval(&self.z)?;
         let off = DVec2::new(ctx.eval(&self.x)?, ctx.eval(&self.y)?);
         let size = ctx.eval(&self.size)?;
@@ -383,6 +436,15 @@ impl Feature for QrFeature {
         }
         Ok(FeatureOutput { bodies, ..Default::default() })
     }
+    fn place_on_face(&mut self, plane: Plane, body: usize) -> bool {
+        self.plane = "Face".into();
+        self.face_plane = Some(plane);
+        self.z = "0".into();
+        self.x = "-(size) / 2".replace("(size)", &self.size);
+        self.y = self.x.clone();
+        let _ = body;
+        true
+    }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())
     }
@@ -395,6 +457,9 @@ pub struct TextureFeature {
     pub shape: String,
     pub plane: String,
     pub plane_feature: Option<usize>,
+    /// Plane of a picked face when `plane` is "Face".
+    #[serde(default)]
+    pub face_plane: Option<Plane>,
     pub x: String,
     pub y: String,
     pub z: String,
@@ -411,6 +476,7 @@ impl Default for TextureFeature {
             shape: "hex".into(),
             plane: "XY".into(),
             plane_feature: None,
+            face_plane: None,
             x: "0".into(),
             y: "0".into(),
             z: "0".into(),
@@ -434,7 +500,7 @@ impl Feature for TextureFeature {
     fn params(&self) -> Vec<ParamSpec> {
         let mut v = vec![
             ParamSpec::choice("shape", "Shape", vec!["hex", "circle", "diamond", "square", "triangle"], &self.shape),
-            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature"], &self.plane),
+            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature", "Face"], &self.plane),
             ParamSpec::length("x", "Area corner X", &self.x),
             ParamSpec::length("y", "Area corner Y", &self.y),
             ParamSpec::length("z", "Offset along normal", &self.z),
@@ -472,7 +538,7 @@ impl Feature for TextureFeature {
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let mut plane = resolve_plane(&self.plane, self.plane_feature, ctx)?;
+        let mut plane = resolve_plane_face(&self.plane, self.plane_feature, self.face_plane, ctx)?;
         plane.origin += plane.normal() * ctx.eval(&self.z)?;
         let (x0, y0) = (ctx.eval(&self.x)?, ctx.eval(&self.y)?);
         let (w, d) = (ctx.eval(&self.width)?, ctx.eval(&self.depth)?);
@@ -521,6 +587,15 @@ impl Feature for TextureFeature {
             return Err(RegenError::Other(format!("{} cells is too many; use a larger cell", bodies.len())));
         }
         Ok(FeatureOutput { bodies, ..Default::default() })
+    }
+    fn place_on_face(&mut self, plane: Plane, body: usize) -> bool {
+        self.plane = "Face".into();
+        self.face_plane = Some(plane);
+        self.z = "0".into();
+        self.x = format!("-({}) / 2", self.width);
+        self.y = format!("-({}) / 2", self.depth);
+        let _ = body;
+        true
     }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())

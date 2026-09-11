@@ -25,6 +25,10 @@ pub enum PlaneSource {
 pub struct SketchFeature {
     pub source: PlaneSource,
     pub sketch: Sketch,
+    /// Dimension values driven by expressions, for example `card_w / 2`.
+    /// Evaluated against the document expressions before every solve.
+    #[serde(default)]
+    pub dim_exprs: Vec<(anvil_sketch::ConstraintId, String)>,
 }
 
 impl SketchFeature {
@@ -33,15 +37,19 @@ impl SketchFeature {
     }
 
     pub fn on_datum(name: &str) -> Self {
-        SketchFeature { source: PlaneSource::Datum(name.into()), sketch: Sketch::new(datum_plane(name)) }
+        SketchFeature {
+            source: PlaneSource::Datum(name.into()),
+            sketch: Sketch::new(datum_plane(name)),
+            dim_exprs: Vec::new(),
+        }
     }
 
     pub fn on_plane(plane: Plane) -> Self {
-        SketchFeature { source: PlaneSource::Custom, sketch: Sketch::new(plane) }
+        SketchFeature { source: PlaneSource::Custom, sketch: Sketch::new(plane), dim_exprs: Vec::new() }
     }
 
     pub fn on_feature(idx: usize) -> Self {
-        SketchFeature { source: PlaneSource::Feature(idx), sketch: Sketch::new(Plane::XY) }
+        SketchFeature { source: PlaneSource::Feature(idx), sketch: Sketch::new(Plane::XY), dim_exprs: Vec::new() }
     }
 
     /// A sketch holding one rectangle, used by the demo and tests.
@@ -110,11 +118,30 @@ impl Feature for SketchFeature {
             PlaneSource::Feature(i) => ctx.plane_of(*i)?,
             PlaneSource::Custom => self.sketch.plane,
         };
+        for (cid, expr) in &self.dim_exprs {
+            let v = ctx.eval(expr)?;
+            if let Some(c) = s.constraints.get_mut(*cid) {
+                c.set_value(v);
+            }
+        }
         let rep = s.solve();
         if rep.status == anvil_sketch::SolveStatus::NotConverged {
             return Err(RegenError::Other(format!("sketch did not converge (residual {:.3e})", rep.residual)));
         }
         Ok(FeatureOutput { profiles: s.profiles(), paths: s.open_chains(), plane: Some(s.plane), ..Default::default() })
+    }
+    fn remap_refs(&mut self, map: &dyn Fn(usize) -> Option<usize>) -> Vec<&'static str> {
+        if let PlaneSource::Feature(i) = self.source {
+            match map(i) {
+                Some(n) => self.source = PlaneSource::Feature(n),
+                None => {
+                    // Keep the last solved plane so the sketch survives.
+                    self.source = PlaneSource::Custom;
+                    return vec!["plane_feature"];
+                }
+            }
+        }
+        Vec::new()
     }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())

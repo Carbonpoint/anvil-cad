@@ -247,12 +247,32 @@ fn to_polygons(s: &Solid) -> Vec<Polygon> {
 fn from_polygons(polys: Vec<Polygon>) -> Solid {
     use std::collections::HashMap;
     let mut s = Solid::new();
-    let mut map: HashMap<(i64, i64, i64), VertexId> = HashMap::new();
-    let key = |p: DVec3| ((p.x * 1e6).round() as i64, (p.y * 1e6).round() as i64, (p.z * 1e6).round() as i64);
+    // Weld within a distance tolerance: look in the 27 neighbouring grid
+    // cells, so two points that straddle a cell boundary still merge.
+    const WELD: f64 = 1e-6;
+    let mut map: HashMap<(i64, i64, i64), Vec<(DVec3, VertexId)>> = HashMap::new();
+    let cell = |p: DVec3| ((p.x / WELD).floor() as i64, (p.y / WELD).floor() as i64, (p.z / WELD).floor() as i64);
+    let mut weld = |s: &mut Solid, v: DVec3| -> VertexId {
+        let (cx, cy, cz) = cell(v);
+        for dx in -1..=1 {
+            for dy in -1..=1 {
+                for dz in -1..=1 {
+                    if let Some(list) = map.get(&(cx + dx, cy + dy, cz + dz)) {
+                        if let Some((_, id)) = list.iter().find(|(q, _)| (*q - v).length() <= WELD) {
+                            return *id;
+                        }
+                    }
+                }
+            }
+        }
+        let id = s.add_vertex(v);
+        map.entry((cx, cy, cz)).or_default().push((v, id));
+        id
+    };
     for p in polys {
         let mut ids: Vec<VertexId> = Vec::with_capacity(p.verts.len());
         for v in p.verts {
-            let id = *map.entry(key(v)).or_insert_with(|| s.add_vertex(v));
+            let id = weld(&mut s, v);
             if ids.last() != Some(&id) {
                 ids.push(id);
             }
@@ -331,7 +351,19 @@ pub fn boolean(a: &Solid, b: &Solid, op: BooleanOp) -> Solid {
             na.all_polygons()
         }
     };
-    from_polygons(polys)
+    let mut s = from_polygons(polys);
+    s.fix_t_junctions();
+    // Merging fragments keeps later booleans fast. Keep the merge only if
+    // it does not make the mesh less watertight.
+    let before = s.open_edge_report();
+    let mut merged = s.clone();
+    merged.merge_coplanar_faces();
+    let after = merged.open_edge_report();
+    if after.0 + after.1 <= before.0 + before.1 {
+        merged
+    } else {
+        s
+    }
 }
 
 #[cfg(test)]
@@ -369,8 +401,26 @@ mod tests {
         let r = boolean(&plate, &drill, BooleanOp::Subtract);
         let hole_vol = cylinder(&MPlane::XY, DVec2::ZERO, 3.0, 6.0).unwrap().volume();
         assert!((r.volume() - (5400.0 - hole_vol)).abs() < 1e-6, "{}", r.volume());
-        // CSG output has T-junctions, so the Euler characteristic is not
-        // meaningful here; volume and closedness (positive, stable) are.
-        assert!(r.faces.len() > plate.faces.len());
+        let (open, over) = r.open_edge_report();
+        assert_eq!((open, over), (0, 0), "result must be watertight; euler {}", r.euler_characteristic());
+    }
+
+    #[test]
+    fn repeated_holes_keep_face_count_small() {
+        let mut plate = box_solid(DVec3::ZERO, DVec3::new(100.0, 60.0, 8.0)).unwrap();
+        for (x, y) in [(10.0, 10.0), (90.0, 10.0), (90.0, 50.0), (10.0, 50.0), (50.0, 30.0)] {
+            let drill =
+                cylinder(&MPlane { origin: DVec3::new(0.0, 0.0, 9.0), ..MPlane::XY }, DVec2::new(x, y), 4.0, -10.0)
+                    .unwrap();
+            plate = boolean(&plate, &drill, BooleanOp::Subtract);
+        }
+        // Known limit: after several booleans in a row a few edges can be
+        // shared by more than two faces (non-manifold slivers). Volume stays
+        // exact; see docs/WORKBOOK.md. Open (single-use) edges must stay zero.
+        assert_eq!(plate.open_edge_report().0, 0, "{:?}", plate.open_edge_report());
+        // Without merging this grew past ten thousand fragments.
+        assert!(plate.faces.len() < 2000, "{} faces", plate.faces.len());
+        let exact = 48000.0 - 5.0 * cylinder(&MPlane::XY, DVec2::ZERO, 4.0, 8.0).unwrap().volume();
+        assert!((plate.volume() - exact).abs() / exact < 1e-9, "{} vs {exact}", plate.volume());
     }
 }

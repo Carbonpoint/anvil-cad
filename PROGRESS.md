@@ -2,6 +2,9 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-11: Workbook of six CSWA-style parts (docs/WORKBOOK.md, anvil_io::workbook, File > Samples WB 1-6). Multi-agent bug hunt on them; 12 fixes (see WORKBOOK.md findings). Features: CSG booleans with T-junction repair, Extrude/Revolve/Text join-cut-intersect, Hole, Combine, edge Fillet and Chamfer with edge picking, face placement for Hole/Text/QR/Texture, reference remapping and navigator reorder, selection filter, section view, interference, view buttons, hover labels, expression-driven sketch dimensions, sketch chamfer and tangent arc, DXF import. Builds run on stalker via scripts/remote-test.sh.
+- Next: Shell and Draft (offset surfaces), timeline rollback, loft twist on rotated planes, SVG import, construction axes and points, persistent face and edge references.
+
 - 2026-09-10: Business card batch, part A: kernel faces with holes, Text (bundled DejaVu Sans), QR Code, Texture, Press Pull, nested sketch loops become holes, rounded rectangle builder, STL per feature, 3MF multi-object export, Business Card sample (anvil_io::business_card). 50 tests. Local builds capped at 4 jobs (.cargo/config.toml) after WSL crashes.
 - 2026-09-10: Part B done: face hover and click selection, Press Pull from a face (Q), Sketch on selected face, right-click menus in model and sketch modes, Ctrl multi-select, Shift+drag box select (model) and drag box select (sketch, window or crossing), Dimension tool by clicking with label editing, midpoint/centre/quadrant/curve snaps with markers, 3MF and STL-per-part export buttons, Business card sample button. Remote test script scripts/remote-test.sh (stalker). 50 tests.
 - 2026-09-10: docs/FUSION_PARITY.md added: every Fusion Solid and Sketch command with status.

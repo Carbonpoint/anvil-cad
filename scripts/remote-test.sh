@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
-# Run the Anvil test suite on a lab host (default: stalker) instead of WSL.
-# Usage: scripts/remote-test.sh [host] [cargo subcommand...]
-# Requires ~/lanssh/lanssh and a Rust toolchain on the host (rustup, minimal).
+# Build or test Anvil on a lab host instead of WSL.
+# Usage: scripts/remote-test.sh [cargo subcommand...]
+#   REMOTE_HOST  host name from ~/lanssh (default stalker)
+#   REMOTE_DIR   directory on the host (default anvil-cad); use a unique
+#                name per parallel worker, for example anvil-wt-fillet
+#   REMOTE_JOBS  cargo -j value (default 16)
+# The local tree (minus target and .git) is copied over each time, so the
+# remote always builds exactly what is on disk here.
 set -euo pipefail
-HOST="${1:-stalker}"; shift || true
+HOST="${REMOTE_HOST:-stalker}"
+DIR="${REMOTE_DIR:-anvil-cad}"
+JOBS="${REMOTE_JOBS:-16}"
 CMD="${*:-test --workspace}"
 cd "$(dirname "$0")/.."
 tar czf - --exclude=target --exclude=.git . | ~/lanssh/lanssh "$HOST" \
-  "rm -rf ~/anvil-cad && mkdir -p ~/anvil-cad && cd ~/anvil-cad && tar xzf - && source ~/.cargo/env && cargo $CMD -j 32 2>&1 | tail -40"
+  "mkdir -p ~/$DIR && cd ~/$DIR && find . -mindepth 1 -maxdepth 1 ! -name target -exec rm -rf {} + && tar xzf - && source ~/.cargo/env && export CARGO_BUILD_JOBS=$JOBS && cargo $CMD 2>&1 | tail -80"

@@ -54,6 +54,21 @@ impl Feature for LoftFeature {
         }
         Ok(FeatureOutput { bodies: vec![ctx.kernel.loft(&sections)?], ..Default::default() })
     }
+    fn remap_refs(&mut self, map: &dyn Fn(usize) -> Option<usize>) -> Vec<&'static str> {
+        let mut broken = Vec::new();
+        let mapped: Vec<String> = parse_index_list(&self.sections)
+            .into_iter()
+            .filter_map(|i| match map(i) {
+                Some(n) => Some(n.to_string()),
+                None => {
+                    broken.push("sections");
+                    None
+                }
+            })
+            .collect();
+        self.sections = mapped.join(", ");
+        broken
+    }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())
     }

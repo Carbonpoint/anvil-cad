@@ -144,9 +144,27 @@ pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> Ker
 
     let mut s = Solid::new();
     let mut ring_ids: Vec<Vec<VertexId>> = Vec::with_capacity(rings);
+    // Profile points on the axis become one pole vertex shared by all rings.
+    let on_axis: Vec<bool> = world
+        .iter()
+        .map(|&p| {
+            let d = p - axis.origin;
+            (d - axis.dir * d.dot(axis.dir)).length() < 1e-9
+        })
+        .collect();
+    let mut poles: Vec<Option<VertexId>> = vec![None; world.len()];
     for r in 0..rings {
         let t = angle * r as f64 / steps as f64;
-        ring_ids.push(world.iter().map(|&p| s.add_vertex(axis.rotate(p, t))).collect());
+        let mut ids = Vec::with_capacity(world.len());
+        for (k, &p) in world.iter().enumerate() {
+            if on_axis[k] {
+                let id = *poles[k].get_or_insert_with(|| s.add_vertex(p));
+                ids.push(id);
+            } else {
+                ids.push(s.add_vertex(axis.rotate(p, t)));
+            }
+        }
+        ring_ids.push(ids);
     }
     let surf_id = 0u32;
     for r in 0..steps {
@@ -352,7 +370,27 @@ pub fn sweep(plane: &Plane, profile: &[DVec2], path: &[anvil_math::DVec3], close
         }
         x = (x - t * x.dot(t)).normalize();
         let y = t.cross(x);
-        rings.push(prof.iter().map(|p| path[i] + x * p.x + y * p.y).collect::<Vec<_>>());
+        // Miter at bends: stretch the section along the bend direction by
+        // 1/cos(half angle) so the pipe keeps its size through the corner.
+        let interior = closed || (i > 0 && i + 1 < m);
+        let (bend, stretch) = if interior {
+            let din = seg_dir((i + m - 1) % m);
+            let dout = seg_dir(i % m);
+            let cos_half = din.dot(t).clamp(0.2, 1.0);
+            let b = dout - din;
+            let b = (b - t * b.dot(t)).normalize_or_zero();
+            (b, 1.0 / cos_half - 1.0)
+        } else {
+            (DVec3::ZERO, 0.0)
+        };
+        rings.push(
+            prof.iter()
+                .map(|p| {
+                    let v = x * p.x + y * p.y;
+                    path[i] + v + bend * (v.dot(bend) * stretch)
+                })
+                .collect::<Vec<_>>(),
+        );
         prev_t = t;
     }
     skin_rings(&rings, closed, Surface::Cylindrical { id: 1 })
