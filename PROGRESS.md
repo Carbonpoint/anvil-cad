@@ -2,6 +2,9 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-12: Six Skyline SAR cofounder cards exported to examples/skyline (STL and 3MF).
+- 2026-09-12: Skyline SAR card sample (anvil_io::logo, File > Samples). Text gains letter spacing. Fixed a triangulation fault that inverted one triangle in glyphs with counters (visible as a notch in R), with orientation and area regression tests.
+
 - 2026-09-11: Fonts: searchable Font dropdown (bundled plus installed fonts), bundled Archivo Black and Liberation Sans Bold, Thicken strokes, stroke-width printability note. Business card defaults to Archivo Black.
 
 - 2026-09-11: Workbook of six CSWA-style parts (docs/WORKBOOK.md, anvil_io::workbook, File > Samples WB 1-6). Multi-agent bug hunt on them; 12 fixes (see WORKBOOK.md findings). Features: CSG booleans with T-junction repair, Extrude/Revolve/Text join-cut-intersect, Hole, Combine, edge Fillet and Chamfer with edge picking, face placement for Hole/Text/QR/Texture, reference remapping and navigator reorder, selection filter, section view, interference, view buttons, hover labels, expression-driven sketch dimensions, sketch chamfer and tangent arc, DXF import. Builds run on stalker via scripts/remote-test.sh.

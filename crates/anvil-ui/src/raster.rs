@@ -111,7 +111,14 @@ impl Framebuffer {
             let pa = mesh.positions[idx[0] as usize];
             let pb = mesh.positions[idx[1] as usize];
             let pc = mesh.positions[idx[2] as usize];
-            let n = (pb - pa).cross(pc - pa).normalize_or_zero();
+            // Sliver triangles have a tiny cross product, so their normal is
+            // unreliable. Fall back to the stored face normal.
+            let cross = (pb - pa).cross(pc - pa);
+            let n = if cross.length() > 1e-12 {
+                cross.normalize()
+            } else {
+                mesh.normals.get(idx[0] as usize).copied().unwrap_or(DVec3::Z)
+            };
             let dist = style.section.map(|(sn, w)| (sn.dot(pa) - w, sn.dot(pb) - w, sn.dot(pc) - w));
             if let Some((da, db, dc)) = dist {
                 if da > 0.0 && db > 0.0 && dc > 0.0 {

@@ -418,8 +418,10 @@ mod tests {
         // shared by more than two faces (non-manifold slivers). Volume stays
         // exact; see docs/WORKBOOK.md. Open (single-use) edges must stay zero.
         assert_eq!(plate.open_edge_report().0, 0, "{:?}", plate.open_edge_report());
-        // Without merging this grew past ten thousand fragments.
-        assert!(plate.faces.len() < 2000, "{} faces", plate.faces.len());
+        // Without merging this grew past ten thousand fragments. Merging is
+        // skipped for groups whose boundary loops are ambiguous, so the count
+        // still creeps up with each boolean; see docs/WORKBOOK.md.
+        assert!(plate.faces.len() < 2500, "{} faces", plate.faces.len());
         let exact = 48000.0 - 5.0 * cylinder(&MPlane::XY, DVec2::ZERO, 4.0, 8.0).unwrap().volume();
         assert!((plate.volume() - exact).abs() / exact < 1e-9, "{} vs {exact}", plate.volume());
     }

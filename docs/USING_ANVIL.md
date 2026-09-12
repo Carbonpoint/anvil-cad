@@ -137,6 +137,30 @@ A document that uses an installed font stores the file path. On another
 computer without that font the Text feature shows an error; pick a bundled
 font to share files.
 
+## Skyline SAR card sample
+
+File > Samples > **Skyline SAR card** builds a name-and-logo card:
+
+* Card: 85.6 by 53.98 mm, 0.8 mm thick, 4 mm corners.
+* Logo: one sketch holding a scan ring, two mountain peaks, a quadcopter,
+  and two propellers. One sketch means one part in the 3MF file, so the
+  whole mark prints in a second colour.
+* Name: two lines in Archivo Black with letter spacing, so the short
+  acronym matches the width of the word above it.
+* Relief: 0.6 mm. Every stroke is at least 1.2 mm wide, which a 0.4 mm
+  nozzle prints without gaps.
+
+Six cards, one per cofounder name, are exported in `examples/skyline/`
+as STL (single colour) and 3MF (card, logo, and text as separate parts).
+Rebuild them with:
+
+```
+cargo run --release -p anvil-ui --example export_cards -- out
+```
+
+To change the wording, select a Text feature and edit it in Properties.
+To change the logo, double-click the logo sketch and edit the geometry.
+
 ## Business card for multi-colour printing
 
 1. File > Samples > **Business card**. The document has four features: the

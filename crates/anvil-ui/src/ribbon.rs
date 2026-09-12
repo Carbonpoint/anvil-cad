@@ -35,6 +35,7 @@ pub enum RibbonAction {
     Export3mf,
     ExportStlParts,
     SampleCard,
+    SampleSkyline,
     PressPull,
     Workbook(u8),
     Interference,
@@ -230,6 +231,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 tooltip: "Overlap volume between two selected features (Ctrl+click the second)",
                 order: 2,
                 kind: A(Interference),
+            },
+        ),
+        (
+            "File",
+            "Samples",
+            RibbonButton {
+                label: "Skyline SAR card",
+                tooltip: "Name and logo card: rounded card, scan ring with skyline and drone, heavy text",
+                order: 2,
+                kind: A(SampleSkyline),
             },
         ),
         (

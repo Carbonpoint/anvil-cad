@@ -188,6 +188,17 @@ pub fn text_outlines(
     size: f64,
     align_center: bool,
 ) -> Result<Vec<Vec<Vec<DVec2>>>, String> {
+    text_outlines_tracked(font_data, text, size, align_center, 0.0)
+}
+
+/// Glyph outlines with extra space between letters (`tracking`, in mm).
+pub fn text_outlines_tracked(
+    font_data: &[u8],
+    text: &str,
+    size: f64,
+    align_center: bool,
+    tracking: f64,
+) -> Result<Vec<Vec<Vec<DVec2>>>, String> {
     let face = ttf_parser::Face::parse(font_data, 0).map_err(|e| format!("font: {e}"))?;
     let scale = size / face.units_per_em() as f64;
     let mut glyphs = Vec::new();
@@ -203,10 +214,11 @@ pub fn text_outlines(
         if !ob.contours.is_empty() {
             glyphs.push(ob.contours);
         }
-        pen += face.glyph_hor_advance(gid).unwrap_or(0) as f64 * scale;
+        pen += face.glyph_hor_advance(gid).unwrap_or(0) as f64 * scale + tracking;
     }
     if align_center {
-        let shift = DVec2::new(-pen / 2.0, 0.0);
+        // The last letter adds no trailing gap.
+        let shift = DVec2::new(-(pen - tracking).max(0.0) / 2.0, 0.0);
         for g in &mut glyphs {
             for c in g {
                 for p in c {
@@ -237,6 +249,9 @@ pub struct TextFeature {
     /// printable. Zero keeps the font as drawn.
     #[serde(default = "zero")]
     pub thicken: String,
+    /// Extra space between letters, in mm.
+    #[serde(default = "zero")]
+    pub tracking: String,
     /// "new" (separate bodies), "join", or "cut" into `target`.
     #[serde(default = "crate::features::extrude::default_op")]
     pub operation: String,
@@ -259,6 +274,7 @@ impl Default for TextFeature {
             height: "1".into(),
             center: true,
             thicken: "0".into(),
+            tracking: "0".into(),
             operation: "new".into(),
             target: 0,
         }
@@ -290,6 +306,7 @@ impl Feature for TextFeature {
             ParamSpec::length("height", "Emboss height", &self.height),
             ParamSpec::boolean("center", "Centre horizontally", self.center),
             ParamSpec::length("thicken", "Thicken strokes (mm)", &self.thicken),
+            ParamSpec::length("tracking", "Letter spacing (mm)", &self.tracking),
             ParamSpec::choice("operation", "Operation", vec!["new", "join", "cut"], &self.operation),
         ];
         if self.operation != "new" {
@@ -320,6 +337,7 @@ impl Feature for TextFeature {
             ("height", ParamValue::Expr(s)) => self.height = s,
             ("center", ParamValue::Bool(b)) => self.center = b,
             ("thicken", ParamValue::Expr(s)) => self.thicken = s,
+            ("tracking", ParamValue::Expr(s)) => self.tracking = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -331,7 +349,9 @@ impl Feature for TextFeature {
         let size = ctx.eval(&self.size)?;
         let h = ctx.eval(&self.height)?;
         let font = crate::fonts::load(&self.font_path).map_err(RegenError::Other)?;
-        let glyphs = text_outlines(&font, &self.text, size, self.center).map_err(RegenError::Other)?;
+        let tracking = ctx.eval(&self.tracking)?;
+        let glyphs =
+            text_outlines_tracked(&font, &self.text, size, self.center, tracking).map_err(RegenError::Other)?;
         let mut bodies = Vec::new();
         let grow = ctx.eval(&self.thicken)?;
         // Average stroke width per glyph region: 2 * area / perimeter. For a

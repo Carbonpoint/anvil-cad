@@ -314,3 +314,66 @@ fn stroke_note_prefers_heavy_fonts() {
     assert!(bold > regular);
     assert!(thick > regular + 0.2, "{thick} vs {regular}");
 }
+
+#[test]
+fn glyphs_with_counters_tessellate_to_the_right_area() {
+    use anvil_feature::features::emboss::{nest_loops, text_outlines};
+    use anvil_feature::fonts;
+    // R, A, O, and B have counters; a notch in the triangulation shows up
+    // as a volume below the outline area.
+    for font in ["", "builtin:Archivo Black"] {
+        let bytes = fonts::load(font).unwrap();
+        for ch in ["R", "A", "O", "B", "S", "8"] {
+            let glyphs = text_outlines(&bytes, ch, 10.0, false).unwrap();
+            let loops: Vec<Vec<anvil_math::DVec2>> = glyphs.into_iter().flatten().collect();
+            let area = |p: &Vec<anvil_math::DVec2>| {
+                let n = p.len();
+                0.5 * (0..n).map(|i| p[i].perp_dot(p[(i + 1) % n])).sum::<f64>()
+            };
+            let mut outline = 0.0;
+            let mut solid = 0.0;
+            for (outer, holes) in nest_loops(&loops) {
+                outline += area(&outer).abs() - holes.iter().map(|h| area(h).abs()).sum::<f64>();
+                let body = anvil_kernel::ops::extrude_with_holes(&anvil_math::Plane::XY, &outer, &holes, 1.0).unwrap();
+                solid += body.volume();
+            }
+            assert!((solid - outline).abs() / outline < 1e-6, "{font} {ch}: {solid} vs {outline}");
+        }
+    }
+}
+
+#[test]
+fn glyph_cap_triangles_all_face_the_same_way() {
+    use anvil_feature::features::emboss::{nest_loops, text_outlines};
+    use anvil_feature::fonts;
+    let bytes = fonts::load("builtin:Archivo Black").unwrap();
+    for ch in ["R", "A", "S", "B", "8", "O"] {
+        let glyphs = text_outlines(&bytes, ch, 20.0, false).unwrap();
+        let loops: Vec<Vec<anvil_math::DVec2>> = glyphs.into_iter().flatten().collect();
+        for (outer, holes) in nest_loops(&loops) {
+            let body = anvil_kernel::ops::extrude_with_holes(&anvil_math::Plane::XY, &outer, &holes, 2.0).unwrap();
+            let mesh = anvil_kernel::mesh::tessellate(&body);
+            let mut bad = 0;
+            let mut area_up = 0.0;
+            let mut area_down = 0.0;
+            for (k, t) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+                let (a, b, c) =
+                    (mesh.positions[t[0] as usize], mesh.positions[t[1] as usize], mesh.positions[t[2] as usize]);
+                let n = (b - a).cross(c - a);
+                let stored = mesh.normals[t[0] as usize];
+                if n.length() > 1e-12 && n.normalize().dot(stored) < 0.0 {
+                    bad += 1;
+                    eprintln!("{ch}: triangle {k} is flipped, area {:.4}", n.length() / 2.0);
+                }
+                if stored.z > 0.5 {
+                    area_up += n.length() / 2.0;
+                }
+                if stored.z < -0.5 {
+                    area_down += n.length() / 2.0;
+                }
+            }
+            assert_eq!(bad, 0, "{ch}: {bad} flipped triangles");
+            assert!((area_up - area_down).abs() / area_up < 1e-9, "{ch}: caps differ {area_up} vs {area_down}");
+        }
+    }
+}

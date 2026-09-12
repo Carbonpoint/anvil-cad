@@ -45,6 +45,26 @@ pub fn render_offscreen(doc: &anvil_feature::Document, width: usize, height: usi
     fb.to_image()
 }
 
+/// Render a document from a given direction, framed to fit.
+/// `yaw` and `pitch` are in radians; pitch looks down from above.
+pub fn render_view(
+    doc: &anvil_feature::Document,
+    width: usize,
+    height: usize,
+    yaw: f64,
+    pitch: f64,
+) -> egui::ColorImage {
+    let scene = scene::Scene::build(doc);
+    let mut cam = camera::Camera { yaw, pitch, ..camera::Camera::default() };
+    cam.fit(&scene.bounds);
+    let proj = camera::Projector::new(&cam, width as f64, height as f64);
+    let mut fb = raster::Framebuffer::new(width, height);
+    let style = raster::Style::default();
+    fb.clear(style.background);
+    fb.draw_scene(&scene, &proj, &style, None, None);
+    fb.to_image()
+}
+
 /// Render a document looking straight down the Z axis, framed to fit.
 pub fn render_top(doc: &anvil_feature::Document, width: usize, height: usize) -> egui::ColorImage {
     let scene = scene::Scene::build(doc);
