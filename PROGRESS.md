@@ -2,7 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
-- 2026-09-14: Logo business card sample published (anvil_io::logo_card, File > Samples > Logo card, export_logo_cards example taking names on the command line).
+- 2026-09-14: Business card with LinkedIn QR code published as a template: export_qr_card example (name and URL on the command line), docs section with preview.
+
 
 - 2026-09-14: Text gains letter spacing; export and render helpers (render_view, render_top). Design lesson: build printable multi-part parts from extruded profiles with holes rather than chains of booleans, which keeps meshes watertight.
 

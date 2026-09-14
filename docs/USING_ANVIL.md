@@ -137,48 +137,57 @@ A document that uses an installed font stores the file path. On another
 computer without that font the Text feature shows an error; pick a bundled
 font to share files.
 
-## Logo business card sample
+## Business card with a LinkedIn QR code
 
-File > Samples > **Logo card** builds a name-and-logo card for Skyline SAR,
-a drone search and rescue startup:
+A 3D-printable business card with your name and a QR code that opens your
+LinkedIn profile or website. The name and the code are separate parts, so
+a multi-colour printer can print them in a second colour.
 
-* Card: 85.6 by 53.98 mm, 0.8 mm thick, 4 mm corners.
-* Logo: one sketch holding a scan ring, two mountain peaks, a quadcopter,
-  and two propellers. One sketch means one part in the 3MF file, so the
-  whole mark prints in a second colour.
-* Company name: two lines in Archivo Black. Letter spacing on the short
-  line makes it match the width of the line above.
-* Person's name: an optional third line under the company name.
-* Relief: 0.6 mm. Every stroke is at least 1.2 mm wide, which a 0.4 mm
-  nozzle prints without gaps.
+![Business card template](business_card.png)
 
-![Logo card](logo_card.png)
+| Item | Value |
+| --- | --- |
+| Size | 85.6 by 53.98 mm, the size of a credit card |
+| Corners | two opposite corners 0.5 in (12.7 mm), the other two 0.25 in (6.35 mm) |
+| Thickness | 0.8 mm card, 0.6 mm raised name and code |
+| Name font | Archivo Black, strokes about 1 mm wide at 7 mm size |
+| QR code | 24 mm square; modules about 0.8 mm for a typical LinkedIn link |
 
-Make one card per person, as STL and two-colour 3MF:
+### Make your card
 
 ```
-cargo run --release -p anvil-ui --example export_logo_cards -- cards Avery Jordan Sam
+cargo run --release -p anvil-ui --example export_qr_card -- out "Your Name" "https://www.linkedin.com/in/your-handle"
 ```
 
-To change the company name or logo, edit `crates/anvil-io/src/logo_card.rs`:
-the mark is a list of closed loops in `logo_loops()`, and the text lines
-are Text features at the end of `skyline_sar_card_for()`.
+This writes three files to `out`:
 
-## Business card for multi-colour printing
+* `business_card.stl`: the whole card as one file, for a single colour.
+* `business_card.3mf`: the card, the name, and the code as separate parts.
+* `business_card.anvil`: the editable Anvil document.
 
-1. File > Samples > **Business card**. The document has four features: the
-   rounded outline sketch (0.5 in and 0.25 in corner radii), the 0.8 mm
-   card body, the embossed Text, and the QR Code.
-2. Select the Text feature and set your name in Properties. It uses
-   Archivo Black so the letters print with a 0.4 mm nozzle. Select the QR
-   Code feature and set its content to your LinkedIn or website URL. Both
-   read expressions `card_t` (card thickness) and `emboss` (relief height)
-   from the Expressions panel.
-3. Optional: add **Texture** for a hex or dot relief on part of the face.
-4. File > **3MF (parts)**. The file has one object per feature. In Bambu
-   Studio, open it and answer Yes to "load as a single object with multiple
-   parts". Assign a filament to the text and QR parts. **STL per part**
-   writes one STL per feature instead.
+It also writes `business_card.ppm`, a top-view preview.
+
+### Or edit it in the app
+
+1. File > Samples > **Business card**.
+2. Select the Text feature and type your name in Properties. Pick a font
+   from the Font dropdown; Properties shows whether the strokes are thick
+   enough for a 0.4 mm nozzle.
+3. Select the QR Code feature and paste your profile link.
+4. The Expressions panel holds `card_t` (card thickness) and `emboss`
+   (relief height) if you want to change them.
+5. File > **3MF (parts)** or **STL**.
+
+### Printing tips
+
+* In Bambu Studio, open the 3MF and keep it as one object with multiple
+  parts. Select the name and the QR code parts and give them the second
+  filament.
+* Scan the code on the printed card before you hand any out. A shorter
+  link gives larger QR modules, which print and scan more reliably.
+  LinkedIn's custom profile URL is shorter than the default one.
+* Keep the light card and dark code (or the reverse). Low contrast between
+  the two filaments makes the code hard to scan.
 
 ## Bodies
 
