@@ -446,6 +446,17 @@ impl AnvilApp {
                 self.file_path = "business_card.anvil".into();
                 self.status = "Business card loaded. Edit the Text and QR features, then File > 3MF (parts).".into();
             }
+            RibbonAction::SampleSkyline => {
+                self.doc = anvil_io::logo_card::skyline_sar_card_for("Your Name");
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.camera.fit(&self.scene.bounds);
+                self.file_path = "logo_card.anvil".into();
+                self.status = "Logo card loaded. Edit the name in Properties, then File > 3MF (parts).".into();
+            }
             RibbonAction::PressPull => self.press_pull(),
             RibbonAction::Interference => {
                 let pair = match (self.panels.selected, self.multi.first()) {

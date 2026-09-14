@@ -137,6 +137,33 @@ A document that uses an installed font stores the file path. On another
 computer without that font the Text feature shows an error; pick a bundled
 font to share files.
 
+## Logo business card sample
+
+File > Samples > **Logo card** builds a name-and-logo card for Skyline SAR,
+a drone search and rescue startup:
+
+* Card: 85.6 by 53.98 mm, 0.8 mm thick, 4 mm corners.
+* Logo: one sketch holding a scan ring, two mountain peaks, a quadcopter,
+  and two propellers. One sketch means one part in the 3MF file, so the
+  whole mark prints in a second colour.
+* Company name: two lines in Archivo Black. Letter spacing on the short
+  line makes it match the width of the line above.
+* Person's name: an optional third line under the company name.
+* Relief: 0.6 mm. Every stroke is at least 1.2 mm wide, which a 0.4 mm
+  nozzle prints without gaps.
+
+![Logo card](logo_card.png)
+
+Make one card per person, as STL and two-colour 3MF:
+
+```
+cargo run --release -p anvil-ui --example export_logo_cards -- cards Avery Jordan Sam
+```
+
+To change the company name or logo, edit `crates/anvil-io/src/logo_card.rs`:
+the mark is a list of closed loops in `logo_loops()`, and the text lines
+are Text features at the end of `skyline_sar_card_for()`.
+
 ## Business card for multi-colour printing
 
 1. File > Samples > **Business card**. The document has four features: the
