@@ -59,6 +59,20 @@ link is missing. Run once:
 sudo rm -rf /tmp/.X11-unix && sudo ln -s /mnt/wslg/.X11-unix /tmp/.X11-unix
 ```
 
+## Run in Docker
+
+The container holds the headless command-line tool, `anvil-cli`. It needs
+no Rust install and no display. The desktop app is not in the image.
+
+```
+docker build -t anvil-cad .
+docker run --rm -v "$PWD/out:/out" anvil-cad card --name "Your Name" --url "https://www.linkedin.com/in/your-handle"
+```
+
+On Windows PowerShell, use `-v "${PWD}\out:/out"`. The card files appear in
+the `out` folder. `docker run --rm anvil-cad fonts` lists the fonts, and
+`docker build --target test .` runs the tests that need no display.
+
 ## Layout
 
 ```
@@ -71,6 +85,7 @@ crates/anvil-cam       tools, toolpaths, operations, post-processors
 crates/anvil-io        .anvil documents and mesh export
 crates/anvil-ui        ribbon, panels, viewport (eframe/egui)
 crates/anvil-app       the `anvil` binary
+crates/anvil-cli       headless command-line tools (used by the Docker image)
 docs/research          four literature reviews that shaped the design
 docs/adr               architecture decision records
 ```

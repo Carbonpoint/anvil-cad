@@ -150,6 +150,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "anvil-cli"
+version = "0.1.0"
+dependencies = [
+ "anvil-feature",
+ "anvil-io",
+]
+
+[[package]]
 name = "anvil-expr"
 version = "0.1.0"
 dependencies = [

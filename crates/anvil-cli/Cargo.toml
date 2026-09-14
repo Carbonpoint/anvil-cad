@@ -1,0 +1,15 @@
+[package]
+name = "anvil-cli"
+description = "Command-line tools for Anvil CAD that need no GUI, for scripts and containers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "anvil-cli"
+path = "src/main.rs"
+
+[dependencies]
+anvil-feature.workspace = true
+anvil-io.workspace = true

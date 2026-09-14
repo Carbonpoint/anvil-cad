@@ -24,3 +24,21 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --release --bin anvil
+
+  docker:
+    name: docker image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the runtime image
+        run: docker build -t anvil-cad .
+      - name: Make a card inside the container
+        run: |
+          mkdir -p out
+          chmod 777 out
+          docker run --rm -v "$PWD/out:/out" anvil-cad card --name "Your Name" --url "https://www.linkedin.com/in/your-handle"
+          ls -l out
+          test -s out/business_card.stl
+          test -s out/business_card.3mf
+      - name: Run the headless tests inside the build image
+        run: docker build --target test .

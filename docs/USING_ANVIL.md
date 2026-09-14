@@ -167,6 +167,15 @@ This writes three files to `out`:
 
 It also writes `business_card.ppm`, a top-view preview.
 
+Without installing Rust, use the Docker image (see the README):
+
+```
+docker build -t anvil-cad .
+docker run --rm -v "$PWD/out:/out" anvil-cad card --name "Your Name" --url "https://www.linkedin.com/in/your-handle" --font "Archivo Black"
+```
+
+The container writes the STL, 3MF, and Anvil files but no preview image.
+
 ### Or edit it in the app
 
 1. File > Samples > **Business card**.

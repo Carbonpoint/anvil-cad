@@ -10,6 +10,7 @@ members = [
     "crates/anvil-io",
     "crates/anvil-ui",
     "crates/anvil-app",
+    "crates/anvil-cli",
 ]
 
 [workspace.package]

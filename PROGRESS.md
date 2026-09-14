@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-14: Docker: anvil-cli headless tool (card, fonts), multi-stage Dockerfile (build, test, runtime), CI job that builds the image and makes a card in it. Docker is not installed on the WSL box or lab hosts, so the image is verified in GitHub Actions.
+
 - 2026-09-14: Business card with LinkedIn QR code published as a template: export_qr_card example (name and URL on the command line), docs section with preview.
 
 

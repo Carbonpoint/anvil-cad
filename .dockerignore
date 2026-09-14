@@ -1,0 +1,9 @@
+# Keep the build context small: compiled output, git data, and exports.
+target
+**/target
+.git
+examples/**/*.stl
+examples/**/*.3mf
+*.anvil
+*.ppm
+docs/**/*.png
