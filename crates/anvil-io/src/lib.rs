@@ -6,6 +6,7 @@
 //! * STEP, IGES, 3MF, DXF: planned. See `docs/research/04-...md`.
 
 pub mod logo;
+pub mod towel_stand;
 pub mod workbook;
 
 use anvil_feature::Document;

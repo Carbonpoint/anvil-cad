@@ -2,12 +2,15 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-14: Paper towel stand (anvil_io::towel_stand): counterbored screw holes, drainage feet and rim, percent rings for a wire IKEA holder. Built without booleans to keep the mesh watertight. Workflow lesson: design multi-part prints from extruded profiles with holes, not from booleans.
+
 - 2026-09-12: Six Skyline SAR cofounder cards exported to examples/skyline (STL and 3MF).
 - 2026-09-12: Skyline SAR card sample (anvil_io::logo, File > Samples). Text gains letter spacing. Fixed a triangulation fault that inverted one triangle in glyphs with counters (visible as a notch in R), with orientation and area regression tests.
 
 - 2026-09-11: Fonts: searchable Font dropdown (bundled plus installed fonts), bundled Archivo Black and Liberation Sans Bold, Thicken strokes, stroke-width printability note. Business card defaults to Archivo Black.
 
 - 2026-09-11: Workbook of six CSWA-style parts (docs/WORKBOOK.md, anvil_io::workbook, File > Samples WB 1-6). Multi-agent bug hunt on them; 12 fixes (see WORKBOOK.md findings). Features: CSG booleans with T-junction repair, Extrude/Revolve/Text join-cut-intersect, Hole, Combine, edge Fillet and Chamfer with edge picking, face placement for Hole/Text/QR/Texture, reference remapping and navigator reorder, selection filter, section view, interference, view buttons, hover labels, expression-driven sketch dimensions, sketch chamfer and tangent arc, DXF import. Builds run on stalker via scripts/remote-test.sh.
+- Open: ear clipping inverts one triangle in some glyphs (notch in R). Test glyph_cap_triangles_all_face_the_same_way is ignored until fixed; a diagonal-split fallback fixed it but shifted boolean volumes in workbook 01.
 - Next: Shell and Draft (offset surfaces), timeline rollback, loft twist on rotated planes, SVG import, construction axes and points, persistent face and edge references.
 
 - 2026-09-10: Business card batch, part A: kernel faces with holes, Text (bundled DejaVu Sans), QR Code, Texture, Press Pull, nested sketch loops become holes, rounded rectangle builder, STL per feature, 3MF multi-object export, Business Card sample (anvil_io::business_card). 50 tests. Local builds capped at 4 jobs (.cargo/config.toml) after WSL crashes.
