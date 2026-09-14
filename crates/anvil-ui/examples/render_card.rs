@@ -2,7 +2,7 @@
 //! `cargo run -p anvil-ui --example render_card -- out.ppm`
 fn main() {
     let out = std::env::args().nth(1).unwrap_or_else(|| "card.ppm".into());
-    let doc = anvil_io::business_card("Alex Goldman", "https://www.linkedin.com/");
+    let doc = anvil_io::business_card("Your Name", "https://example.com");
     let (w, h) = (1400usize, 900usize);
     let img = anvil_ui::render_top(&doc, w, h);
     let mut bytes = format!("P6 {w} {h} 255\n").into_bytes();

@@ -5,8 +5,6 @@
 //! * `.stl`: binary STL export of tessellated bodies.
 //! * STEP, IGES, 3MF, DXF: planned. See `docs/research/04-...md`.
 
-pub mod logo;
-pub mod towel_stand;
 pub mod workbook;
 
 use anvil_feature::Document;
@@ -346,7 +344,7 @@ mod card_tests {
 
     #[test]
     fn business_card_exports_parts() {
-        let doc = business_card("Alex Goldman", "https://www.linkedin.com/");
+        let doc = business_card("Your Name", "https://example.com");
         for (i, f) in doc.features.iter().enumerate() {
             assert!(f.error.is_none(), "feature {i}: {:?}", f.error);
         }

@@ -2,10 +2,9 @@
 
 Newest first. One line per work session or milestone.
 
-- 2026-09-14: Paper towel stand (anvil_io::towel_stand): counterbored screw holes, drainage feet and rim, percent rings for a wire IKEA holder. Built without booleans to keep the mesh watertight. Workflow lesson: design multi-part prints from extruded profiles with holes, not from booleans.
+- 2026-09-14: Text gains letter spacing; export and render helpers (render_view, render_top). Design lesson: build printable multi-part parts from extruded profiles with holes rather than chains of booleans, which keeps meshes watertight.
 
-- 2026-09-12: Six Skyline SAR cofounder cards exported to examples/skyline (STL and 3MF).
-- 2026-09-12: Skyline SAR card sample (anvil_io::logo, File > Samples). Text gains letter spacing. Fixed a triangulation fault that inverted one triangle in glyphs with counters (visible as a notch in R), with orientation and area regression tests.
+
 
 - 2026-09-11: Fonts: searchable Font dropdown (bundled plus installed fonts), bundled Archivo Black and Liberation Sans Bold, Thicken strokes, stroke-width printability note. Business card defaults to Archivo Black.
 

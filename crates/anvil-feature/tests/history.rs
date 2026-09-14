@@ -295,7 +295,7 @@ fn stroke_note_prefers_heavy_fonts() {
     let width = |font: &str, thicken: &str| -> f64 {
         let mut doc = Document::new("t");
         doc.add_feature(Box::new(TextFeature {
-            text: "Alex Goldman".into(),
+            text: "Sample Name".into(),
             size: "7".into(),
             height: "0.6".into(),
             font_path: font.into(),

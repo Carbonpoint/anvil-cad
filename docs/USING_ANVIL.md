@@ -137,56 +137,6 @@ A document that uses an installed font stores the file path. On another
 computer without that font the Text feature shows an error; pick a bundled
 font to share files.
 
-## Paper towel stand
-
-`anvil_io::towel_stand::towel_stand()` builds a stand for a bent-wire
-IKEA paper towel holder. Export it with:
-
-```
-cargo run --release -p anvil-ui --example export_towel_stand -- out
-```
-
-| Item | Value |
-| --- | --- |
-| Disc | 140 mm diameter, 6 mm slab |
-| Screw holes | 3.4 mm, 70 mm apart on one diameter (M3; fits 2 to 3 mm screws) |
-| Screw recess | 7 mm counterbore, 3 mm deep from the underside; heads sit 4.5 mm above the counter |
-| Underside | 1.5 mm hexagonal feet and a segmented rim with 24 drain gaps |
-| Percent rings | 75, 50, and 25 percent of paper left, for a 140 mm roll on a 41 mm core, raised 0.6 mm with number labels |
-
-Print it as modelled, feet down. The slab bridges the gaps between feet,
-which are at most 5 mm. The rings and labels are separate parts in the 3MF,
-so they can take a second colour. The ring radii follow paper area, so the
-50 percent ring is not halfway between core and edge.
-
-The stand is built only from extrusions of profiles with holes, with no
-booleans. That keeps the mesh watertight, which avoids the known boolean
-limit described in docs/WORKBOOK.md.
-
-## Skyline SAR card sample
-
-File > Samples > **Skyline SAR card** builds a name-and-logo card:
-
-* Card: 85.6 by 53.98 mm, 0.8 mm thick, 4 mm corners.
-* Logo: one sketch holding a scan ring, two mountain peaks, a quadcopter,
-  and two propellers. One sketch means one part in the 3MF file, so the
-  whole mark prints in a second colour.
-* Name: two lines in Archivo Black with letter spacing, so the short
-  acronym matches the width of the word above it.
-* Relief: 0.6 mm. Every stroke is at least 1.2 mm wide, which a 0.4 mm
-  nozzle prints without gaps.
-
-Six cards, one per cofounder name, are exported in `examples/skyline/`
-as STL (single colour) and 3MF (card, logo, and text as separate parts).
-Rebuild them with:
-
-```
-cargo run --release -p anvil-ui --example export_cards -- out
-```
-
-To change the wording, select a Text feature and edit it in Properties.
-To change the logo, double-click the logo sketch and edit the geometry.
-
 ## Business card for multi-colour printing
 
 1. File > Samples > **Business card**. The document has four features: the
