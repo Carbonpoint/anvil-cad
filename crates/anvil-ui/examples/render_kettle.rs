@@ -32,6 +32,13 @@ fn main() {
     eprintln!("rendered in {:.2} s", t1.elapsed().as_secs_f64());
     write("kettle_side.ppm", anvil_ui::render_view(&doc, 1400, 1000, std::f64::consts::FRAC_PI_2, 0.05));
     write("kettle_spout.ppm", anvil_ui::render_view(&doc, 1400, 1000, 0.0, 0.25));
+    let mold = anvil_io::kettle::kettle_mold();
+    for (i, f) in mold.features.iter().enumerate() {
+        if let Some(n) = f.output.as_ref().and_then(|o| o.note.as_ref()) {
+            eprintln!("mold feature {i} {}: {n}", f.feature.name());
+        }
+    }
+    write("kettle_mold.ppm", anvil_ui::render_view(&mold, 1600, 1000, 0.9, 0.5));
     let gated = anvil_io::kettle::kettle_gated();
     write("kettle_gated.ppm", anvil_ui::render_view(&gated, 1400, 1000, 2.6, 0.35));
     anvil_io::write_3mf(&doc, &out.join("kettle.3mf")).unwrap();

@@ -477,6 +477,17 @@ impl AnvilApp {
                     }
                 }
             }
+            RibbonAction::KettleMold => {
+                self.doc = anvil_io::kettle::kettle_mold();
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.camera.fit(&self.scene.bounds);
+                self.file_path = "kettle_mold.anvil".into();
+                self.status = "Kettle mold loaded: pattern halves, core, and core box halves.".into();
+            }
             RibbonAction::KettleGated => {
                 self.doc = anvil_io::kettle::kettle_gated();
                 self.panels = PanelState::default();

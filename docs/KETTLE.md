@@ -20,7 +20,7 @@ the mold. Stage 5 is the simulation.
 | 1 | Body of revolution with dots | Hobnail feature (revolve with relief), localized booleans |
 | 2 | Spout, lugs, bail, lid, knob | Tapered pipe, sample document `kettle()` |
 | 3 | Sprue, runner, gates, riser | Casting ribbon tab, first layout on the kettle |
-| 4 | Pattern halves, core, core prints | Parting plane split, draft check, shrink scale |
+| 4 | Pattern halves, core, core prints | Parting plane split, draft check, shrink scale (first cut done) |
 | 5 | Fill and solidification | Export to Truchas or OpenFOAM, or a built-in voxel model |
 
 Spout: the shape must pour without dripping. The rules of thumb are a
@@ -117,6 +117,35 @@ thickest junction. All four are Casting tab features with expressions
 This layout is a starting point. The mold split (stage 4) adds the core
 for the inside and the core prints, and the flow model (stage 5) decides
 gate sizes and riser positions.
+
+## Mold (stage 4, first cut)
+
+File > Samples > Kettle mold, or `anvil_io::kettle::kettle_mold()`. The
+parting plane is vertical, the XZ plane through the spout and the lugs,
+so the two pattern halves pull along Y. A body of revolution split
+through its axis has no undercut along that pull, the spout lies in the
+plane, and the lug bosses and pin holes point along the pull.
+
+The sample builds five printable parts, laid out side by side and scaled
+by 1.01 for the shrink of grey cast iron:
+
+| Part | How it is made |
+| --- | --- |
+| Pattern halves (2) | The outer profile revolved as a solid, plus the spout, the lug bosses, the mouth core print, and the spout bore, with the dots on the dome, split on XZ |
+| Core | The exact cavity revolved, plus a 43.5 mm print through the mouth and the spout bore that reaches past the tip |
+| Core box halves (2) | A block minus the core, split on XZ |
+
+Draft check (Casting tab) reports the undercut area of each pattern half
+along its pull. The dots themselves are the only undercuts: the far side
+of every dot leans away from the pull by about one millimetre. Real
+arare kettles get their dots by hand-pressing the sand, so this is where
+a printed pattern and a foundry pattern differ.
+
+![Kettle mold](kettle_mold.png)
+
+The gating from stage 3 is not on the pattern yet. It goes onto the
+match plate between the halves, which is the next step, together with
+a plane pick for the parting plane so any body can be split the same way.
 
 ## Known limits
 

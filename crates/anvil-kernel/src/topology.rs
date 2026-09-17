@@ -316,6 +316,12 @@ impl Solid {
                         let a = loop_a[i];
                         let b = loop_a[(i + 1) % n];
                         let key = if a < b { (a, b) } else { (b, a) };
+                        // Only a manifold edge carries orientation. An edge
+                        // shared by more than two faces (a sliver at a boolean
+                        // seam) would flip a whole region the wrong way.
+                        if by_edge[&key].len() != 2 {
+                            continue;
+                        }
                         for &nb in &by_edge[&key] {
                             if nb == fid || visited.contains(&nb) {
                                 continue;
@@ -585,8 +591,9 @@ impl Solid {
             }
             let normal = self.face_normal(&self.faces[fids[0]]);
             let surface = self.faces[fids[0]].surface;
-            // Directed boundary edges with interior pairs cancelled.
-            let mut edges: HashMap<(VertexId, VertexId), usize> = HashMap::new();
+            // Directed boundary edges with interior pairs cancelled. Ordered
+            // maps keep the merged loops the same from run to run.
+            let mut edges: std::collections::BTreeMap<(VertexId, VertexId), usize> = std::collections::BTreeMap::new();
             for &fid in &fids {
                 let f = &self.faces[fid];
                 for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
@@ -608,7 +615,7 @@ impl Solid {
                 }
             }
             // Chain into loops.
-            let mut next: HashMap<VertexId, Vec<VertexId>> = HashMap::new();
+            let mut next: std::collections::BTreeMap<VertexId, Vec<VertexId>> = std::collections::BTreeMap::new();
             for ((a, b), c) in &edges {
                 for _ in 0..*c {
                     next.entry(*a).or_default().push(*b);

@@ -41,6 +41,8 @@ pub enum RibbonAction {
     Kettle,
     /// The kettle with a sprue, runner, ingate, and riser.
     KettleGated,
+    /// The kettle body split into pattern halves, core, and core box.
+    KettleMold,
     Interference,
 }
 
@@ -324,6 +326,16 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
             tooltip: "The kettle with a sprue, runner, ingate, and riser",
             order: 21,
             kind: ButtonKind::Action(RibbonAction::KettleGated),
+        },
+    );
+    place(
+        "File",
+        "Samples",
+        RibbonButton {
+            label: "Kettle mold",
+            tooltip: "Pattern halves, core, and core box for the kettle body",
+            order: 22,
+            kind: ButtonKind::Action(RibbonAction::KettleMold),
         },
     );
     for d in descriptors() {

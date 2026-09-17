@@ -587,15 +587,49 @@ pub fn split_by_plane(solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Soli
     let mut halves = [Solid::new(), Solid::new()];
     let mut welds: [std::collections::HashMap<(i64, i64, i64), VertexId>; 2] = Default::default();
     let weld_key = |p: DVec3| ((p.x * 1e7).round() as i64, (p.y * 1e7).round() as i64, (p.z * 1e7).round() as i64);
-    let mut cap_segments: Vec<[DVec3; 2]> = Vec::new();
     let mut any_cut = false;
-    for f in solid.faces.values() {
-        let pts: Vec<DVec3> = f.outer.iter().map(|&v| solid.pos(v)).collect();
+    let eps = 1e-9 * (1.0 + solid.bounds().diagonal());
+    // Faces with holes are split as their triangles; a hole loop cut by
+    // the plane would otherwise need a merge with the outer loop.
+    let tri =
+        if solid.faces.values().any(|f| !f.inner.is_empty()) { Some(crate::mesh::tessellate(solid)) } else { None };
+    let mut by_face: std::collections::HashMap<crate::FaceId, Vec<[DVec3; 3]>> = std::collections::HashMap::new();
+    if let Some(m) = &tri {
+        for (k, t) in m.indices.as_chunks::<3>().0.iter().enumerate() {
+            if let Some(&fid) = m.face_of_tri.get(k) {
+                if !solid.faces[fid].inner.is_empty() {
+                    by_face.entry(fid).or_default().push([
+                        m.positions[t[0] as usize],
+                        m.positions[t[1] as usize],
+                        m.positions[t[2] as usize],
+                    ]);
+                }
+            }
+        }
+    }
+    let mut split_loop = |pts: &[DVec3], surface: Surface| {
         let ds: Vec<f64> = pts.iter().map(|&p| dist(p)).collect();
+        // A face lying in the plane goes to the half it closes.
+        if ds.iter().all(|d| d.abs() <= eps) {
+            let mut nv = DVec3::ZERO;
+            for i in 0..pts.len() {
+                let (p, q) = (pts[i], pts[(i + 1) % pts.len()]);
+                nv += p.cross(q);
+            }
+            let side = if nv.dot(n) > 0.0 { 0 } else { 1 };
+            let h = &mut halves[side];
+            let w = &mut welds[side];
+            let ids: Vec<VertexId> =
+                pts.iter().map(|&p| *w.entry(weld_key(p)).or_insert_with(|| h.add_vertex(p))).collect();
+            h.push_face(ids, surface);
+            return;
+        }
+        if ds.iter().any(|d| *d > eps) && ds.iter().any(|d| *d < -eps) {
+            any_cut = true;
+        }
         for (side, keep_positive) in [(0usize, false), (1usize, true)] {
-            let inside = |d: f64| if keep_positive { d >= -1e-9 } else { d <= 1e-9 };
+            let inside = |d: f64| if keep_positive { d >= -eps } else { d <= eps };
             let mut poly: Vec<DVec3> = Vec::new();
-            let mut cut_pts: Vec<DVec3> = Vec::new();
             for i in 0..pts.len() {
                 let j = (i + 1) % pts.len();
                 let (p, q) = (pts[i], pts[j]);
@@ -603,88 +637,267 @@ pub fn split_by_plane(solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Soli
                 if inside(dp) {
                     poly.push(p);
                 }
-                if (dp > 1e-9 && dq < -1e-9) || (dp < -1e-9 && dq > 1e-9) {
-                    let t = dp / (dp - dq);
-                    let x = p + (q - p) * t;
-                    poly.push(x);
-                    cut_pts.push(x);
+                if (dp > eps && dq < -eps) || (dp < -eps && dq > eps) {
+                    // Same crossing point from both sides of the edge.
+                    let (a, b, da, db) = if p.x < q.x || (p.x == q.x && (p.y < q.y || (p.y == q.y && p.z <= q.z))) {
+                        (p, q, dp, dq)
+                    } else {
+                        (q, p, dq, dp)
+                    };
+                    let t = da / (da - db);
+                    poly.push(a + (b - a) * t);
                 }
             }
-            if cut_pts.len() == 2 && side == 0 {
-                cap_segments.push([cut_pts[0], cut_pts[1]]);
-                any_cut = true;
+            // Drop repeated points (a vertex on the plane next to its crossing).
+            poly.dedup_by(|a, b| weld_key(*a) == weld_key(*b));
+            if poly.len() >= 3 && weld_key(poly[0]) == weld_key(*poly.last().unwrap()) {
+                poly.pop();
             }
             if poly.len() >= 3 {
                 let h = &mut halves[side];
                 let w = &mut welds[side];
                 let ids: Vec<VertexId> =
                     poly.iter().map(|&p| *w.entry(weld_key(p)).or_insert_with(|| h.add_vertex(p))).collect();
-                h.add_face(ids, f.surface);
+                h.push_face(ids, surface);
             }
+        }
+    };
+    for (fid, f) in &solid.faces {
+        if let Some(tris) = by_face.get(&fid) {
+            for t in tris {
+                split_loop(t, f.surface);
+            }
+        } else {
+            let pts: Vec<DVec3> = f.outer.iter().map(|&v| solid.pos(v)).collect();
+            split_loop(&pts, f.surface);
         }
     }
     if !any_cut {
         return Err(KernelError::InvalidInput("plane does not cut the body".into()));
     }
-    // Chain cap segments into loops and cap both halves.
-    let loops = chain_segments(&cap_segments);
-    for lp in loops {
-        if lp.len() < 3 {
-            continue;
-        }
-        let below: Vec<VertexId> =
-            lp.iter().map(|&p| *welds[0].entry(weld_key(p)).or_insert_with(|| halves[0].add_vertex(p))).collect();
-        halves[0].add_face(below, Surface::Plane);
-        let above: Vec<VertexId> =
-            lp.iter().rev().map(|&p| *welds[1].entry(weld_key(p)).or_insert_with(|| halves[1].add_vertex(p))).collect();
-        halves[1].add_face(above, Surface::Plane);
-    }
+    // The cap of each half is exactly its open boundary: chain the edges
+    // used once into loops, then nest holes inside the outer loops.
     let [mut below, mut above] = halves;
-    below.make_consistent();
-    above.make_consistent();
+    for (h, outward) in [(&mut below, n), (&mut above, -n)] {
+        cap_open_boundary(h, outward);
+        h.surfaces = solid.surfaces.clone();
+        h.rebuild_edges();
+        h.make_consistent();
+    }
     Ok((below, above))
 }
 
-fn chain_segments(segs: &[[anvil_math::DVec3; 2]]) -> Vec<Vec<anvil_math::DVec3>> {
-    let mut used = vec![false; segs.len()];
-    let mut loops = Vec::new();
-    for start in 0..segs.len() {
-        if used[start] {
-            continue;
-        }
-        used[start] = true;
-        let mut lp = vec![segs[start][0], segs[start][1]];
-        loop {
-            let last = *lp.last().unwrap();
-            let mut found = false;
-            for (i, s) in segs.iter().enumerate() {
-                if used[i] {
+/// Close every open boundary loop of `s` with a planar face. Loops are
+/// chained by vertex id, so the result is exact. Loops that lie inside
+/// another loop become holes of that face. `n` is the outward normal of
+/// the cap.
+fn cap_open_boundary(s: &mut Solid, n: anvil_math::DVec3) {
+    use anvil_math::DVec3;
+    use std::collections::HashMap;
+    // Directed use counts per undirected edge: `fwd` counts a -> b for
+    // the sorted pair (a, b). An edge is open when the total is odd; the
+    // extra pair from a sliver at a boolean seam cancels out, and the
+    // direction that wins is the one the side faces really use.
+    let mut uses: HashMap<(VertexId, VertexId), (usize, usize)> = HashMap::new();
+    for f in s.faces.values() {
+        for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
+            for i in 0..lp.len() {
+                let (a, b) = (lp[i], lp[(i + 1) % lp.len()]);
+                if a == b {
                     continue;
                 }
-                let next = if (s[0] - last).length() < 1e-7 {
-                    Some(s[1])
-                } else if (s[1] - last).length() < 1e-7 {
-                    Some(s[0])
+                let e = uses.entry(if a < b { (a, b) } else { (b, a) }).or_insert((0, 0));
+                if a < b {
+                    e.0 += 1;
                 } else {
-                    None
-                };
-                if let Some(p) = next {
-                    used[i] = true;
-                    lp.push(p);
-                    found = true;
-                    break;
+                    e.1 += 1;
                 }
             }
-            if !found || (lp.last().unwrap() - lp[0]).length() < 1e-7 {
+        }
+    }
+    // The cap runs opposite to the side faces along every open edge.
+    let mut open: Vec<(VertexId, VertexId)> = uses
+        .into_iter()
+        .filter(|(_, (f, b))| (f + b) % 2 == 1)
+        .map(|((a, b), (f, bw))| if f > bw { (b, a) } else { (a, b) })
+        .collect();
+    open.sort();
+    // Connectivity is undirected, so a chain never dangles at a vertex
+    // whose recorded direction is off. The direction only decides which
+    // way to go where more than one edge is on offer.
+    let dir_ok: std::collections::BTreeSet<(VertexId, VertexId)> = open.iter().copied().collect();
+    let key = |a: VertexId, b: VertexId| if a < b { (a, b) } else { (b, a) };
+    let mut adj: std::collections::BTreeMap<VertexId, Vec<VertexId>> = std::collections::BTreeMap::new();
+    let mut unused: std::collections::BTreeSet<(VertexId, VertexId)> = std::collections::BTreeSet::new();
+    for (a, b) in &open {
+        adj.entry(*a).or_default().push(*b);
+        adj.entry(*b).or_default().push(*a);
+        unused.insert(key(*a, *b));
+    }
+    let mut left = unused.len();
+    let mut loops: Vec<Vec<VertexId>> = Vec::new();
+    for &(start, first) in &open {
+        if !unused.remove(&key(start, first)) {
+            continue;
+        }
+        left -= 1;
+        let mut lp = vec![start, first];
+        let mut prev = start;
+        let mut cur = first;
+        loop {
+            let all: Vec<VertexId> = adj
+                .get(&cur)
+                .map(|v| v.iter().copied().filter(|&c| unused.contains(&key(cur, c))).collect())
+                .unwrap_or_default();
+            if all.is_empty() {
+                break;
+            }
+            let forward: Vec<VertexId> = all.iter().copied().filter(|&c| dir_ok.contains(&(cur, c))).collect();
+            let cands = if forward.is_empty() { all } else { forward };
+            // At a vertex where two loops touch, take the sharpest left
+            // turn seen from outside: the cap runs counter-clockwise there,
+            // so the region stays on the left and the loops never cross.
+            let nx = if cands.len() == 1 {
+                cands[0]
+            } else {
+                let d_in = (s.pos(cur) - s.pos(prev)).normalize_or_zero();
+                let mut best = (cands[0], f64::NEG_INFINITY);
+                for &c in &cands {
+                    let d_out = (s.pos(c) - s.pos(cur)).normalize_or_zero();
+                    let turn = d_in.cross(d_out).dot(n).atan2(d_in.dot(d_out));
+                    if turn > best.1 {
+                        best = (c, turn);
+                    }
+                }
+                best.0
+            };
+            unused.remove(&key(cur, nx));
+            left -= 1;
+            if nx == start {
+                break;
+            }
+            lp.push(nx);
+            prev = cur;
+            cur = nx;
+            if lp.len() > 1_000_000 {
                 break;
             }
         }
-        if (lp.last().unwrap() - lp[0]).length() < 1e-7 {
-            lp.pop();
+        if lp.len() >= 3 {
+            loops.push(lp);
         }
-        loops.push(lp);
     }
-    loops
+    if std::env::var("ANVIL_SPLIT_DEBUG").is_ok() {
+        let sizes: Vec<usize> = loops.iter().map(|l| l.len()).collect();
+        eprintln!("cap: {} loops {:?}, {} edges left over", loops.len(), sizes, left);
+        for lp in &loops {
+            let near = |cx: f64, cz: f64| {
+                lp.iter()
+                    .filter(|&&v| {
+                        let p = s.pos(v);
+                        ((p.x - cx).powi(2) + (p.z - cz).powi(2)).sqrt() < 2.4
+                    })
+                    .count()
+            };
+            let degree: Vec<usize> = lp.iter().map(|v| adj.get(v).map(|l| l.len()).unwrap_or(0)).collect();
+            let branches = degree.iter().filter(|&&d| d > 2).count();
+            // Compare the loop's own area with its triangulated area.
+            let helper = if n.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+            let u = n.cross(helper).normalize();
+            let v = n.cross(u);
+            let k = lp.len();
+            let shoelace: f64 = (0..k)
+                .map(|i| {
+                    let p = s.pos(lp[i]);
+                    let q = s.pos(lp[(i + 1) % k]);
+                    p.dot(u) * q.dot(v) - q.dot(u) * p.dot(v)
+                })
+                .sum::<f64>()
+                * 0.5;
+            let mut probe = Solid::new();
+            let ids: Vec<VertexId> = lp.iter().map(|&x| probe.add_vertex(s.pos(x))).collect();
+            probe.push_face(ids, Surface::Plane);
+            let m = crate::mesh::tessellate(&probe);
+            let tri_area: f64 = m
+                .indices
+                .as_chunks::<3>()
+                .0
+                .iter()
+                .map(|t| {
+                    let (a, b, c) =
+                        (m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]);
+                    (b - a).cross(c - a).length() * 0.5
+                })
+                .sum();
+            eprintln!("  loop area {shoelace:.1} vs triangulated {tri_area:.1}, {} triangles", m.indices.len() / 3);
+            eprintln!(
+                "  loop of {}: {} vertices near lug hole +x, {} near lug hole -x, {} branch vertices",
+                lp.len(),
+                near(60.0, 80.0),
+                near(-60.0, 80.0),
+                branches
+            );
+        }
+    }
+    if loops.is_empty() {
+        return;
+    }
+    // Signed area in the cap plane: positive loops are outers.
+    let helper = if n.x.abs() < 0.9 { DVec3::X } else { DVec3::Y };
+    let u = n.cross(helper).normalize();
+    let v = n.cross(u);
+    let to2 = |p: DVec3| (p.dot(u), p.dot(v));
+    let area = |lp: &Vec<VertexId>| -> f64 {
+        let k = lp.len();
+        (0..k)
+            .map(|i| {
+                let (x0, y0) = to2(s.pos(lp[i]));
+                let (x1, y1) = to2(s.pos(lp[(i + 1) % k]));
+                x0 * y1 - x1 * y0
+            })
+            .sum::<f64>()
+            * 0.5
+    };
+    let inside = |pt: (f64, f64), lp: &Vec<VertexId>| -> bool {
+        let k = lp.len();
+        let mut c = false;
+        for i in 0..k {
+            let (x0, y0) = to2(s.pos(lp[i]));
+            let (x1, y1) = to2(s.pos(lp[(i + 1) % k]));
+            if (y0 > pt.1) != (y1 > pt.1) && pt.0 < (x1 - x0) * (pt.1 - y0) / (y1 - y0) + x0 {
+                c = !c;
+            }
+        }
+        c
+    };
+    let areas: Vec<f64> = loops.iter().map(area).collect();
+    // The sign convention depends on which side the cap faces; take the
+    // larger total as the outer sign.
+    let pos: f64 = areas.iter().filter(|a| **a > 0.0).sum();
+    let neg: f64 = areas.iter().filter(|a| **a < 0.0).map(|a| -a).sum();
+    let outer_sign = if pos >= neg { 1.0 } else { -1.0 };
+    let mut outers: Vec<(usize, f64)> =
+        areas.iter().enumerate().filter(|(_, a)| **a * outer_sign > 0.0).map(|(i, a)| (i, a.abs())).collect();
+    outers.sort_by(|a, b| a.1.total_cmp(&b.1));
+    let mut holes: Vec<Vec<usize>> = vec![Vec::new(); loops.len()];
+    for (i, a) in areas.iter().enumerate() {
+        if *a * outer_sign >= 0.0 {
+            continue;
+        }
+        let pt = to2(s.pos(loops[i][0]));
+        // Smallest outer that contains the hole.
+        if let Some((o, _)) = outers.iter().find(|(o, _)| inside(pt, &loops[*o])) {
+            holes[*o].push(i);
+        }
+    }
+    let mut faces: Vec<(Vec<VertexId>, Vec<Vec<VertexId>>)> = Vec::new();
+    for (o, _) in &outers {
+        let inner: Vec<Vec<VertexId>> = holes[*o].iter().map(|&h| loops[h].clone()).collect();
+        faces.push((loops[*o].clone(), inner));
+    }
+    for (outer, inner) in faces {
+        s.faces.insert(crate::topology::Face { outer, inner, surface: Surface::Plane });
+    }
 }
 
 #[cfg(test)]

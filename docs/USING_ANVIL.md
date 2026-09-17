@@ -279,6 +279,15 @@ lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
 ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
 dimensions, the build order, and the casting plan.
 
+## Mold split
+
+Split body (Solid tab) cuts a body on a datum plane and keeps one or
+both halves; the halves are closed with a flat cap. Draft check
+(Casting tab, Mold group) reports how much of a body faces away from a
+pull direction, so you can tell whether a pattern half will leave the
+sand. Scale by 1.01 for grey cast iron shrink. File > Samples > Kettle
+mold shows the whole flow: pattern halves, core, and core box.
+
 ## What is not there yet
 
 Shell reports "not supported by this kernel yet". Booleans are a BSP

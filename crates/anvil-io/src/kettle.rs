@@ -8,10 +8,13 @@
 use anvil_feature::features::extrude::ExtrudeFeature;
 use anvil_feature::features::hole::HoleFeature;
 use anvil_feature::features::pending::CombineFeature;
+use anvil_feature::features::primitives::BoxFeature;
 use anvil_feature::features::revolve::RevolveFeature;
 use anvil_feature::features::sketch::SketchFeature;
 use anvil_feature::features::solid_extra::PipeFeature;
+use anvil_feature::features::solid_extra::SplitBodyFeature;
 use anvil_feature::features::surface_pattern::SurfacePatternFeature;
+use anvil_feature::features::transform::{MoveFeature, ScaleFeature};
 use anvil_feature::Document;
 use anvil_kernel::{Solid, SurfaceGeom};
 use anvil_math::{DVec2, DVec3, Plane};
@@ -379,6 +382,160 @@ pub fn kettle_gated() -> Document {
     doc.0
 }
 
+/// The kettle body ready for sand casting: two pattern halves, the
+/// core, and two core box halves, all scaled by the cast iron shrink
+/// allowance. The parting plane is vertical, through the spout and the
+/// lugs (the XZ plane), so the halves pull along Y with no undercut on
+/// the body. Stage 4 of docs/KETTLE.md.
+pub fn kettle_mold() -> Document {
+    use anvil_feature::features::casting::DraftCheckFeature;
+    let mut doc = TimedDoc(kettle());
+    doc.set_expression("shrink", "1.01").ok();
+    doc.set_expression("print_h", "32").ok();
+    // 24, 25: the exact cavity, revolved.
+    let inner: [&[(f64, f64)]; 6] = [
+        &[(0.0, 3.0)],
+        &[(66.5, 3.0)],
+        &[(75.5, 31.0), (74.0, 44.5), (69.0, 58.5), (61.0, 72.0), (52.0, 82.0), (44.0, 88.0)],
+        &[(44.0, 96.0)],
+        &[(0.0, 96.0)],
+        &[(0.0, 3.0)],
+    ];
+    let mut cav = SketchFeature::on_datum("XZ");
+    closed_loop(&mut cav, &inner[..5]);
+    doc.add_feature(Box::new(cav));
+    doc.add_feature(Box::new(RevolveFeature {
+        sketch: 24,
+        axis: "Y".into(),
+        angle_deg: "360".into(),
+        segments: "segments".into(),
+        ..Default::default()
+    }));
+    // 26, 27: the mouth core print, a cylinder that seats in the mold.
+    let mut print = SketchFeature::on_plane(Plane { origin: DVec3::new(0.0, 0.0, 93.0), ..Plane::XY });
+    let c = print.sketch.add_point(0.0, 0.0);
+    print.sketch.add_circle(c, 43.5);
+    doc.add_feature(Box::new(print));
+    doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 26,
+        distance: "print_h".into(),
+        symmetric: false,
+        operation: "new".into(),
+        target: 0,
+    }));
+    // 28 to 31: core = cavity + print + spout bore (its end past the tip is the print).
+    doc.add_feature(Box::new(CombineFeature { body: 25, tool: 27, op: "join".into() }));
+    doc.add_feature(Box::new(spout_path(0.12, 0.16)));
+    doc.add_feature(Box::new(PipeFeature { path: 29, diameter: "bore_d".into(), end_diameter: "bore_tip".into() }));
+    doc.add_feature(Box::new(CombineFeature { body: 28, tool: 30, op: "join".into() }));
+    // 32, 33: the outer shape as a solid, the start of the pattern.
+    let mut outer_sk = SketchFeature::on_datum("XZ");
+    closed_loop(
+        &mut outer_sk,
+        &[
+            &[(0.0, 0.0)],
+            &[(68.0, 0.0)],
+            &[(70.0, 2.0)],
+            &[(80.0, 30.0)],
+            &[(78.0, 32.0), (77.0, 45.0), (72.0, 60.0), (64.0, 74.0), (55.0, 84.0), (47.0, 90.0)],
+            &[(47.0, 94.0)],
+            &[(0.0, 94.0)],
+        ],
+    );
+    doc.add_feature(Box::new(outer_sk));
+    doc.add_feature(Box::new(RevolveFeature {
+        sketch: 32,
+        axis: "Y".into(),
+        angle_deg: "360".into(),
+        segments: "segments".into(),
+        ..Default::default()
+    }));
+    let outer = doc.features[33]
+        .output
+        .as_ref()
+        .and_then(|o| o.bodies.first())
+        .and_then(|b| dome_surface(b, 35.0, 85.0))
+        .unwrap_or(0);
+    // 34 to 38: spout, lugs, mouth print, and bore joined on: the mold
+    // then has the seats for the core prints.
+    doc.add_feature(Box::new(CombineFeature { body: 33, tool: 3, op: "join".into() }));
+    doc.add_feature(Box::new(ExtrudeFeature {
+        sketch: 11,
+        distance: "10".into(),
+        symmetric: false,
+        operation: "new".into(),
+        target: 0,
+    }));
+    doc.add_feature(Box::new(CombineFeature { body: 34, tool: 35, op: "join".into() }));
+    doc.add_feature(Box::new(CombineFeature { body: 36, tool: 27, op: "join".into() }));
+    doc.add_feature(Box::new(CombineFeature { body: 37, tool: 30, op: "join".into() }));
+    // 39: the same dots as the kettle body, on the pattern's dome.
+    doc.add_feature(Box::new(SurfacePatternFeature {
+        body: 38,
+        surface: outer.to_string(),
+        layout: "hobnail".into(),
+        pitch: "dot_pitch".into(),
+        dot: "dot_size".into(),
+        height: "dot_height".into(),
+        margin: "3".into(),
+        step: "0.6".into(),
+        ..Default::default()
+    }));
+    // 40, 41: pattern halves, split on the XZ plane through the spout.
+    for keep in ["below", "above"] {
+        doc.add_feature(Box::new(SplitBodyFeature {
+            body: 39,
+            plane: "XZ".into(),
+            plane_feature: None,
+            offset: "0".into(),
+            keep: keep.into(),
+        }));
+    }
+    // 42 to 45: core box = block minus core, split the same way.
+    doc.add_feature(Box::new(BoxFeature {
+        x: "-95".into(),
+        y: "-95".into(),
+        z: "-6".into(),
+        width: "205".into(),
+        depth: "190".into(),
+        height: "140".into(),
+    }));
+    doc.add_feature(Box::new(CombineFeature { body: 42, tool: 31, op: "cut".into() }));
+    for keep in ["below", "above"] {
+        doc.add_feature(Box::new(SplitBodyFeature {
+            body: 43,
+            plane: "XZ".into(),
+            plane_feature: None,
+            offset: "0".into(),
+            keep: keep.into(),
+        }));
+    }
+    // 46 to 50: lay the parts out side by side. "below" the XZ plane is
+    // the +Y side, because the XZ normal points to -Y.
+    let moves: [(usize, &str, &str); 5] =
+        [(40, "0", "120"), (41, "0", "-120"), (44, "-260", "120"), (45, "-260", "-120"), (31, "260", "0")];
+    for (body, dx, dy) in moves {
+        doc.add_feature(Box::new(MoveFeature { body, dx: dx.into(), dy: dy.into(), ..Default::default() }));
+    }
+    // 51 to 55: shrink allowance for grey cast iron.
+    for body in 46..=50 {
+        doc.add_feature(Box::new(ScaleFeature { body, factor: "shrink".into(), copy: false }));
+    }
+    // 56, 57: draft check of the pattern halves along their pull.
+    doc.add_feature(Box::new(DraftCheckFeature { body: 51, pull: "Y".into(), min_draft: "1".into() }));
+    doc.add_feature(Box::new(DraftCheckFeature { body: 52, pull: "-Y".into(), min_draft: "1".into() }));
+    let wood = [196, 160, 110];
+    let sand = [210, 190, 140];
+    let grey = [120, 124, 130];
+    doc.appearance.insert(51, wood);
+    doc.appearance.insert(52, wood);
+    doc.appearance.insert(53, grey);
+    doc.appearance.insert(54, grey);
+    doc.appearance.insert(55, sand);
+    let _ = inner[5];
+    doc.0
+}
+
 /// Times every feature when `ANVIL_TIMING` is set, for tuning.
 struct TimedDoc(Document);
 impl std::ops::Deref for TimedDoc {
@@ -453,6 +610,38 @@ mod tests {
         let bb = bodies[0].bounds();
         assert!(bb.max.x > 98.0 && bb.max.x < 104.0, "spout tip reaches x = {}", bb.max.x);
         assert!(secs < 60.0, "kettle took {secs:.1} s");
+    }
+
+    #[test]
+    fn kettle_mold_makes_five_parts() {
+        let doc = kettle_mold();
+        for (i, f) in doc.features.iter().enumerate() {
+            assert!(f.error.is_none(), "feature {i} ({}): {:?}", f.feature.name(), f.error);
+        }
+        let parts = crate::document_parts(&doc);
+        let names: Vec<usize> = parts.iter().map(|p| p.feature).collect();
+        // Kettle body, bail, lid, two pattern halves, two core box halves, core.
+        assert_eq!(parts.len(), 8, "parts from features {names:?}");
+        let vol = |i: usize| doc.features[i].output.as_ref().unwrap().bodies[0].volume();
+        // The pattern before the split: the outer shape with its prints,
+        // about 1.7 L. The halves add up to it and are closed.
+        let pattern = vol(39);
+        assert!(pattern > 1.6e6 && pattern < 1.8e6, "pattern {pattern} mm3");
+        let halves = vol(40) + vol(41);
+        assert!((halves - pattern).abs() / pattern < 0.001, "halves {halves} vs pattern {pattern}");
+        for i in [40usize, 41] {
+            let (open, over) = doc.features[i].output.as_ref().unwrap().bodies[0].open_edge_report();
+            eprintln!("pattern half {i}: {open} open edges, {over} over-shared");
+            assert_eq!(open, 0, "pattern half {i} has open edges");
+        }
+        // The core is the cavity plus prints: 1.3 to 1.7 L.
+        let core = vol(55);
+        assert!(core > 1.25e6 && core < 1.75e6, "core {core} mm3");
+        for i in [56usize, 57] {
+            let note = doc.features[i].output.as_ref().unwrap().note.clone().unwrap_or_default();
+            eprintln!("{note}");
+            assert!(note.contains("undercut") || note.contains("no undercuts"));
+        }
     }
 
     #[test]

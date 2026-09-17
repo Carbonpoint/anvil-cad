@@ -4,6 +4,7 @@
 //! one produces a single solid body that a caster can combine, mirror, or
 //! subtract from a mold box with the existing Combine and Move features.
 
+use crate::BODY_TYPES;
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError};
 use anvil_kernel::BooleanOp;
 use anvil_math::{Axis, DVec2, DVec3, Plane};
@@ -453,3 +454,105 @@ mod tests {
         assert!((got - exact).abs() / exact < 0.05, "got {got}, exact {exact}");
     }
 }
+
+/// Draft check: how much of a body faces away from the pull direction.
+/// A pattern must leave the sand without tearing it, so every face
+/// should lean toward the pull by at least the draft angle. The feature
+/// changes nothing; it reports the undercut and low draft area in its
+/// note.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DraftCheckFeature {
+    pub body: usize,
+    /// Pull direction: X, Y, Z, -X, -Y, or -Z.
+    pub pull: String,
+    /// Minimum draft angle in degrees.
+    pub min_draft: String,
+}
+
+impl Default for DraftCheckFeature {
+    fn default() -> Self {
+        DraftCheckFeature { body: 1, pull: "Z".into(), min_draft: "1".into() }
+    }
+}
+
+#[typetag::serde(name = "draft_check")]
+impl Feature for DraftCheckFeature {
+    fn kind(&self) -> &'static str {
+        "draft_check"
+    }
+    fn name(&self) -> String {
+        format!("Draft check (pull {})", self.pull)
+    }
+    fn params(&self) -> Vec<ParamSpec> {
+        vec![
+            ParamSpec::feature_ref("body", "Body", BODY_TYPES.to_vec(), self.body),
+            ParamSpec::choice("pull", "Pull direction", vec!["X", "Y", "Z", "-X", "-Y", "-Z"], &self.pull),
+            ParamSpec::angle("min_draft", "Minimum draft angle", &self.min_draft),
+        ]
+    }
+    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
+        match (name, value) {
+            ("body", ParamValue::FeatureRef(i)) => self.body = i,
+            ("pull", ParamValue::Choice(p)) => self.pull = p,
+            ("min_draft", ParamValue::Expr(s)) => self.min_draft = s,
+            (n, _) => return Err(format!("unknown parameter {n}")),
+        }
+        Ok(())
+    }
+    fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
+        let dir = match self.pull.as_str() {
+            "X" => DVec3::X,
+            "Y" => DVec3::Y,
+            "-X" => -DVec3::X,
+            "-Y" => -DVec3::Y,
+            "-Z" => -DVec3::Z,
+            _ => DVec3::Z,
+        };
+        let min = ctx.eval(&self.min_draft)?.to_radians().sin();
+        let (mut under_n, mut under_a, mut low_n, mut low_a, mut total_a) = (0usize, 0.0, 0usize, 0.0, 0.0);
+        for b in ctx.bodies_of(self.body)? {
+            for f in b.faces.values() {
+                // Newell vector: direction is the normal, length is twice the area.
+                let mut nv = DVec3::ZERO;
+                let k = f.outer.len();
+                for i in 0..k {
+                    let p = b.pos(f.outer[i]);
+                    let q = b.pos(f.outer[(i + 1) % k]);
+                    nv.x += (p.y - q.y) * (p.z + q.z);
+                    nv.y += (p.z - q.z) * (p.x + q.x);
+                    nv.z += (p.x - q.x) * (p.y + q.y);
+                }
+                let area = nv.length() * 0.5;
+                if area < 1e-12 {
+                    continue;
+                }
+                total_a += area;
+                let c = nv.normalize().dot(dir);
+                if c < -min {
+                    under_n += 1;
+                    under_a += area;
+                } else if c < min {
+                    low_n += 1;
+                    low_a += area;
+                }
+            }
+        }
+        let note = if under_n == 0 && low_n == 0 {
+            format!("no undercuts, every face has at least {} deg of draft", self.min_draft)
+        } else {
+            format!(
+                "undercut: {under_n} faces, {:.0} mm2 ({:.1} percent); below {} deg draft: {low_n} faces, {:.0} mm2",
+                under_a,
+                100.0 * under_a / total_a.max(1e-9),
+                self.min_draft,
+                low_a
+            )
+        };
+        Ok(FeatureOutput { note: Some(note), ..Default::default() })
+    }
+    fn clone_box(&self) -> Box<dyn Feature> {
+        Box::new(self.clone())
+    }
+}
+
+inventory::submit! { FeatureDescriptor { id: "draft_check", label: "Draft check", tab: "Casting", group: "Mold", tooltip: "Report faces that face away from the pull direction", order: 10, create: || Box::new(DraftCheckFeature::default()) } }
