@@ -8,7 +8,9 @@
 //! Layouts: `hobnail` (arare) is one dot size in staggered rows with a
 //! fixed count per row, so the dots shrink toward the narrow end and line
 //! up in spiral columns. `tortoiseshell` (kikko) is a large dot ringed by
-//! small dots in each cell.
+//! small dots in each cell. `machinery` is a procedural mesh of half
+//! round tubes (rings, runs along the axis, diagonals), bosses, and bolt
+//! heads, for the look of dense plumbing on a model at small scale.
 
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError};
 use anvil_kernel::relief::{HeightField, RevolvedParam};
@@ -37,6 +39,13 @@ pub struct SurfacePatternFeature {
     pub step: String,
     /// Dot free band at both ends of the surface.
     pub margin: String,
+    /// Seed of the machinery layout; another seed gives another mesh.
+    #[serde(default = "one_expr")]
+    pub seed: String,
+}
+
+fn one_expr() -> String {
+    "1".into()
 }
 
 impl Default for SurfacePatternFeature {
@@ -52,6 +61,7 @@ impl Default for SurfacePatternFeature {
             height: "1".into(),
             step: "0.6".into(),
             margin: "2".into(),
+            seed: "1".into(),
         }
     }
 }
@@ -183,6 +193,149 @@ impl HeightField for DotField {
     }
 }
 
+/// A half round tube on the surface between two `(s, theta)` points.
+/// `theta` may run past a full turn so a ring arc can cross zero.
+#[derive(Clone, Copy, Debug)]
+pub struct Tube {
+    pub s0: f64,
+    pub t0: f64,
+    pub s1: f64,
+    pub t1: f64,
+    pub rho: f64,
+    pub height: f64,
+    /// Surface radius, for the arc distance around the axis.
+    pub r: f64,
+}
+
+impl Tube {
+    /// Distance from `(s, theta)` to the tube centreline, on the surface.
+    fn distance(&self, s: f64, theta: f64) -> f64 {
+        let (u0, v0) = (self.s0, self.t0 * self.r);
+        let (u1, v1) = (self.s1, self.t1 * self.r);
+        let full = std::f64::consts::TAU * self.r;
+        let mut best = f64::INFINITY;
+        for k in -1..=1 {
+            let (u, v) = (s, theta * self.r + k as f64 * full);
+            let (du, dv) = (u1 - u0, v1 - v0);
+            let len2 = du * du + dv * dv;
+            let t = if len2 > 1e-12 { ((u - u0) * du + (v - v0) * dv) / len2 } else { 0.0 }.clamp(0.0, 1.0);
+            let (pu, pv) = (u0 + t * du, v0 + t * dv);
+            best = best.min(((u - pu).powi(2) + (v - pv).powi(2)).sqrt());
+        }
+        best
+    }
+}
+
+/// Tubes plus bosses: the machinery layout.
+pub struct MachineryField {
+    pub tubes: Vec<Tube>,
+    pub bosses: DotField,
+    pub dropped_tubes: usize,
+}
+
+impl HeightField for MachineryField {
+    fn height(&self, s: f64, theta: f64) -> f64 {
+        let mut best = self.bosses.height_at(s, theta);
+        for t in &self.tubes {
+            let d = t.distance(s, theta);
+            if d < t.rho {
+                let h = t.height * (1.0 - (d / t.rho).powi(2)).sqrt();
+                best = best.max(h);
+            }
+        }
+        best
+    }
+    fn exclude_near(&mut self, fixed: &[(f64, f64)], param: &RevolvedParam) {
+        self.bosses.exclude_near(fixed, param);
+        let before = self.tubes.len();
+        self.tubes.retain(|t| fixed.iter().all(|&(s, th)| t.distance(s, th) >= t.rho * 1.05));
+        self.dropped_tubes = before - self.tubes.len();
+    }
+}
+
+/// A small deterministic random source (LCG), so a seed always gives the
+/// same mesh.
+struct Lcg(u64);
+impl Lcg {
+    fn next(&mut self) -> f64 {
+        self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        ((self.0 >> 11) as f64) / ((1u64 << 53) as f64)
+    }
+    fn range(&mut self, lo: f64, hi: f64) -> f64 {
+        lo + (hi - lo) * self.next()
+    }
+}
+
+/// Lay out the machinery mesh: ring arcs every `pitch` along the axis,
+/// runs along the axis every `pitch` around it, some diagonals, bosses,
+/// and bolt heads. `dot` is the tube diameter, `height` the tube height.
+pub fn layout_machinery(
+    param: &RevolvedParam,
+    pitch: f64,
+    dot: f64,
+    height: f64,
+    margin: f64,
+    seed: u64,
+) -> MachineryField {
+    use std::f64::consts::TAU;
+    let len = param.length();
+    let s0 = margin.max(0.0);
+    let s1 = len - margin.max(0.0);
+    let r_max = param.run.iter().map(|p| p.x).fold(0.0, f64::max).max(1e-6);
+    let mut rng = Lcg(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1);
+    let mut tubes = Vec::new();
+    let mut dots = Vec::new();
+    if s1 <= s0 || pitch <= 0.0 || dot <= 0.0 {
+        return MachineryField { tubes, bosses: DotField::new(dots, r_max), dropped_tubes: 0 };
+    }
+    let rho = dot * 0.5;
+    let rows = ((s1 - s0) / pitch).floor().max(1.0) as usize;
+    let row_pitch = (s1 - s0) / rows as f64;
+    // Ring arcs: two or three per row, each 40 to 200 degrees.
+    for j in 0..rows {
+        let s = s0 + row_pitch * (j as f64 + 0.5) + rng.range(-0.25, 0.25) * row_pitch;
+        let r = param.radius(s).max(1e-6);
+        let arcs = 2 + (rng.next() * 2.0) as usize;
+        let mut theta = rng.range(0.0, TAU);
+        for _ in 0..arcs {
+            let span = rng.range(0.7, 3.5);
+            let scale = rng.range(0.55, 1.0);
+            tubes.push(Tube { s0: s, t0: theta, s1: s, t1: theta + span, rho: rho * scale, height: height * scale, r });
+            theta += span + rng.range(0.3, 1.2);
+        }
+    }
+    // Runs along the axis.
+    let cols = ((TAU * r_max / pitch).round() as usize).max(3);
+    for i in 0..cols {
+        let theta = (i as f64 + rng.range(0.1, 0.9)) * TAU / cols as f64;
+        let a = s0 + rng.range(0.0, 0.5) * (s1 - s0);
+        let b = (a + rng.range(0.25, 0.7) * (s1 - s0)).min(s1);
+        let r = param.radius((a + b) * 0.5).max(1e-6);
+        let scale = rng.range(0.5, 0.9);
+        tubes.push(Tube { s0: a, t0: theta, s1: b, t1: theta, rho: rho * scale, height: height * scale, r });
+        // Every other run gets a bend: a short diagonal off its end.
+        if i % 2 == 0 {
+            let dth = rng.range(-1.0, 1.0) * pitch / r;
+            let ds = rng.range(0.15, 0.35) * (s1 - s0);
+            let (c, d) = if b + ds <= s1 { (b, b + ds) } else { (a, (a - ds).max(s0)) };
+            tubes.push(Tube { s0: c, t0: theta, s1: d, t1: theta + dth, rho: rho * scale, height: height * scale, r });
+        }
+    }
+    // Bosses and bolt heads.
+    let area = TAU * r_max * (s1 - s0);
+    let n_boss = (area / (pitch * pitch) * 0.6) as usize;
+    for _ in 0..n_boss {
+        let s = rng.range(s0 + rho, s1 - rho);
+        let theta = rng.range(0.0, TAU);
+        let r = param.radius(s).max(1e-6);
+        let big = rng.next() < 0.3;
+        let size = if big { rho * rng.range(1.4, 2.2) } else { rho * rng.range(0.35, 0.6) };
+        let h = if big { height * rng.range(0.8, 1.3) } else { height * 0.5 };
+        dots.push(Dot { s, theta, rho: size, height: h, r });
+    }
+    MachineryField { tubes, bosses: DotField::new(dots, r_max), dropped_tubes: 0 }
+}
+
 /// Lay out dots on a surface of revolution.
 #[allow(clippy::too_many_arguments)]
 pub fn layout_dots(
@@ -260,7 +413,7 @@ impl Feature for SurfacePatternFeature {
         vec![
             ParamSpec::feature_ref("body", "Body", crate::BODY_TYPES.to_vec(), self.body),
             ParamSpec::length("surface", "Surface id (pick a face)", &self.surface),
-            ParamSpec::choice("layout", "Layout", vec!["hobnail", "tortoiseshell"], &self.layout),
+            ParamSpec::choice("layout", "Layout", vec!["hobnail", "tortoiseshell", "machinery"], &self.layout),
             ParamSpec::length("pitch", "Pitch", &self.pitch),
             ParamSpec::length("columns", "Dots per row (0 = from pitch)", &self.columns),
             ParamSpec::length("dot", "Dot diameter", &self.dot),
@@ -268,6 +421,7 @@ impl Feature for SurfacePatternFeature {
             ParamSpec::length("height", "Dot height", &self.height),
             ParamSpec::length("margin", "Margin at ends", &self.margin),
             ParamSpec::length("step", "Mesh step", &self.step),
+            ParamSpec::length("seed", "Seed (machinery)", &self.seed),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
@@ -282,6 +436,7 @@ impl Feature for SurfacePatternFeature {
             ("height", ParamValue::Expr(s)) => self.height = s,
             ("margin", ParamValue::Expr(s)) => self.margin = s,
             ("step", ParamValue::Expr(s)) => self.step = s,
+            ("seed", ParamValue::Expr(s)) => self.seed = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -305,6 +460,7 @@ impl Feature for SurfacePatternFeature {
         let height = ctx.eval(&self.height)?;
         let step = ctx.eval(&self.step)?;
         let margin = ctx.eval(&self.margin)?;
+        let seed = ctx.eval(&self.seed)?.round().max(0.0) as u64;
         let src = ctx.bodies_of(self.body)?;
         let tag = Surface::Revolved { id: surface };
         let mut bodies = Vec::with_capacity(src.len());
@@ -321,6 +477,19 @@ impl Feature for SurfacePatternFeature {
             let at = first.outer.iter().map(|&v| b.pos(v)).sum::<anvil_math::DVec3>() / first.outer.len() as f64;
             let param = RevolvedParam::new(geom, Some((at, b.face_normal(first))))
                 .ok_or_else(|| KernelError::InvalidInput("surface run is too short".into()))?;
+            if self.layout == "machinery" {
+                let mut field = layout_machinery(&param, pitch, dot, height, margin, seed);
+                let out = ctx.kernel.relief(b, surface, step, &mut field)?;
+                note = Some(format!(
+                    "{} tubes ({} dropped at cut edges), {} bosses, {} faces",
+                    field.tubes.len(),
+                    field.dropped_tubes,
+                    field.bosses.count,
+                    out.faces.len()
+                ));
+                bodies.push(out);
+                continue;
+            }
             let dots = layout_dots(&param, &self.layout, columns, pitch, dot, dot_end, height, margin);
             let r_max = param.run.iter().map(|p| p.x).fold(0.0, f64::max);
             let mut field = DotField::new(dots, r_max);
@@ -351,7 +520,7 @@ inventory::submit! {
         label: "Pattern on face",
         tab: "Solid",
         group: "Modify",
-        tooltip: "Raised dots (hobnail or tortoiseshell) over one curved surface",
+        tooltip: "Raised dots (hobnail, tortoiseshell) or a machinery mesh of tubes over one curved surface",
         order: 75,
         create: || Box::new(SurfacePatternFeature::default()),
     }
@@ -409,5 +578,69 @@ mod tests {
         assert!(f.output.as_ref().unwrap().note.as_deref().unwrap_or("").contains("dots"));
         // Only one body is visible: the pattern consumed the revolve.
         assert_eq!(doc.bodies().len(), 1);
+    }
+
+    #[test]
+    fn machinery_on_a_drum() {
+        let mut doc = Document::new("drum");
+        let mut sk = SketchFeature::on_datum("XZ");
+        let pts = [DVec2::new(0.0, 0.0), DVec2::new(22.0, 0.0), DVec2::new(22.0, 25.0), DVec2::new(0.0, 25.0)];
+        let ids: Vec<_> = pts.iter().map(|p| sk.sketch.add_point(p.x, p.y)).collect();
+        for i in 0..ids.len() {
+            sk.sketch.add_line(ids[i], ids[(i + 1) % ids.len()]);
+        }
+        doc.add_feature(Box::new(sk));
+        doc.add_feature(Box::new(RevolveFeature { sketch: 0, axis: "Y".into(), ..Default::default() }));
+        let body = &doc.features[1].output.as_ref().unwrap().bodies[0];
+        let wall = *body
+            .surfaces
+            .iter()
+            .find(|(_, g)| {
+                let anvil_kernel::SurfaceGeom::Revolved { run, .. } = g;
+                run.iter().all(|p| (p.x - 22.0).abs() < 1e-9)
+            })
+            .map(|(k, _)| k)
+            .expect("wall");
+        let v0 = body.volume();
+        let mut pat = SurfacePatternFeature {
+            body: 1,
+            layout: "machinery".into(),
+            pitch: "4".into(),
+            dot: "2.2".into(),
+            height: "1.1".into(),
+            step: "0.5".into(),
+            margin: "2.5".into(),
+            seed: "7".into(),
+            ..Default::default()
+        };
+        assert!(pat.place_on_surface(Surface::Revolved { id: wall }, 1));
+        doc.add_feature(Box::new(pat));
+        let f = &doc.features[2];
+        assert!(f.error.is_none(), "{:?}", f.error);
+        let out = &f.output.as_ref().unwrap().bodies[0];
+        assert_eq!(out.open_edge_report(), (0, 0), "watertight");
+        let added = out.volume() - v0;
+        // The mesh adds a few percent of the drum's volume, never more.
+        assert!(added > 0.005 * v0 && added < 0.15 * v0, "added {added} of {v0}");
+        let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
+        assert!(note.contains("tubes") && note.contains("bosses"), "{note}");
+        // The same seed gives the same mesh; another seed differs.
+        let mut again = doc.clone();
+        again.features.truncate(2);
+        let mut pat2 = SurfacePatternFeature {
+            body: 1,
+            layout: "machinery".into(),
+            pitch: "4".into(),
+            dot: "2.2".into(),
+            height: "1.1".into(),
+            step: "0.5".into(),
+            margin: "2.5".into(),
+            seed: "8".into(),
+            ..Default::default()
+        };
+        assert!(pat2.place_on_surface(Surface::Revolved { id: wall }, 1));
+        again.add_feature(Box::new(pat2));
+        let out2 = &again.features[2].output.as_ref().unwrap().bodies[0];
+        assert!((out2.volume() - out.volume()).abs() > 1e-6, "seed changes the mesh");
     }
 }

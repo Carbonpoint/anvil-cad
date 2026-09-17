@@ -265,6 +265,15 @@ only rebuilds the faces near the tool.
 
 ![Kettle sample](kettle.png)
 
+The `machinery` layout replaces the dots with a procedural mesh of half
+round tubes (ring arcs, runs along the axis with bends), bosses, and
+bolt heads, for the look of dense plumbing on a small model. Pitch is
+the spacing of the rings and runs, Dot diameter the tube diameter,
+Dot height the tube height, and Seed picks one of many meshes. Tubes
+that would reach a cut edge or the end of the surface are dropped whole,
+like dots. On a vertical wall printed upright the tubes are small
+overhangs that need no support.
+
 ## Tapered pipe
 
 Pipe has a second value, Diameter at end. Leave it at 0 for one
