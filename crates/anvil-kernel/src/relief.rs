@@ -301,6 +301,59 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, field: &mut dyn HeightFiel
             extras.entry(key).or_default().push((t, v));
         }
     }
+    // An extra vertex that only refined cells use is a split point a
+    // boolean plane left on a face it did not cut. Both cells are rebuilt,
+    // so the vertex can go; keeping it would pin the surface there.
+    {
+        let cell_ids: HashSet<crate::FaceId> = cells.values().map(|c| c.0).collect();
+        let mut uses: HashMap<VertexId, usize> = HashMap::new();
+        for f in solid.faces.values() {
+            for &v in f.outer.iter().chain(f.inner.iter().flatten()) {
+                *uses.entry(v).or_default() += 1;
+            }
+        }
+        let mut cell_uses: HashMap<VertexId, usize> = HashMap::new();
+        for fid in &cell_ids {
+            for &v in &solid.faces[*fid].outer {
+                *cell_uses.entry(v).or_default() += 1;
+            }
+        }
+        for list in extras.values_mut() {
+            list.retain(|x| uses.get(&x.1).copied().unwrap_or(0) > cell_uses.get(&x.1).copied().unwrap_or(0));
+        }
+        extras.retain(|_, list| !list.is_empty());
+    }
+    if std::env::var("ANVIL_RELIEF_DEBUG").is_ok() {
+        let cell_ids: HashSet<crate::FaceId> = cells.values().map(|c| c.0).collect();
+        eprintln!("relief: {} tagged facets, {} cells, {} edges with extras", tagged.len(), cells.len(), extras.len());
+        for i in 0..param.run.len().saturating_sub(1) {
+            let n = (0..segs).filter(|&j| cells.contains_key(&(i, j))).count();
+            if n != segs {
+                eprintln!(
+                    "  row {i} (s {:.1} to {:.1}, r {:.1}): {n} of {segs} cells",
+                    param.cum[i],
+                    param.cum[i + 1],
+                    param.run[i].x
+                );
+            }
+        }
+        for (fid, f) in &tagged {
+            if cell_ids.contains(fid) {
+                continue;
+            }
+            let c = f.outer.iter().map(|&v| solid.pos(v)).sum::<DVec3>() / f.outer.len() as f64;
+            let (rz, theta) = param.frame(c);
+            let lattice = f.outer.iter().filter(|&&v| lattice_of.contains_key(&v)).count();
+            eprintln!(
+                "  refused: {} verts ({} on lattice) at theta {:.1} deg, z {:.1}, r {:.1}",
+                f.outer.len(),
+                lattice,
+                theta.to_degrees(),
+                rz.y,
+                rz.x
+            );
+        }
+    }
     if cells.is_empty() {
         return Err(KernelError::InvalidInput(
             "no whole revolve cells on that surface; put the pattern before cuts that touch the surface".into(),
@@ -565,6 +618,10 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, field: &mut dyn HeightFiel
             }
         }
     }
+    // Drop vertices no face uses any more (discarded extras).
+    let used: HashSet<VertexId> =
+        out.faces.values().flat_map(|f| f.outer.iter().chain(f.inner.iter().flatten()).copied()).collect();
+    out.vertices.retain(|k, _| used.contains(&k));
     out.rebuild_edges();
     out.make_consistent();
     Ok(out)

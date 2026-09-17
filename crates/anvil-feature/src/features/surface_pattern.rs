@@ -139,6 +139,7 @@ impl HeightField for DotField {
     fn exclude_near(&mut self, fixed: &[(f64, f64)], _param: &RevolvedParam) {
         let nt = (std::f64::consts::TAU / self.cell_t).ceil() as i64;
         let mut doomed: Vec<(i64, i64, usize)> = Vec::new();
+        let debug = std::env::var("ANVIL_RELIEF_DEBUG").is_ok();
         for &(s, theta) in fixed {
             let (ks, kt) = self.cell_of(s, theta);
             for ds in -1..=1 {
@@ -169,7 +170,10 @@ impl HeightField for DotField {
         for (a, b, n) in doomed.into_iter().rev() {
             if let Some(list) = self.cells.get_mut(&(a, b)) {
                 if n < list.len() {
-                    list.remove(n);
+                    let d = list.remove(n);
+                    if debug {
+                        eprintln!("  dropped dot at theta {:.1} deg, s {:.1}, r {:.1}", d.theta.to_degrees(), d.s, d.r);
+                    }
                     self.dropped += 1;
                 }
             }
