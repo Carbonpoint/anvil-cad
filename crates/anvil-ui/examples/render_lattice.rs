@@ -74,6 +74,6 @@ fn main() {
             }
         }
         eprintln!("{name}: built in {:.1} s", t0.elapsed().as_secs_f64());
-        write(&out, &format!("lattice_{name}.ppm"), anvil_ui::render_view(&doc, 900, 700, -0.9, 0.5));
+        write(&out, &format!("lattice_{name}.ppm"), anvil_ui::render_view(&doc, 900, 700, 2.3, 0.5));
     }
 }
