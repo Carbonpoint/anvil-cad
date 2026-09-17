@@ -64,6 +64,9 @@ pub const BODY_TYPES: &[&str] = &[
     "combine",
     "hole",
     "surface_pattern",
+    "sprue",
+    "runner",
+    "riser",
 ];
 
 /// Feature type ids that define a plane.

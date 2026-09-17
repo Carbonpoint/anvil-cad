@@ -205,6 +205,35 @@ Mirror, and the patterns take a body feature as input; they default to the
 selected feature. Measure shows the volume and bounding box in the status
 bar.
 
+## Casting tab
+
+The Casting tab holds three features for laying out a sand casting gating
+system. Each one makes a single body, in the Gating group.
+
+**Sprue.** The channel that carries poured metal down into the mold. Set
+the x and y position of its vertical axis and the z of its top rim. It is
+built as one solid of revolution: a pouring cup at the top, a tapered
+shaft below it, and a well at the bottom that slows the metal before it
+reaches the runner. Defaults: pouring cup diameter 40 mm and depth 20 mm,
+sprue top diameter 18 mm, sprue bottom diameter 12 mm, sprue height
+120 mm, well diameter 30 mm and depth 15 mm.
+
+**Runner.** The horizontal channel that carries metal from the sprue well
+to the part. Set a start point and an end point; both ends share the same
+bottom z, since a runner runs flat in the parting plane. The cross
+section is a trapezoid, wider at the bottom than the top, so the sand
+pattern lifts out cleanly. Defaults: width 20 mm, height 15 mm, taper 0.
+Taper is a fraction from 0 to 1 that shrinks the width from the start end
+to the end end, for a runner that narrows along its length.
+
+**Riser.** A reservoir that feeds extra metal into the casting as it
+cools, so shrinkage does not leave a void in the part. It is a cylinder
+on a narrower neck, set by x, y, and the z of the base of the neck.
+Defaults: diameter 50 mm, height 80 mm, neck diameter 25 mm, neck length
+10 mm. When blind is on (the default), the top is domed, so the riser
+closes over and holds its heat longer. When blind is off, the top is
+flat and open.
+
 ## What is not there yet
 
 Fillet, Chamfer, Shell, Combine, and Hole are on the ribbon but report
