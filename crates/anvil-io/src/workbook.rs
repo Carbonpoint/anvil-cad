@@ -215,6 +215,7 @@ pub fn ex04_hex_nut() -> Document {
         angle_deg: "360".into(),
         operation: "intersect".into(),
         target: 1,
+        ..Default::default()
     })); // 3
     doc.add_feature(Box::new(HoleFeature {
         body: 3,

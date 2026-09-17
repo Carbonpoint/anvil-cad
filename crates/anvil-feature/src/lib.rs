@@ -63,6 +63,7 @@ pub const BODY_TYPES: &[&str] = &[
     "shell",
     "combine",
     "hole",
+    "surface_pattern",
 ];
 
 /// Feature type ids that define a plane.
@@ -90,6 +91,13 @@ pub trait Feature: Send + Sync + std::fmt::Debug + std::any::Any {
     /// Put this feature on a picked face. `body` is the feature that made
     /// the face. Returns false if the feature has no placement.
     fn place_on_face(&mut self, _plane: anvil_math::Plane, _body: usize) -> bool {
+        false
+    }
+
+    /// Put this feature on a picked curved surface (all facets that share
+    /// the tag). `body` is the feature that made it. Returns false if the
+    /// feature does not work on surfaces.
+    fn place_on_surface(&mut self, _surface: anvil_kernel::Surface, _body: usize) -> bool {
         false
     }
 

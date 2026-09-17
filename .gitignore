@@ -4,3 +4,4 @@
 *.stl
 *.nc
 .DS_Store
+.claude/

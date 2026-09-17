@@ -18,10 +18,11 @@ pub mod blend;
 pub mod csg;
 pub mod mesh;
 pub mod ops;
+pub mod relief;
 pub mod topology;
 
 pub use mesh::TriMesh;
-pub use topology::{Edge, EdgeId, Face, FaceId, Solid, Surface, Vertex, VertexId};
+pub use topology::{Edge, EdgeId, Face, FaceId, Solid, Surface, SurfaceGeom, Vertex, VertexId};
 
 use anvil_math::{Axis, DVec2, DVec3, Plane};
 use thiserror::Error;
@@ -52,6 +53,18 @@ pub enum BooleanOp {
 pub trait Kernel {
     fn extrude(&self, plane: &Plane, profile: &[DVec2], distance: f64) -> KernelResult<Solid>;
     fn revolve(&self, plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> KernelResult<Solid>;
+    /// Revolve with a chosen facet count per full turn.
+    fn revolve_n(
+        &self,
+        plane: &Plane,
+        profile: &[DVec2],
+        axis: &Axis,
+        angle: f64,
+        segments: usize,
+    ) -> KernelResult<Solid>;
+    /// Refine the facets of one curved surface to about `step` mm and move
+    /// them outward by `height(s, theta)`; see `relief`.
+    fn relief(&self, solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) -> f64) -> KernelResult<Solid>;
     fn boolean(&self, a: &Solid, b: &Solid, op: BooleanOp) -> KernelResult<Solid>;
     fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f64) -> KernelResult<Solid>;
     fn tessellate(&self, solid: &Solid) -> TriMesh;
@@ -92,6 +105,19 @@ impl Kernel for NativeKernel {
     }
     fn revolve(&self, plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> KernelResult<Solid> {
         ops::revolve(plane, profile, axis, angle)
+    }
+    fn revolve_n(
+        &self,
+        plane: &Plane,
+        profile: &[DVec2],
+        axis: &Axis,
+        angle: f64,
+        segments: usize,
+    ) -> KernelResult<Solid> {
+        ops::revolve_n(plane, profile, axis, angle, segments)
+    }
+    fn relief(&self, solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) -> f64) -> KernelResult<Solid> {
+        relief::relief(solid, surface, step, height)
     }
     fn boolean(&self, a: &Solid, b: &Solid, op: BooleanOp) -> KernelResult<Solid> {
         let r = csg::boolean(a, b, op);

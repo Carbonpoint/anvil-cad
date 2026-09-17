@@ -159,8 +159,12 @@ impl Node {
         std::mem::swap(&mut self.front, &mut self.back);
     }
 
-    fn clip_polygons(&self, polys: Vec<Polygon>) -> Vec<Polygon> {
-        let Some(plane) = self.plane else { return polys };
+    /// Clip polygons against this tree. At a leaf, `keep` decides whether a
+    /// polygon survives. For a complete tree this matches csg.js (keep in
+    /// front leaves, drop in back leaves); for a tree built from only the
+    /// polygons near the other body, `keep` tests the full mesh instead.
+    fn clip_polygons(&self, polys: Vec<Polygon>, keep: &dyn Fn(&Polygon) -> bool) -> Vec<Polygon> {
+        let Some(plane) = self.plane else { return polys.into_iter().filter(|p| keep(p)).collect() };
         let mut front = Vec::new();
         let mut back = Vec::new();
         for p in &polys {
@@ -170,25 +174,25 @@ impl Node {
             back.extend(cb);
         }
         let front = match &self.front {
-            Some(f) => f.clip_polygons(front),
-            None => front,
+            Some(f) => f.clip_polygons(front, keep),
+            None => front.into_iter().filter(|p| keep(p)).collect(),
         };
         let back = match &self.back {
-            Some(b) => b.clip_polygons(back),
-            None => Vec::new(),
+            Some(b) => b.clip_polygons(back, keep),
+            None => back.into_iter().filter(|p| keep(p)).collect(),
         };
         let mut out = front;
         out.extend(back);
         out
     }
 
-    fn clip_to(&mut self, other: &Node) {
-        self.polygons = other.clip_polygons(std::mem::take(&mut self.polygons));
+    fn clip_to(&mut self, other: &Node, keep: &dyn Fn(&Polygon) -> bool) {
+        self.polygons = other.clip_polygons(std::mem::take(&mut self.polygons), keep);
         if let Some(f) = &mut self.front {
-            f.clip_to(other);
+            f.clip_to(other, keep);
         }
         if let Some(b) = &mut self.back {
-            b.clip_to(other);
+            b.clip_to(other, keep);
         }
     }
 
@@ -314,44 +318,196 @@ fn retag(s: &Solid, base: u32) -> Solid {
     c
 }
 
+/// Point-in-solid test by ray parity along +x, with a grid over the (y, z)
+/// projection so each query touches only a few triangles.
+struct InsideTest {
+    tris: Vec<[DVec3; 3]>,
+    grid: std::collections::HashMap<(i64, i64), Vec<u32>>,
+    cell: f64,
+    origin: (f64, f64),
+    jitter: DVec3,
+}
+
+impl InsideTest {
+    fn new(polys: &[Polygon]) -> Self {
+        let mut tris: Vec<[DVec3; 3]> = Vec::with_capacity(polys.len());
+        let mut lo = DVec3::splat(f64::INFINITY);
+        let mut hi = DVec3::splat(f64::NEG_INFINITY);
+        for p in polys {
+            for k in 1..p.verts.len() - 1 {
+                tris.push([p.verts[0], p.verts[k], p.verts[k + 1]]);
+            }
+            for v in &p.verts {
+                lo = lo.min(*v);
+                hi = hi.max(*v);
+            }
+        }
+        let diag = (hi - lo).length().max(1e-9);
+        let per_axis = ((tris.len() as f64).sqrt().clamp(8.0, 1024.0)).floor();
+        let cell = ((hi.y - lo.y).max(hi.z - lo.z) / per_axis).max(diag * 1e-6);
+        let origin = (lo.y, lo.z);
+        let key = |y: f64, z: f64| (((y - origin.0) / cell).floor() as i64, ((z - origin.1) / cell).floor() as i64);
+        let mut grid: std::collections::HashMap<(i64, i64), Vec<u32>> = std::collections::HashMap::new();
+        for (i, t) in tris.iter().enumerate() {
+            let (y0, z0) = (t[0].y.min(t[1].y).min(t[2].y), t[0].z.min(t[1].z).min(t[2].z));
+            let (y1, z1) = (t[0].y.max(t[1].y).max(t[2].y), t[0].z.max(t[1].z).max(t[2].z));
+            let (a, b) = (key(y0, z0), key(y1, z1));
+            for ky in a.0..=b.0 {
+                for kz in a.1..=b.1 {
+                    grid.entry((ky, kz)).or_default().push(i as u32);
+                }
+            }
+        }
+        // A fixed odd offset keeps the ray off shared edges and vertices.
+        let jitter = DVec3::new(0.0, 1.7e-7, 2.9e-7) * diag;
+        InsideTest { tris, grid, cell, origin, jitter }
+    }
+
+    fn inside(&self, p: DVec3) -> bool {
+        let p = p + self.jitter;
+        let k =
+            (((p.y - self.origin.0) / self.cell).floor() as i64, ((p.z - self.origin.1) / self.cell).floor() as i64);
+        let Some(list) = self.grid.get(&k) else { return false };
+        let mut hits = 0usize;
+        for &i in list {
+            let t = &self.tris[i as usize];
+            // 2D point in triangle on the (y, z) projection.
+            let e = |a: DVec3, b: DVec3| (b.y - a.y) * (p.z - a.z) - (b.z - a.z) * (p.y - a.y);
+            let (d0, d1, d2) = (e(t[0], t[1]), e(t[1], t[2]), e(t[2], t[0]));
+            let has_neg = d0 < 0.0 || d1 < 0.0 || d2 < 0.0;
+            let has_pos = d0 > 0.0 || d1 > 0.0 || d2 > 0.0;
+            if has_neg && has_pos {
+                continue;
+            }
+            let n = (t[1] - t[0]).cross(t[2] - t[0]);
+            if n.x.abs() < 1e-18 {
+                continue;
+            }
+            let x = t[0].x - (n.y * (p.y - t[0].y) + n.z * (p.z - t[0].z)) / n.x;
+            if x > p.x {
+                hits += 1;
+            }
+        }
+        hits % 2 == 1
+    }
+}
+
+fn poly_bounds(polys: &[Polygon]) -> (DVec3, DVec3) {
+    let mut lo = DVec3::splat(f64::INFINITY);
+    let mut hi = DVec3::splat(f64::NEG_INFINITY);
+    for p in polys {
+        for v in &p.verts {
+            lo = lo.min(*v);
+            hi = hi.max(*v);
+        }
+    }
+    (lo, hi)
+}
+
+fn touches(p: &Polygon, lo: DVec3, hi: DVec3) -> bool {
+    let mut plo = DVec3::splat(f64::INFINITY);
+    let mut phi = DVec3::splat(f64::NEG_INFINITY);
+    for v in &p.verts {
+        plo = plo.min(*v);
+        phi = phi.max(*v);
+    }
+    plo.x <= hi.x && phi.x >= lo.x && plo.y <= hi.y && phi.y >= lo.y && plo.z <= hi.z && phi.z >= lo.z
+}
+
+fn centroid(p: &Polygon) -> DVec3 {
+    p.verts.iter().copied().sum::<DVec3>() / p.verts.len() as f64
+}
+
+/// Boolean of two solids. Polygons that lie outside the other body's
+/// bounding box cannot be cut, so they skip the BSP entirely. The trees are
+/// built from the remaining polygons only, and leaves are classified with a
+/// ray test against the full mesh. Large smooth bodies with a small tool
+/// (a spout on a kettle) stay fast this way.
 pub fn boolean(a: &Solid, b: &Solid, op: BooleanOp) -> Solid {
     let a = retag(a, 1_000_000);
-    let b = retag(b, 2_000_000);
-    let mut na = Node::new(to_polygons(&a));
-    let mut nb = Node::new(to_polygons(&b));
-    let polys = match op {
+    let mut b = retag(b, 2_000_000);
+    // Curved surface ids of the two bodies must stay distinct.
+    b.offset_surface_ids(a.max_surface_id().map(|m| m + 1).unwrap_or(0));
+    let pa = to_polygons(&a);
+    let pb = to_polygons(&b);
+    let (alo, ahi) = poly_bounds(&pa);
+    let (blo, bhi) = poly_bounds(&pb);
+    let diag = (ahi - alo).length().max((bhi - blo).length()).max(1e-9);
+    let pad = DVec3::splat(diag * 1e-5);
+    let (alo, ahi, blo, bhi) = (alo - pad, ahi + pad, blo - pad, bhi + pad);
+    let test_a = InsideTest::new(&pa);
+    let test_b = InsideTest::new(&pb);
+    let nudge = diag * 1e-6;
+    let outside_a = |p: &Polygon| !test_a.inside(centroid(p) + p.normal * nudge);
+    let inside_a = |p: &Polygon| test_a.inside(centroid(p) + p.normal * nudge);
+    let outside_b = |p: &Polygon| !test_b.inside(centroid(p) + p.normal * nudge);
+    let inside_b = |p: &Polygon| test_b.inside(centroid(p) + p.normal * nudge);
+    let (near_a, far_a): (Vec<Polygon>, Vec<Polygon>) = pa.into_iter().partition(|p| touches(p, blo, bhi));
+    let (near_b, far_b): (Vec<Polygon>, Vec<Polygon>) = pb.into_iter().partition(|p| touches(p, alo, ahi));
+    let flip_all = |v: Vec<Polygon>| -> Vec<Polygon> {
+        v.into_iter()
+            .map(|mut p| {
+                p.flip();
+                p
+            })
+            .collect()
+    };
+    let mut polys: Vec<Polygon> = Vec::new();
+    let disjoint = near_a.is_empty() || near_b.is_empty();
+    match op {
         BooleanOp::Union => {
-            na.clip_to(&nb);
-            nb.clip_to(&na);
-            nb.invert();
-            nb.clip_to(&na);
-            nb.invert();
-            na.build(nb.all_polygons());
-            na.all_polygons()
+            if disjoint {
+                polys.extend(near_a);
+                polys.extend(near_b);
+            } else {
+                let mut na = Node::new(near_a);
+                let mut nb = Node::new(near_b);
+                na.clip_to(&nb, &outside_b);
+                nb.clip_to(&na, &outside_a);
+                nb.invert();
+                nb.clip_to(&na, &outside_a);
+                nb.invert();
+                polys.extend(na.all_polygons());
+                polys.extend(nb.all_polygons());
+            }
+            polys.extend(far_a);
+            polys.extend(far_b);
         }
         BooleanOp::Subtract => {
-            na.invert();
-            na.clip_to(&nb);
-            nb.clip_to(&na);
-            nb.invert();
-            nb.clip_to(&na);
-            nb.invert();
-            na.build(nb.all_polygons());
-            na.invert();
-            na.all_polygons()
+            if disjoint {
+                polys.extend(near_a);
+            } else {
+                let mut na = Node::new(near_a);
+                let mut nb = Node::new(near_b);
+                na.invert();
+                na.clip_to(&nb, &outside_b);
+                nb.clip_to(&na, &inside_a);
+                nb.invert();
+                nb.clip_to(&na, &inside_a);
+                nb.invert();
+                // The tool's surviving polygons face into the cut.
+                polys.extend(flip_all(na.all_polygons()));
+                polys.extend(flip_all(nb.all_polygons()));
+            }
+            polys.extend(far_a);
         }
         BooleanOp::Intersect => {
-            na.invert();
-            nb.clip_to(&na);
-            nb.invert();
-            na.clip_to(&nb);
-            nb.clip_to(&na);
-            na.build(nb.all_polygons());
-            na.invert();
-            na.all_polygons()
+            if !disjoint {
+                let mut na = Node::new(near_a);
+                let mut nb = Node::new(near_b);
+                na.invert();
+                nb.clip_to(&na, &inside_a);
+                nb.invert();
+                na.clip_to(&nb, &inside_b);
+                nb.clip_to(&na, &inside_a);
+                polys.extend(flip_all(na.all_polygons()));
+                polys.extend(flip_all(nb.all_polygons()));
+            }
         }
-    };
+    }
     let mut s = from_polygons(polys);
+    s.surfaces = a.surfaces.clone();
+    s.surfaces.extend(b.surfaces.iter().map(|(k, v)| (*k, v.clone())));
     s.fix_t_junctions();
     // Merging fragments keeps later booleans fast. Keep the merge only if
     // it does not make the mesh less watertight.

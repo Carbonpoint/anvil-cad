@@ -1,6 +1,6 @@
 //! Modeling operations.
 
-use crate::topology::{Solid, Surface, VertexId};
+use crate::topology::{Solid, Surface, SurfaceGeom, VertexId};
 use crate::{BooleanOp, EdgeId, KernelError, KernelResult};
 use anvil_math::{Axis, DVec2, Plane};
 
@@ -118,17 +118,30 @@ pub fn extrude_with_holes(plane: &Plane, outer: &[DVec2], holes: &[Vec<DVec2>], 
 /// Revolve a closed profile about `axis` (given in world space, lying in the
 /// sketch plane) by `angle` radians. A full 2*pi gives a closed ring.
 pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> KernelResult<Solid> {
+    revolve_n(plane, profile, axis, angle, REVOLVE_SEGMENTS)
+}
+
+/// Turn angle (radians) between profile segments that starts a new
+/// surface run. Smooth curves stay one surface; corners split them.
+const RUN_CORNER: f64 = 0.35;
+
+/// Like `revolve`, with `segments` facets per full turn. Each smooth run of
+/// the profile becomes its own `Surface::Revolved` id, and the solid
+/// records the run geometry in `surfaces`, so a face can be selected and
+/// patterned as one continuous surface.
+pub fn revolve_n(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64, segments: usize) -> KernelResult<Solid> {
     if profile.len() < 3 {
         return Err(KernelError::DegenerateProfile);
     }
     if angle.abs() <= anvil_math::ANGULAR_TOL {
         return Err(KernelError::InvalidInput("revolve angle is zero".into()));
     }
+    let segments = segments.clamp(6, 4096);
     let angle = angle.clamp(-std::f64::consts::TAU, std::f64::consts::TAU);
     let full = (angle.abs() - std::f64::consts::TAU).abs() < 1e-9;
     let prof = ccw(profile);
     let n = prof.len();
-    let steps = ((angle.abs() / std::f64::consts::TAU) * REVOLVE_SEGMENTS as f64).ceil().max(1.0) as usize;
+    let steps = ((angle.abs() / std::f64::consts::TAU) * segments as f64).ceil().max(1.0) as usize;
     let rings = if full { steps } else { steps + 1 };
 
     // Points must all lie on one side of the axis.
@@ -142,16 +155,56 @@ pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> Ker
     // "negative" side relative to rotation direction.
     let flip = (signs.iter().sum::<f64>() < 0.0) != (angle < 0.0);
 
+    // Axis frame: r along `x_axis` (from the axis toward the profile), z along the axis.
+    let radial = |p: anvil_math::DVec3| {
+        let d = p - axis.origin;
+        d - axis.dir * d.dot(axis.dir)
+    };
+    let x_axis = world
+        .iter()
+        .map(|&p| radial(p))
+        .max_by(|a, b| a.length_squared().total_cmp(&b.length_squared()))
+        .map(|v| v.normalize_or_zero())
+        .unwrap_or(anvil_math::DVec3::X);
+    let rz = |p: anvil_math::DVec3| DVec2::new(radial(p).dot(x_axis), (p - axis.origin).dot(axis.dir));
+    let on_axis: Vec<bool> = world.iter().map(|&p| radial(p).length() < 1e-9).collect();
+
+    // Split the closed profile into smooth runs. A run breaks at a corner
+    // or at a segment lying on the axis (which produces no faces).
+    let seg_dir = |i: usize| (rz(world[(i + 1) % n]) - rz(world[i])).normalize_or_zero();
+    let seg_on_axis = |i: usize| on_axis[i] && on_axis[(i + 1) % n];
+    let corner_at = |i: usize| {
+        // Corner between segment i-1 and segment i.
+        let a = seg_dir((i + n - 1) % n);
+        let b = seg_dir(i);
+        seg_on_axis((i + n - 1) % n) || seg_on_axis(i) || a.dot(b) < RUN_CORNER.cos()
+    };
+    let mut run_of_seg = vec![0u32; n];
+    let mut runs: Vec<Vec<usize>> = Vec::new();
+    // Start at a corner if there is one, so a smooth loop is one run.
+    let start = (0..n).find(|&i| corner_at(i)).unwrap_or(0);
+    let mut current: Vec<usize> = Vec::new();
+    for k in 0..n {
+        let i = (start + k) % n;
+        if k > 0 && corner_at(i) && !current.is_empty() {
+            runs.push(std::mem::take(&mut current));
+        }
+        if !seg_on_axis(i) {
+            current.push(i);
+        }
+    }
+    if !current.is_empty() {
+        runs.push(current);
+    }
+    for (id, segs) in runs.iter().enumerate() {
+        for &i in segs {
+            run_of_seg[i] = id as u32;
+        }
+    }
+
     let mut s = Solid::new();
     let mut ring_ids: Vec<Vec<VertexId>> = Vec::with_capacity(rings);
     // Profile points on the axis become one pole vertex shared by all rings.
-    let on_axis: Vec<bool> = world
-        .iter()
-        .map(|&p| {
-            let d = p - axis.origin;
-            (d - axis.dir * d.dot(axis.dir)).length() < 1e-9
-        })
-        .collect();
     let mut poles: Vec<Option<VertexId>> = vec![None; world.len()];
     for r in 0..rings {
         let t = angle * r as f64 / steps as f64;
@@ -166,7 +219,6 @@ pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> Ker
         }
         ring_ids.push(ids);
     }
-    let surf_id = 0u32;
     for r in 0..steps {
         let r2 = (r + 1) % rings;
         for i in 0..n {
@@ -186,7 +238,7 @@ pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> Ker
             } else if (pts[3] - pts[2]).length() < 1e-9 {
                 quad.remove(2);
             }
-            s.add_face(quad, Surface::Revolved { id: surf_id });
+            s.push_face(quad, Surface::Revolved { id: run_of_seg[i] });
         }
     }
     if !full {
@@ -197,9 +249,17 @@ pub fn revolve(plane: &Plane, profile: &[DVec2], axis: &Axis, angle: f64) -> Ker
         } else {
             end.reverse();
         }
-        s.add_face(start, Surface::Plane);
-        s.add_face(end, Surface::Plane);
+        s.push_face(start, Surface::Plane);
+        s.push_face(end, Surface::Plane);
     }
+    for (id, segs) in runs.iter().enumerate() {
+        let mut run: Vec<DVec2> = segs.iter().map(|&i| rz(world[i])).collect();
+        if let Some(&last) = segs.last() {
+            run.push(rz(world[(last + 1) % n]));
+        }
+        s.surfaces.insert(id as u32, SurfaceGeom::Revolved { axis: *axis, x_axis, run, segments });
+    }
+    s.rebuild_edges();
     s.make_consistent();
     Ok(s)
 }

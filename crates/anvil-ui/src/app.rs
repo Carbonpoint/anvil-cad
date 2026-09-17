@@ -548,6 +548,17 @@ impl AnvilApp {
                     self.selected_edges.clear();
                 }
             }
+            if let (false, Some((_, fid, tri))) = (placed, self.selected_face) {
+                // A curved surface first: features like Pattern on face
+                // take every facet that shares the picked face's tag.
+                if let (Some(solid), Some((body_fi, _))) =
+                    (self.scene.solid_of_tri(&self.doc, tri), self.scene.body_of_tri(tri))
+                {
+                    if let Some(face) = solid.faces.get(fid) {
+                        placed = f.place_on_surface(face.surface, body_fi);
+                    }
+                }
+            }
             if let (false, Some((_, _, tri))) = (placed, self.selected_face) {
                 if let (Some(plane), Some((body_fi, _))) =
                     (self.scene.face_plane(&self.doc, tri), self.scene.body_of_tri(tri))

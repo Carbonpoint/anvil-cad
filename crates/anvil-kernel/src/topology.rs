@@ -1,7 +1,8 @@
 //! B-rep topology.
 
-use anvil_math::{Aabb, DVec3};
+use anvil_math::{Aabb, Axis, DVec2, DVec3};
 use slotmap::{new_key_type, SlotMap};
+use std::collections::HashMap;
 
 new_key_type! {
     pub struct VertexId;
@@ -45,11 +46,44 @@ pub struct Face {
     pub surface: Surface,
 }
 
+/// The analytic geometry behind a group of facets that share one curved
+/// `Surface` tag. Features that pattern or refine a face need this to map a
+/// point on the facets back to surface parameters.
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SurfaceGeom {
+    /// Surface of revolution. `run` is the profile polyline as `(r, z)` in
+    /// the axis frame: `r` is the distance from the axis, `z` the height
+    /// along `axis.dir`. `x_axis` is the radial direction at angle zero and
+    /// `segments` is the facet count per full turn.
+    Revolved { axis: Axis, x_axis: DVec3, run: Vec<DVec2>, segments: usize },
+}
+
+impl SurfaceGeom {
+    /// Apply a point transform. Directions follow the transformed points.
+    pub fn transformed(&self, f: &dyn Fn(DVec3) -> DVec3) -> SurfaceGeom {
+        match self {
+            SurfaceGeom::Revolved { axis, x_axis, run, segments } => {
+                let o = f(axis.origin);
+                let dir = (f(axis.origin + axis.dir) - o).normalize_or_zero();
+                let xa = (f(axis.origin + *x_axis) - o).normalize_or_zero();
+                let scale = (f(axis.origin + axis.dir) - o).length();
+                let run =
+                    if (scale - 1.0).abs() > 1e-9 { run.iter().map(|p| *p * scale).collect() } else { run.clone() };
+                SurfaceGeom::Revolved { axis: Axis { origin: o, dir }, x_axis: xa, run, segments: *segments }
+            }
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct Solid {
     pub vertices: SlotMap<VertexId, Vertex>,
     pub edges: SlotMap<EdgeId, Edge>,
     pub faces: SlotMap<FaceId, Face>,
+    /// Analytic geometry of curved surfaces, keyed by the `id` in the
+    /// `Surface` tag. Absent for surfaces the kernel cannot describe.
+    #[serde(default)]
+    pub surfaces: HashMap<u32, SurfaceGeom>,
 }
 
 impl Solid {
@@ -59,6 +93,58 @@ impl Solid {
 
     pub fn add_vertex(&mut self, pos: DVec3) -> VertexId {
         self.vertices.insert(Vertex { pos })
+    }
+
+    /// Add a face without touching the edge list. Call `rebuild_edges`
+    /// once at the end. `add_face` scans every edge per call, which is too
+    /// slow for meshes with many thousands of faces.
+    pub fn push_face(&mut self, outer: Vec<VertexId>, surface: Surface) -> FaceId {
+        self.faces.insert(Face { outer, inner: Vec::new(), surface })
+    }
+
+    /// Rebuild the edge list from the face loops.
+    pub fn rebuild_edges(&mut self) {
+        self.edges.clear();
+        let mut seen = std::collections::HashSet::new();
+        let loops: Vec<Vec<VertexId>> =
+            self.faces.values().flat_map(|f| std::iter::once(f.outer.clone()).chain(f.inner.iter().cloned())).collect();
+        for lp in loops {
+            for i in 0..lp.len() {
+                let (a, b) = (lp[i], lp[(i + 1) % lp.len()]);
+                let k = if a < b { (a, b) } else { (b, a) };
+                if seen.insert(k) {
+                    self.edges.insert(Edge { a, b });
+                }
+            }
+        }
+    }
+
+    /// The largest curved surface id in use, if any.
+    pub fn max_surface_id(&self) -> Option<u32> {
+        self.faces
+            .values()
+            .filter_map(|f| match f.surface {
+                Surface::Cylindrical { id } | Surface::Revolved { id } if id < CSG_TAG_BASE => Some(id),
+                _ => None,
+            })
+            .chain(self.surfaces.keys().copied())
+            .max()
+    }
+
+    /// Renumber every curved surface id by `offset`, tags and geometry
+    /// alike. Used before a boolean so ids from two bodies stay distinct.
+    pub fn offset_surface_ids(&mut self, offset: u32) {
+        if offset == 0 {
+            return;
+        }
+        for f in self.faces.values_mut() {
+            f.surface = match f.surface {
+                Surface::Cylindrical { id } if id < CSG_TAG_BASE => Surface::Cylindrical { id: id + offset },
+                Surface::Revolved { id } if id < CSG_TAG_BASE => Surface::Revolved { id: id + offset },
+                s => s,
+            };
+        }
+        self.surfaces = std::mem::take(&mut self.surfaces).into_iter().map(|(k, v)| (k + offset, v)).collect();
     }
 
     pub fn add_face(&mut self, outer: Vec<VertexId>, surface: Surface) -> FaceId {
@@ -126,6 +212,9 @@ impl Solid {
         let mut s = self.clone();
         for v in s.vertices.values_mut() {
             v.pos = f(v.pos);
+        }
+        for g in s.surfaces.values_mut() {
+            *g = g.transformed(&f);
         }
         if flips_orientation {
             for face in s.faces.values_mut() {
