@@ -15,8 +15,11 @@ pub enum RibbonAction {
     Redo,
     NewDocument,
     Save,
+    /// Save to a path chosen in a file dialog.
+    SaveAs,
     Load,
-    ExportStl,
+    /// Open the Export dialog: pick a format, then a file.
+    Export,
     FitView,
     DemoPart,
     ExportGcode,
@@ -32,8 +35,6 @@ pub enum RibbonAction {
     CenterOfMass,
     BillOfMaterials,
     ToggleUnits,
-    Export3mf,
-    ExportStlParts,
     SampleCard,
     PressPull,
     Workbook(u8),
@@ -115,8 +116,23 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
         ),
         (
             "File",
+            "Document",
+            RibbonButton {
+                label: "Save As",
+                tooltip: "Choose where to save the .anvil document",
+                order: 3,
+                kind: A(SaveAs),
+            },
+        ),
+        (
+            "File",
             "Export",
-            RibbonButton { label: "STL", tooltip: "Export all bodies as binary STL", order: 0, kind: A(ExportStl) },
+            RibbonButton {
+                label: "Export",
+                tooltip: "Choose a format (STL, 3MF, OBJ, PLY, OFF, AMF, glTF, STEP) and where to save",
+                order: 0,
+                kind: A(Export),
+            },
         ),
         (
             "File",
@@ -187,26 +203,6 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "Solid",
             "Manage",
             RibbonButton { label: "Units mm/in", tooltip: "Toggle the display unit", order: 2, kind: A(ToggleUnits) },
-        ),
-        (
-            "File",
-            "Export",
-            RibbonButton {
-                label: "3MF (parts)",
-                tooltip: "Export a 3MF with one object per feature, for Bambu Studio or PrusaSlicer",
-                order: 1,
-                kind: A(Export3mf),
-            },
-        ),
-        (
-            "File",
-            "Export",
-            RibbonButton {
-                label: "STL per part",
-                tooltip: "Export one STL file per feature",
-                order: 2,
-                kind: A(ExportStlParts),
-            },
         ),
         (
             "File",

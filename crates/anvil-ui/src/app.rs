@@ -57,6 +57,12 @@ pub struct AnvilApp {
     section_axis: usize,
     section_offset: f64,
     section_flip: bool,
+    /// Export dialog open, with the format picked so far.
+    export_dialog: Option<anvil_io::export::Format>,
+    /// Last format used, the default next time.
+    export_format: anvil_io::export::Format,
+    /// A write waiting for the user to confirm an overwrite.
+    pending_write: Option<(PathBuf, anvil_io::export::Format)>,
 }
 
 /// What a click in the model viewport may select.
@@ -91,6 +97,9 @@ impl AnvilApp {
             hovered_datum: None,
             file_path: "part.anvil".into(),
             status: "Ready".into(),
+            export_dialog: None,
+            export_format: anvil_io::export::Format::Stl,
+            pending_write: None,
             saved_camera: None,
             com_marker: None,
             color_edit: [140, 170, 205],
@@ -239,6 +248,12 @@ impl AnvilApp {
                     Err(e) => format!("Save failed: {e}"),
                 };
             }
+            RibbonAction::SaveAs => {
+                self.choose_file(anvil_io::export::Format::Anvil);
+            }
+            RibbonAction::Export => {
+                self.export_dialog = Some(self.export_format);
+            }
             RibbonAction::Load => {
                 let p = PathBuf::from(&self.file_path);
                 match anvil_io::load_document(&p) {
@@ -254,14 +269,6 @@ impl AnvilApp {
                     }
                     Err(e) => self.status = format!("Load failed: {e}"),
                 }
-            }
-            RibbonAction::ExportStl => {
-                self.refresh_scene();
-                let p = PathBuf::from(&self.file_path).with_extension("stl");
-                self.status = match anvil_io::write_stl(&self.scene.mesh, &p) {
-                    Ok(()) => format!("Wrote {} ({} triangles)", p.display(), self.scene.mesh.triangle_count()),
-                    Err(e) => format!("STL export failed: {e}"),
-                };
             }
             RibbonAction::ExportGcode => {
                 let profile = self
@@ -420,20 +427,6 @@ impl AnvilApp {
                     "BOM: {} items, total mass {total_mass:.2} g. Full list in the log (RUST_LOG=info).",
                     lines.len()
                 );
-            }
-            RibbonAction::Export3mf => {
-                let p = PathBuf::from(&self.file_path).with_extension("3mf");
-                self.status = match anvil_io::write_3mf(&self.doc, &p) {
-                    Ok(n) => format!("Wrote {} with {n} objects (one per feature)", p.display()),
-                    Err(e) => format!("3MF export failed: {e}"),
-                };
-            }
-            RibbonAction::ExportStlParts => {
-                let p = PathBuf::from(&self.file_path).with_extension("stl");
-                self.status = match anvil_io::write_stl_parts(&self.doc, &p) {
-                    Ok(files) => format!("Wrote {} STL files next to {}", files.len(), p.display()),
-                    Err(e) => format!("STL export failed: {e}"),
-                };
             }
             RibbonAction::SampleCard => {
                 self.doc = anvil_io::business_card("Your Name", "https://www.linkedin.com/in/your-handle");
@@ -1516,8 +1509,107 @@ impl AnvilApp {
 
 use anvil_feature::Feature;
 
+impl AnvilApp {
+    /// Open the native save dialog for `format`, starting from the current
+    /// document name. An existing file asks for confirmation first.
+    fn choose_file(&mut self, format: anvil_io::export::Format) {
+        let stem = PathBuf::from(&self.file_path);
+        let stem = stem.file_stem().and_then(|s| s.to_str()).unwrap_or("part").to_string();
+        let dir = PathBuf::from(&self.file_path).parent().map(|p| p.to_path_buf()).filter(|p| p.is_dir());
+        let mut dialog = rfd::FileDialog::new()
+            .set_title(format!("Export as {}", format.label()))
+            .add_filter(format.label(), &[format.extension()])
+            .set_file_name(format!("{stem}.{}", format.extension()));
+        if let Some(d) = dir {
+            dialog = dialog.set_directory(d);
+        }
+        let Some(mut path) = dialog.save_file() else {
+            self.status = "Export cancelled".into();
+            return;
+        };
+        if path.extension().is_none() {
+            path.set_extension(format.extension());
+        }
+        self.export_format = format;
+        self.export_dialog = None;
+        if path.exists() {
+            self.pending_write = Some((path, format));
+        } else {
+            self.write_file(path, format);
+        }
+    }
+
+    fn write_file(&mut self, path: PathBuf, format: anvil_io::export::Format) {
+        self.refresh_scene();
+        self.status = match anvil_io::export::write(&self.doc, format, &path) {
+            Ok(note) => note,
+            Err(e) => format!("{} export failed: {e}", format.label()),
+        };
+        if format == anvil_io::export::Format::Anvil {
+            self.file_path = path.display().to_string();
+        }
+    }
+
+    /// The Export dialog (format list) and the overwrite confirmation.
+    fn export_windows(&mut self, ctx: &egui::Context) {
+        use anvil_io::export::Format;
+        if let Some(mut format) = self.export_dialog {
+            let mut open = true;
+            let mut choose = false;
+            let mut cancel = false;
+            egui::Window::new("Export").collapsible(false).resizable(false).open(&mut open).show(ctx, |ui| {
+                ui.label("Format:");
+                for f in Format::ALL {
+                    ui.radio_value(&mut format, f, f.label()).on_hover_text(f.hint());
+                }
+                ui.separator();
+                ui.label(format.hint());
+                ui.horizontal(|ui| {
+                    if ui.button("Choose file and export").clicked() {
+                        choose = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+            self.export_dialog = if open && !cancel { Some(format) } else { None };
+            if choose {
+                self.choose_file(format);
+            }
+        }
+        if let Some((path, format)) = self.pending_write.clone() {
+            let mut decided: Option<bool> = None;
+            egui::Window::new("Replace file?").collapsible(false).resizable(false).show(ctx, |ui| {
+                ui.label(format!("{} already exists.", path.display()));
+                ui.label("Replace it with this export?");
+                ui.horizontal(|ui| {
+                    if ui.button("Replace").clicked() {
+                        decided = Some(true);
+                    }
+                    if ui.button("Keep the old file").clicked() {
+                        decided = Some(false);
+                    }
+                });
+            });
+            match decided {
+                Some(true) => {
+                    self.pending_write = None;
+                    self.write_file(path, format);
+                }
+                Some(false) => {
+                    self.pending_write = None;
+                    self.status = format!("Kept {}", path.display());
+                }
+                None => {}
+            }
+        }
+    }
+}
+
 impl eframe::App for AnvilApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.export_windows(ctx);
         let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {
             (i.modifiers.command && i.key_pressed(egui::Key::Z), i.modifiers.command && i.key_pressed(egui::Key::Y))

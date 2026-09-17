@@ -3,9 +3,11 @@
 //! * `.anvil`: native document, JSON today. See ADR 0002 for the planned
 //!   zip container with binary blobs.
 //! * `.stl`: binary STL export of tessellated bodies.
-//! * STEP, IGES, 3MF, DXF: planned. See `docs/research/04-...md`.
+//! * `export`: STL, 3MF, OBJ, PLY, OFF, AMF, glTF, and STEP (faceted
+//!   B-rep) behind one `Format` list for the Export dialog.
 
 pub mod casting;
+pub mod export;
 pub mod kettle;
 pub mod workbook;
 
@@ -179,6 +181,18 @@ pub fn write_stl_parts(doc: &Document, stem: &Path) -> Result<Vec<std::path::Pat
 /// Write a 3MF with one object per feature. Slicers such as Bambu Studio
 /// and PrusaSlicer load each object as a separate part.
 pub fn write_3mf(doc: &Document, path: &Path) -> Result<usize, IoError> {
+    write_3mf_impl(doc, path, false)
+}
+
+/// Write a 3MF with one object built from one component per feature.
+/// Slicers load it as a single object with parts and merge overlapping
+/// parts when slicing, so a model of many joined or touching features
+/// prints as one piece.
+pub fn write_3mf_group(doc: &Document, path: &Path) -> Result<usize, IoError> {
+    write_3mf_impl(doc, path, true)
+}
+
+fn write_3mf_impl(doc: &Document, path: &Path, group: bool) -> Result<usize, IoError> {
     let parts = document_parts(doc);
     let mut model = String::new();
     model.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<model unit=\"millimeter\" xml:lang=\"en-US\" xmlns=\"http://schemas.microsoft.com/3dmanufacturing/core/2015/02\">\n<resources>\n");
@@ -197,9 +211,24 @@ pub fn write_3mf(doc: &Document, path: &Path) -> Result<usize, IoError> {
         }
         model.push_str("</triangles></mesh></object>\n");
     }
+    if group {
+        model.push_str(&format!(
+            "<object id=\"{}\" name=\"{}\" type=\"model\"><components>\n",
+            parts.len() + 1,
+            xml_escape(&doc.name)
+        ));
+        for k in 0..parts.len() {
+            model.push_str(&format!("<component objectid=\"{}\"/>\n", k + 1));
+        }
+        model.push_str("</components></object>\n");
+    }
     model.push_str("</resources>\n<build>\n");
-    for k in 0..parts.len() {
-        model.push_str(&format!("<item objectid=\"{}\"/>\n", k + 1));
+    if group {
+        model.push_str(&format!("<item objectid=\"{}\"/>\n", parts.len() + 1));
+    } else {
+        for k in 0..parts.len() {
+            model.push_str(&format!("<item objectid=\"{}\"/>\n", k + 1));
+        }
     }
     model.push_str("</build>\n</model>\n");
     let content_types = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"model\" ContentType=\"application/vnd.ms-package.3dmanufacturing-3dmodel+xml\"/></Types>";
@@ -213,7 +242,7 @@ pub fn write_3mf(doc: &Document, path: &Path) -> Result<usize, IoError> {
     Ok(parts.len())
 }
 
-fn xml_escape(s: &str) -> String {
+pub(crate) fn xml_escape(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
 }
 
