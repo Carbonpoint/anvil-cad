@@ -19,7 +19,7 @@ the mold. Stage 5 is the simulation.
 | --- | --- | --- |
 | 1 | Body of revolution with dots | Hobnail feature (revolve with relief), localized booleans |
 | 2 | Spout, lugs, bail, lid, knob | Tapered pipe, sample document `kettle()` |
-| 3 | Sprue, runner, gates, riser | Casting ribbon tab |
+| 3 | Sprue, runner, gates, riser | Casting ribbon tab, first layout on the kettle |
 | 4 | Pattern halves, core, core prints | Parting plane split, draft check, shrink scale |
 | 5 | Fill and solidification | Export to Truchas or OpenFOAM, or a built-in voxel model |
 
@@ -98,6 +98,23 @@ spout base and the lugs, the way a real casting looks.
 Expressions: dot_pitch, dot_size, dot_height, spout_d, spout_tip,
 bore_d, bore_tip, bail_d, lug_hole, segments. Change one in the
 Expressions panel and the kettle rebuilds.
+
+## Gating (stage 3, first layout)
+
+File > Samples > Kettle + gating, or `anvil_io::kettle::kettle_gated()`.
+The parting plane is at the ridge (z = 30), the widest section: the drag
+holds the base and the cope holds the dome and the spout. A sprue on
+the side away from the spout has its pouring cup at z = 150 and its well
+below the parting plane. A runner in the drag carries the metal to an
+ingate in the ridge band. A blind riser sits over the spout base, the
+thickest junction. All four are Casting tab features with expressions
+`part_z` and `pour_z`, so the layout moves with the plane.
+
+![Kettle with gating](kettle_gated.png)
+
+This layout is a starting point. The mold split (stage 4) adds the core
+for the inside and the core prints, and the flow model (stage 5) decides
+gate sizes and riser positions.
 
 ## Known limits
 

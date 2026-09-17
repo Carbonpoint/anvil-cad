@@ -273,8 +273,9 @@ the tip: the section scales linearly by arc length.
 
 File > Samples > Kettle loads a cast iron kettle: body, bail, and lid as
 three bodies. It uses the pattern, the tapered pipe, the wedge cut, the
-lug bosses, and the holes. Read docs/KETTLE.md for the dimensions, the
-build order, and the casting plan.
+lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
+ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
+dimensions, the build order, and the casting plan.
 
 ## What is not there yet
 

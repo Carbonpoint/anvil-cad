@@ -477,6 +477,17 @@ impl AnvilApp {
                     }
                 }
             }
+            RibbonAction::KettleGated => {
+                self.doc = anvil_io::kettle::kettle_gated();
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.camera.fit(&self.scene.bounds);
+                self.file_path = "kettle_gated.anvil".into();
+                self.status = "Kettle with gating loaded. Gating features are on the Casting tab.".into();
+            }
             RibbonAction::Kettle => {
                 self.doc = anvil_io::kettle::kettle();
                 self.panels = PanelState::default();

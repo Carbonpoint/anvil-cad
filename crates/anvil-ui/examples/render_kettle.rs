@@ -28,6 +28,8 @@ fn main() {
     write("kettle.ppm", anvil_ui::render_view(&doc, 1400, 1000, -0.6, 0.45));
     eprintln!("rendered in {:.2} s", t1.elapsed().as_secs_f64());
     write("kettle_side.ppm", anvil_ui::render_view(&doc, 1400, 1000, std::f64::consts::FRAC_PI_2, 0.05));
+    let gated = anvil_io::kettle::kettle_gated();
+    write("kettle_gated.ppm", anvil_ui::render_view(&gated, 1400, 1000, 2.6, 0.35));
     anvil_io::write_3mf(&doc, &out.join("kettle.3mf")).unwrap();
     anvil_io::write_stl_parts(&doc, &out.join("kettle.stl")).unwrap();
     anvil_io::save_document(&doc, &out.join("kettle.anvil")).unwrap();

@@ -315,6 +315,70 @@ pub fn kettle() -> Document {
     doc.0
 }
 
+/// The kettle with a first gating layout: a sprue on the side away from
+/// the spout, a runner in the parting plane at the ridge, an ingate into
+/// the ridge band, and a blind riser over the spout base. The parting
+/// plane is at the ridge, the widest section, so the drag holds the base
+/// and the cope holds the dome. Stage 3 of docs/KETTLE.md; the mold
+/// split (stage 4) will move these where the flow model says.
+pub fn kettle_gated() -> Document {
+    use anvil_feature::features::casting::{RiserFeature, RunnerFeature, SprueFeature};
+    let mut doc = TimedDoc(kettle());
+    doc.set_expression("part_z", "30").ok();
+    doc.set_expression("pour_z", "150").ok();
+    // 24: sprue with its well below the parting plane.
+    doc.add_feature(Box::new(SprueFeature {
+        x: "-135".into(),
+        y: "0".into(),
+        top_z: "pour_z".into(),
+        cup_diameter: "45".into(),
+        cup_depth: "20".into(),
+        sprue_top_diameter: "18".into(),
+        sprue_bottom_diameter: "12".into(),
+        sprue_height: "pour_z - 20 - part_z".into(),
+        well_diameter: "30".into(),
+        well_depth: "15".into(),
+    }));
+    // 25: runner from the well to the body, top face in the parting plane.
+    doc.add_feature(Box::new(RunnerFeature {
+        start_x: "-135".into(),
+        start_y: "0".into(),
+        end_x: "-84".into(),
+        end_y: "0".into(),
+        end_z: "part_z - 15".into(),
+        width: "20".into(),
+        height: "15".into(),
+        taper: "0".into(),
+    }));
+    // 26: ingate into the ridge band, stopping inside the wall.
+    doc.add_feature(Box::new(RunnerFeature {
+        start_x: "-90".into(),
+        start_y: "0".into(),
+        end_x: "-76".into(),
+        end_y: "0".into(),
+        end_z: "part_z - 4".into(),
+        width: "14".into(),
+        height: "6".into(),
+        taper: "0".into(),
+    }));
+    // 27: blind riser over the spout base, the thickest junction.
+    doc.add_feature(Box::new(RiserFeature {
+        x: "68".into(),
+        y: "0".into(),
+        base_z: "76".into(),
+        diameter: "36".into(),
+        height: "50".into(),
+        neck_diameter: "16".into(),
+        neck_length: "8".into(),
+        blind: true,
+    }));
+    let brass = [178, 142, 66];
+    for i in 24usize..=27 {
+        doc.appearance.insert(i, brass);
+    }
+    doc.0
+}
+
 /// Times every feature when `ANVIL_TIMING` is set, for tuning.
 struct TimedDoc(Document);
 impl std::ops::Deref for TimedDoc {
@@ -389,5 +453,17 @@ mod tests {
         let bb = bodies[0].bounds();
         assert!(bb.max.x > 98.0 && bb.max.x < 104.0, "spout tip reaches x = {}", bb.max.x);
         assert!(secs < 60.0, "kettle took {secs:.1} s");
+    }
+
+    #[test]
+    fn gated_kettle_adds_four_gating_bodies() {
+        let doc = kettle_gated();
+        for (i, f) in doc.features.iter().enumerate() {
+            assert!(f.error.is_none(), "feature {i} ({}): {:?}", f.feature.name(), f.error);
+        }
+        assert_eq!(doc.bodies().len(), 7, "kettle bodies plus sprue, runner, ingate, riser");
+        let sprue = &doc.features[24].output.as_ref().unwrap().bodies[0];
+        let bb = sprue.bounds();
+        assert!((bb.max.z - 150.0).abs() < 1e-6 && (bb.min.z - 15.0).abs() < 1e-6, "sprue spans {bb:?}");
     }
 }

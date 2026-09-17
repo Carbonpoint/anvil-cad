@@ -39,6 +39,8 @@ pub enum RibbonAction {
     Workbook(u8),
     /// Load the kettle sample, see docs/KETTLE.md.
     Kettle,
+    /// The kettle with a sprue, runner, ingate, and riser.
+    KettleGated,
     Interference,
 }
 
@@ -312,6 +314,16 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
             tooltip: "Cast iron kettle with hobnail dots, see docs/KETTLE.md",
             order: 20,
             kind: ButtonKind::Action(RibbonAction::Kettle),
+        },
+    );
+    place(
+        "File",
+        "Samples",
+        RibbonButton {
+            label: "Kettle + gating",
+            tooltip: "The kettle with a sprue, runner, ingate, and riser",
+            order: 21,
+            kind: ButtonKind::Action(RibbonAction::KettleGated),
         },
     );
     for d in descriptors() {
