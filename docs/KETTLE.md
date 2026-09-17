@@ -92,8 +92,10 @@ Build order in the history:
 | 23 | Pattern on face | Dots on the lid top |
 
 The pattern goes last on each body so every boolean runs on the coarse
-mesh. Cells a cut has touched stay smooth, so the dots stop around the
-spout base and the lugs, the way a real casting looks.
+mesh. Only the facets the spout and the lugs pass through stay smooth,
+so the dots run up to their edges. Facets next to a seam carry the
+split vertices the boolean sewed in; the pattern refines them and keeps
+those vertices, so the mesh stays closed.
 
 Expressions: dot_pitch, dot_size, dot_height, spout_d, spout_tip,
 bore_d, bore_tip, bail_d, lug_hole, segments. Change one in the
@@ -133,4 +135,6 @@ gate sizes and riser positions.
 * 2026-09-17: revolve gives each smooth run its own surface; Pattern on
   face (relief) feature; booleans keep far faces and rebuild only the
   seam; tapered pipe; Casting tab (sprue, runner, riser); kettle sample
-  with renders. Next: stage 3, gating on the kettle, then the mold split.
+  with renders; first gating layout; the pattern now refines facets that
+  carry split vertices, so the bare zone around the spout is gone. Next:
+  the mold split.

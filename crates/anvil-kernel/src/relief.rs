@@ -208,20 +208,29 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
     };
 
     // Whole revolve cells: (i, j) is the cell between run vertices i, i+1
-    // and angle steps j, j+1.
+    // and angle steps j, j+1. A cell may carry extra vertices on its edges
+    // (split points a boolean sewed in); they must lie on the straight
+    // edge between two corners and are kept in the fine mesh.
     let mut cells: HashMap<(usize, usize), (crate::FaceId, bool)> = HashMap::new();
+    let mut extras: HashMap<(VertexId, VertexId), Vec<(f64, VertexId)>> = HashMap::new();
+    let etol = 2e-6 * (1.0 + scale);
     for (fid, f) in &tagged {
-        if f.outer.len() != 4 || !f.inner.is_empty() {
+        if f.outer.len() < 4 || !f.inner.is_empty() {
             continue;
         }
         let idx: Vec<Option<(usize, usize)>> = f.outer.iter().map(|&v| index_of(v, solid.pos(v))).collect();
-        let Some(idx) = idx.into_iter().collect::<Option<Vec<_>>>() else { continue };
-        let i0 = idx.iter().map(|k| k.0).min().unwrap();
-        let i1 = idx.iter().map(|k| k.0).max().unwrap();
+        let corners: Vec<(usize, (usize, usize))> =
+            idx.iter().enumerate().filter_map(|(k, x)| x.map(|c| (k, c))).collect();
+        if corners.len() != 4 {
+            continue;
+        }
+        let cidx: Vec<(usize, usize)> = corners.iter().map(|c| c.1).collect();
+        let i0 = cidx.iter().map(|k| k.0).min().unwrap();
+        let i1 = cidx.iter().map(|k| k.0).max().unwrap();
         if i1 != i0 + 1 {
             continue;
         }
-        let js: HashSet<usize> = idx.iter().map(|k| k.1).collect();
+        let js: HashSet<usize> = cidx.iter().map(|k| k.1).collect();
         if js.len() != 2 {
             continue;
         }
@@ -234,12 +243,45 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
         } else {
             continue;
         };
-        // Orientation: does (i0+1, j0) follow (i0, j0) in the loop?
-        let pos = |k: (usize, usize)| idx.iter().position(|x| *x == k).unwrap();
+        // Every other vertex must sit on the edge between its two corners.
+        let n = f.outer.len();
+        let mut ok = true;
+        let mut local: Vec<((VertexId, VertexId), f64, VertexId)> = Vec::new();
+        for (ci, &(k, _)) in corners.iter().enumerate() {
+            let (k_next, _) = corners[(ci + 1) % 4];
+            let (a_id, b_id) = (f.outer[k], f.outer[k_next]);
+            let (a, b) = (solid.pos(a_id), solid.pos(b_id));
+            let ab = b - a;
+            let l2 = ab.length_squared();
+            let mut m = (k + 1) % n;
+            while m != k_next {
+                let v = f.outer[m];
+                let pv = solid.pos(v);
+                let t = (pv - a).dot(ab) / l2;
+                if !(t > 0.0 && t < 1.0) || (pv - (a + ab * t)).length() > etol {
+                    ok = false;
+                    break;
+                }
+                let (key, tt) = if a_id < b_id { ((a_id, b_id), t) } else { ((b_id, a_id), 1.0 - t) };
+                local.push((key, tt, v));
+                m = (m + 1) % n;
+            }
+            if !ok {
+                break;
+            }
+        }
+        if !ok {
+            continue;
+        }
+        // Orientation: does (i0+1, j0) follow (i0, j0) in the corner cycle?
+        let pos = |k: (usize, usize)| cidx.iter().position(|x| *x == k).unwrap();
         let a = pos((i0, j0));
         let b = pos((i0 + 1, j0));
         let forward = (a + 1) % 4 == b;
         cells.insert((i0, j0), (*fid, forward));
+        for (key, t, v) in local {
+            extras.entry(key).or_default().push((t, v));
+        }
     }
     if cells.is_empty() {
         return Err(KernelError::InvalidInput(
@@ -408,11 +450,43 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
         }
         out.push_face(loop_ids, tag);
     }
-    // Sew the seam vertices into the faces that were not refined.
-    if !seam.is_empty() {
-        for list in seam.values_mut() {
-            list.sort_by(|x, y| x.0.total_cmp(&y.0));
+    // Sew the fine edge vertices into the faces that were not refined, and
+    // the extra vertices those faces already had into the fine faces. Both
+    // use the straight coarse edge as the common ruler: every vertex on it
+    // has a position t from 0 at one corner to 1 at the other.
+    for list in seam.values_mut() {
+        list.sort_by(|x, y| x.0.total_cmp(&y.0));
+    }
+    /// Coarse edge (sorted corner pair) and position along it.
+    type EdgePos = ((VertexId, VertexId), f64);
+    let mut on_edge: HashMap<VertexId, Vec<EdgePos>> = HashMap::new();
+    let mut sub_extra: HashMap<(VertexId, VertexId), Vec<(f64, VertexId)>> = HashMap::new();
+    let edge_keys: HashSet<(VertexId, VertexId)> = seam.keys().chain(extras.keys()).copied().collect();
+    for key in &edge_keys {
+        on_edge.entry(key.0).or_default().push((*key, 0.0));
+        on_edge.entry(key.1).or_default().push((*key, 1.0));
+        let mut seq: Vec<(f64, VertexId)> = vec![(0.0, key.0)];
+        if let Some(list) = seam.get(key) {
+            seq.extend(list.iter().copied());
         }
+        seq.push((1.0, key.1));
+        if let Some(ex) = extras.get(key) {
+            for &(t, v) in ex {
+                on_edge.entry(v).or_default().push((*key, t));
+                // The fine sub-edge this extra falls into.
+                let k = seq.iter().rposition(|x| x.0 < t).unwrap_or(0).min(seq.len() - 2);
+                let (p, q) = (seq[k].1, seq[k + 1].1);
+                let span = (seq[k + 1].0 - seq[k].0).max(1e-12);
+                let local = (t - seq[k].0) / span;
+                let (sk, lt) = if p < q { ((p, q), local) } else { ((q, p), 1.0 - local) };
+                sub_extra.entry(sk).or_default().push((lt, v));
+            }
+        }
+    }
+    for list in sub_extra.values_mut() {
+        list.sort_by(|x, y| x.0.total_cmp(&y.0));
+    }
+    if !edge_keys.is_empty() {
         let ids: Vec<crate::FaceId> = out.faces.keys().collect();
         for fid in ids {
             let face = &out.faces[fid];
@@ -426,13 +500,32 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
                     let (a, b) = (lp[k], lp[(k + 1) % n]);
                     new_lp.push(a);
                     let key = if a < b { (a, b) } else { (b, a) };
-                    if let Some(list) = seam.get(&key) {
+                    if let Some(list) = sub_extra.get(&key) {
                         changed = true;
                         if a < b {
                             new_lp.extend(list.iter().map(|x| x.1));
                         } else {
                             new_lp.extend(list.iter().rev().map(|x| x.1));
                         }
+                        continue;
+                    }
+                    let (Some(ea), Some(eb)) = (on_edge.get(&a), on_edge.get(&b)) else { continue };
+                    let Some((ckey, ta, tb)) = ea.iter().find_map(|(ka, ta)| {
+                        eb.iter().find(|(kb, tb)| kb == ka && (tb - ta).abs() > 1e-12).map(|(_, tb)| (*ka, *ta, *tb))
+                    }) else {
+                        continue;
+                    };
+                    let Some(list) = seam.get(&ckey) else { continue };
+                    let (lo, hi) = (ta.min(tb), ta.max(tb));
+                    let between: Vec<VertexId> = list.iter().filter(|x| x.0 > lo && x.0 < hi).map(|x| x.1).collect();
+                    if between.is_empty() {
+                        continue;
+                    }
+                    changed = true;
+                    if ta < tb {
+                        new_lp.extend(between);
+                    } else {
+                        new_lp.extend(between.into_iter().rev());
                     }
                 }
                 *lp = new_lp;
@@ -516,5 +609,49 @@ mod tests {
         let inner_ok =
             r.vertices.values().any(|v| ((v.pos.x * v.pos.x + v.pos.y * v.pos.y).sqrt() - 17.0).abs() < 1e-9);
         assert!(inner_ok);
+    }
+
+    #[test]
+    fn relief_after_a_cut_refines_cells_with_split_vertices() {
+        use crate::csg::boolean;
+        use crate::ops::cylinder;
+        use crate::BooleanOp;
+        let prof = vec![
+            DVec2::new(0.0, 0.0),
+            DVec2::new(20.0, 0.0),
+            DVec2::new(20.0, 30.0),
+            DVec2::new(17.0, 30.0),
+            DVec2::new(17.0, 3.0),
+            DVec2::new(0.0, 3.0),
+        ];
+        let plane = Plane { origin: DVec3::ZERO, x_axis: DVec3::X, y_axis: DVec3::Z };
+        let axis = Axis::new(DVec3::ZERO, DVec3::Z);
+        let cup = revolve_n(&plane, &prof, &axis, std::f64::consts::TAU, 48).unwrap();
+        // A hole through the outer wall.
+        let side = Plane { origin: DVec3::new(30.0, 0.0, 15.0), x_axis: DVec3::Y, y_axis: DVec3::Z };
+        let tool = cylinder(&side, DVec2::ZERO, 3.0, -20.0).unwrap();
+        let cut = boolean(&cup, &tool, BooleanOp::Subtract);
+        let outer = *cut
+            .surfaces
+            .iter()
+            .find(|(_, g)| {
+                let SurfaceGeom::Revolved { run, .. } = g;
+                run.iter().all(|p| (p.x - 20.0).abs() < 1e-9) && run.len() == 2
+            })
+            .map(|(k, _)| k)
+            .expect("outer wall run");
+        let before = cut.open_edge_report();
+        let tag = Surface::Revolved { id: outer };
+        let with_extras = cut.faces.values().filter(|f| f.surface == tag && f.outer.len() > 4).count();
+        assert!(with_extras > 0, "the cut leaves split vertices on neighbouring cells");
+        let r = relief(&cut, outer, 1.0, &|_, _| 0.5).unwrap();
+        assert_eq!(r.open_edge_report(), before, "no new seam defects");
+        // Nearly every cell is refined: only the merged fragments around
+        // the hole stay coarse, and they have many vertices.
+        let cells_before = cut.faces.values().filter(|f| f.surface == tag).count();
+        let coarse_left = r.faces.values().filter(|f| f.surface == tag && f.outer.len() > 6).count();
+        assert!(coarse_left < cells_before / 4, "{coarse_left} of {cells_before} cells were not refined");
+        let fine = r.faces.values().filter(|f| f.surface == tag).count();
+        assert!(fine > cells_before * 20, "only {fine} faces after refinement");
     }
 }
