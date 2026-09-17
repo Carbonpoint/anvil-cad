@@ -10,4 +10,5 @@ repository.workspace = true
 anvil-kernel.workspace = true
 anvil-math.workspace = true
 anvil-feature.workspace = true
+anvil-sketch.workspace = true
 thiserror.workspace = true

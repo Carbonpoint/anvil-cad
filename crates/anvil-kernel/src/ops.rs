@@ -384,12 +384,29 @@ fn skin_rings(rings: &[Vec<anvil_math::DVec3>], closed: bool, surface: Surface) 
 /// the sketch plane origin; the profile is carried along with a
 /// rotation-minimising frame. `closed` joins the last section to the first.
 pub fn sweep(plane: &Plane, profile: &[DVec2], path: &[anvil_math::DVec3], closed: bool) -> KernelResult<Solid> {
+    sweep_scaled(plane, profile, path, closed, &[])
+}
+
+/// Sweep with the section scaled at each path vertex by `scales`. An
+/// empty slice means no scaling; otherwise it must have one value per
+/// path vertex. A tapered spout is a pipe with scales from 1 down to the
+/// tip ratio.
+pub fn sweep_scaled(
+    plane: &Plane,
+    profile: &[DVec2],
+    path: &[anvil_math::DVec3],
+    closed: bool,
+    scales: &[f64],
+) -> KernelResult<Solid> {
     use anvil_math::DVec3;
     if profile.len() < 3 {
         return Err(KernelError::DegenerateProfile);
     }
     if path.len() < 2 {
         return Err(KernelError::InvalidInput("sweep path needs at least two points".into()));
+    }
+    if !scales.is_empty() && scales.len() != path.len() {
+        return Err(KernelError::InvalidInput("sweep needs one scale per path vertex".into()));
     }
     let prof = ccw(profile);
     let m = path.len();
@@ -443,10 +460,11 @@ pub fn sweep(plane: &Plane, profile: &[DVec2], path: &[anvil_math::DVec3], close
         } else {
             (DVec3::ZERO, 0.0)
         };
+        let k = scales.get(i).copied().unwrap_or(1.0).max(1e-6);
         rings.push(
             prof.iter()
                 .map(|p| {
-                    let v = x * p.x + y * p.y;
+                    let v = (x * p.x + y * p.y) * k;
                     path[i] + v + bend * (v.dot(bend) * stretch)
                 })
                 .collect::<Vec<_>>(),

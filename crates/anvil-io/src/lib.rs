@@ -5,6 +5,7 @@
 //! * `.stl`: binary STL export of tessellated bodies.
 //! * STEP, IGES, 3MF, DXF: planned. See `docs/research/04-...md`.
 
+pub mod kettle;
 pub mod workbook;
 
 use anvil_feature::Document;

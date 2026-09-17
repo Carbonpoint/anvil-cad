@@ -86,6 +86,7 @@ crates/anvil-io        .anvil documents and mesh export
 crates/anvil-ui        ribbon, panels, viewport (eframe/egui)
 crates/anvil-app       the `anvil` binary
 crates/anvil-cli       headless command-line tools (used by the Docker image)
+docs/KETTLE.md         cast iron kettle sample: Pattern on face, tapered pipe, Casting tab
 docs/research          four literature reviews that shaped the design
 docs/adr               architecture decision records
 ```

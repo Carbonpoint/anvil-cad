@@ -211,8 +211,9 @@ impl Document {
     pub fn add_feature(&mut self, feature: Box<dyn Feature>) -> FeatureId {
         self.snapshot();
         self.features.push(FeatureNode { feature, suppressed: false, output: None, error: None });
-        self.regenerate();
-        self.features.len() - 1
+        let idx = self.features.len() - 1;
+        self.regenerate_from(idx);
+        idx
     }
 
     /// Remove a feature. References from later features are renumbered.
@@ -314,7 +315,7 @@ impl Document {
         if idx < self.features.len() {
             self.snapshot();
             f(self.features[idx].feature.as_mut());
-            self.regenerate();
+            self.regenerate_from(idx);
         }
     }
 
@@ -336,12 +337,23 @@ impl Document {
     /// Run the whole history in order. Errors are stored per feature; the
     /// rest of the history still runs.
     pub fn regenerate(&mut self) {
+        self.regenerate_from(0);
+    }
+
+    /// Run the history from feature `start` on, keeping the outputs of
+    /// earlier features. Adding or editing a feature cannot change what
+    /// comes before it, so this skips that work.
+    pub fn regenerate_from(&mut self, start: FeatureId) {
         let kernel = NativeKernel;
         if let Err(e) = self.exprs.evaluate() {
             log::warn!("expression table: {e}");
         }
+        let start = start.min(self.features.len());
         let mut outputs: Vec<Option<FeatureOutput>> = Vec::with_capacity(self.features.len());
-        for i in 0..self.features.len() {
+        for node in &self.features[..start] {
+            outputs.push(node.output.clone());
+        }
+        for i in start..self.features.len() {
             if self.features[i].suppressed {
                 self.features[i].output = None;
                 self.features[i].error = None;

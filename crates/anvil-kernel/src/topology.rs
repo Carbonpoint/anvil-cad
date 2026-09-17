@@ -371,20 +371,56 @@ impl Solid {
     /// face's edge, insert it into that face loop. CSG output needs this so
     /// adjacency, feature edges, and the Euler characteristic are right.
     pub fn fix_t_junctions(&mut self) {
-        let verts: Vec<(VertexId, DVec3)> = self.vertices.iter().map(|(id, v)| (id, v.pos)).collect();
+        self.fix_t_junctions_within(None);
+    }
+
+    /// Like `fix_t_junctions`, limited to vertices and faces inside the
+    /// box `region` (corners `lo`, `hi`). A boolean only creates
+    /// T-junctions where the two bodies overlap, so this keeps the repair
+    /// cheap on a large mesh with a small tool.
+    pub fn fix_t_junctions_within(&mut self, region: Option<(DVec3, DVec3)>) {
+        let inside = |p: DVec3| match region {
+            Some((lo, hi)) => p.x >= lo.x && p.y >= lo.y && p.z >= lo.z && p.x <= hi.x && p.y <= hi.y && p.z <= hi.z,
+            None => true,
+        };
+        let verts: Vec<(VertexId, DVec3)> =
+            self.vertices.iter().filter(|(_, v)| inside(v.pos)).map(|(id, v)| (id, v.pos)).collect();
         if verts.len() < 4 {
             return;
         }
-        // Coarse grid for candidate lookup.
+        // Grid for candidate lookup, sized from the region and vertex count.
         let b = self.bounds();
-        let cell = (b.diagonal() / 40.0).max(1e-6);
+        let extent = match region {
+            Some((lo, hi)) => (hi - lo).length().max(1e-6),
+            None => b.diagonal(),
+        };
+        let per_axis = ((verts.len() as f64).cbrt() * 3.0).clamp(40.0, 800.0);
+        let cell = (extent / per_axis).max(1e-6);
         let key = |p: DVec3| ((p.x / cell).floor() as i64, (p.y / cell).floor() as i64, (p.z / cell).floor() as i64);
         let mut grid: std::collections::HashMap<(i64, i64, i64), Vec<usize>> = std::collections::HashMap::new();
         for (k, (_, p)) in verts.iter().enumerate() {
             grid.entry(key(*p)).or_default().push(k);
         }
+        // Split vertices sit on their edge to floating point precision, so
+        // a tight tolerance is enough. A loose one would pull in vertices
+        // that merely pass close by and make micro edges.
         let tol = 1e-6 * (1.0 + b.diagonal());
-        let ids: Vec<FaceId> = self.faces.keys().collect();
+        // A face takes part when its box touches the region: a long edge
+        // can cross the region with both ends outside it.
+        let touches = |f: &Face| match region {
+            Some((lo, hi)) => {
+                let mut flo = DVec3::splat(f64::INFINITY);
+                let mut fhi = DVec3::splat(f64::NEG_INFINITY);
+                for &v in f.outer.iter().chain(f.inner.iter().flatten()) {
+                    let p = self.vertices[v].pos;
+                    flo = flo.min(p);
+                    fhi = fhi.max(p);
+                }
+                flo.x <= hi.x && fhi.x >= lo.x && flo.y <= hi.y && fhi.y >= lo.y && flo.z <= hi.z && fhi.z >= lo.z
+            }
+            None => true,
+        };
+        let ids: Vec<FaceId> = self.faces.iter().filter(|(_, f)| touches(f)).map(|(id, _)| id).collect();
         for fid in ids {
             let face = self.faces[fid].clone();
             let mut loops: Vec<Vec<VertexId>> =
@@ -492,10 +528,32 @@ impl Solid {
     /// triangles; without this, each boolean multiplies the fragment count
     /// of the next one. Requires T-junctions to be fixed first.
     pub fn merge_coplanar_faces(&mut self) {
+        self.merge_coplanar_faces_within(None);
+    }
+
+    /// Like `merge_coplanar_faces`, limited to faces whose box touches
+    /// `region`. A boolean only fragments faces near the seam.
+    pub fn merge_coplanar_faces_within(&mut self, region: Option<(DVec3, DVec3)>) {
         use std::collections::BTreeMap as HashMap;
+        let touches = |f: &Face| match region {
+            Some((lo, hi)) => {
+                let mut flo = DVec3::splat(f64::INFINITY);
+                let mut fhi = DVec3::splat(f64::NEG_INFINITY);
+                for &v in f.outer.iter().chain(f.inner.iter().flatten()) {
+                    let p = self.vertices[v].pos;
+                    flo = flo.min(p);
+                    fhi = fhi.max(p);
+                }
+                flo.x <= hi.x && fhi.x >= lo.x && flo.y <= hi.y && fhi.y >= lo.y && flo.z <= hi.z && fhi.z >= lo.z
+            }
+            None => true,
+        };
         // Group by tag and quantised plane.
         let mut groups: HashMap<(u64, i64, i64, i64, i64), Vec<FaceId>> = HashMap::new();
         for (fid, f) in &self.faces {
+            if !touches(f) {
+                continue;
+            }
             let n = self.face_normal(f);
             if n.length_squared() < 0.5 {
                 continue;
@@ -509,6 +567,15 @@ impl Solid {
             let q = |x: f64| (x * 1e5).round() as i64;
             groups.entry((tag, q(n.x), q(n.y), q(n.z), q(d))).or_default().push(fid);
         }
+        // How many face loops use each vertex, so a vertex that only the
+        // merged faces used can be dropped when it is collinear.
+        let mut uses: std::collections::HashMap<VertexId, usize> = std::collections::HashMap::new();
+        for f in self.faces.values() {
+            for &v in f.outer.iter().chain(f.inner.iter().flatten()) {
+                *uses.entry(v).or_default() += 1;
+            }
+        }
+        let tol = 1e-7 * (1.0 + self.bounds().diagonal());
         for (_, fids) in groups {
             if fids.len() < 2 {
                 if let Some(&f) = fids.first() {
@@ -580,6 +647,49 @@ impl Solid {
                 }
             }
             if !ok || loops.is_empty() {
+                for &f in &fids {
+                    self.untag(f);
+                }
+                continue;
+            }
+            // Drop vertices that only these faces used and that lie on a
+            // straight run of the merged boundary. They are split points a
+            // boolean left behind; keeping them would leave T-junctions.
+            let mut in_group: std::collections::HashMap<VertexId, usize> = std::collections::HashMap::new();
+            for &fid in &fids {
+                let f = &self.faces[fid];
+                for &v in f.outer.iter().chain(f.inner.iter().flatten()) {
+                    *in_group.entry(v).or_default() += 1;
+                }
+            }
+            for lp in &mut loops {
+                let mut changed = true;
+                while changed && lp.len() > 3 {
+                    changed = false;
+                    let n = lp.len();
+                    for i in 0..n {
+                        let v = lp[i];
+                        if uses.get(&v).copied().unwrap_or(0) != in_group.get(&v).copied().unwrap_or(0) {
+                            continue;
+                        }
+                        let a = self.pos(lp[(i + n - 1) % n]);
+                        let b = self.pos(lp[(i + 1) % n]);
+                        let p = self.pos(v);
+                        let ab = b - a;
+                        let l2 = ab.length_squared();
+                        if l2 < 1e-18 {
+                            continue;
+                        }
+                        let t = (p - a).dot(ab) / l2;
+                        if t > 0.0 && t < 1.0 && (p - (a + ab * t)).length() < tol {
+                            lp.remove(i);
+                            changed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if loops.iter().any(|lp| lp.len() < 3) {
                 for &f in &fids {
                     self.untag(f);
                 }

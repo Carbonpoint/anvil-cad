@@ -56,14 +56,64 @@ against the full mesh, so the result is still exact.
 | Ridge height | 30 | flat band below |
 | Body height to the rim | 95 | without lid |
 | Mouth diameter | 88 | lid seat |
-| Wall thickness | 3.5 | cast iron |
+| Wall thickness | 3.0 | cast iron |
 | Dot pitch | 4.5 | at the ridge |
 | Dot height | 1.0 | |
 | Spout base, tip diameter | 24, 15 | outside |
 | Bail bar diameter | 8 | |
 | Lid diameter | 96 | sits on the mouth |
 
+## The sample (stage 1 and 2 done)
+
+File > Samples > Kettle, or `anvil_io::kettle::kettle()`. The document
+builds in about 4 seconds on a workstation and renders in under a
+second. Three bodies: body 208 cm3 (1.50 kg in cast iron), bail 15 cm3,
+lid 27 cm3. The spout tip reaches x = 101 mm, so the kettle is 181 mm
+wide, the bail apex is at 189 mm.
+
+![Kettle](kettle.png)
+
+![Kettle, side](kettle_side.png)
+
+Build order in the history:
+
+| Step | Feature | Note |
+| --- | --- | --- |
+| 0, 1 | Sketch, Revolve 96 segments | Closed profile with the wall: outer dome and inner dome are splines |
+| 2 to 4 | Sketch, Pipe 24 to 15 mm, Combine join | Spout along an arc, tapered |
+| 5 to 7 | Sketch, Revolve 40 degrees, Combine cut | A wedge of the cavity removes the spout stub inside |
+| 8 to 10 | Sketch, Pipe 18 to 11 mm, Combine cut | Bore through the wall and out of the tip |
+| 11, 12 | Sketch, Extrude join | Two lug bosses on the shoulder |
+| 13, 14 | Hole | Pin holes through the lugs |
+| 15 | Pattern on face | Hobnail dots on the outer dome, last |
+| 16, 17 | Sketch, Pipe 8 mm | Bail arch |
+| 18, 19 | Sketch, Revolve | Lid shell with a locating ring |
+| 20 to 22 | Sketch, Revolve, Combine join | Bud knob |
+| 23 | Pattern on face | Dots on the lid top |
+
+The pattern goes last on each body so every boolean runs on the coarse
+mesh. Cells a cut has touched stay smooth, so the dots stop around the
+spout base and the lugs, the way a real casting looks.
+
+Expressions: dot_pitch, dot_size, dot_height, spout_d, spout_tip,
+bore_d, bore_tip, bail_d, lug_hole, segments. Change one in the
+Expressions panel and the kettle rebuilds.
+
+## Known limits
+
+* Booleans leave a few sliver faces at each seam: the body has about 200
+  edges shared by more than two faces, the lid about 100. There are no
+  open edges, so slicers accept the meshes. ADR 0001 (a tolerant kernel)
+  is the real fix.
+* The spout is a plain tapered tube. The lip is not thinned yet.
+* An edit reruns the edited feature and everything after it. Put the
+  pattern late in the history so most edits skip it. The pattern step
+  itself takes under one second.
+
 ## Progress log
 
-* 2026-09-16: plan written. Reference photos reviewed. Kernel relief op
-  and localized booleans in progress.
+* 2026-09-16: plan written. Reference photos reviewed.
+* 2026-09-17: revolve gives each smooth run its own surface; Pattern on
+  face (relief) feature; booleans keep far faces and rebuild only the
+  seam; tapered pipe; Casting tab (sprue, runner, riser); kettle sample
+  with renders. Next: stage 3, gating on the kettle, then the mold split.

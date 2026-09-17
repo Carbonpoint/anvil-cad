@@ -37,6 +37,8 @@ pub enum RibbonAction {
     SampleCard,
     PressPull,
     Workbook(u8),
+    /// Load the kettle sample, see docs/KETTLE.md.
+    Kettle,
     Interference,
 }
 
@@ -302,6 +304,16 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
             },
         );
     }
+    place(
+        "File",
+        "Samples",
+        RibbonButton {
+            label: "Kettle",
+            tooltip: "Cast iron kettle with hobnail dots, see docs/KETTLE.md",
+            order: 20,
+            kind: ButtonKind::Action(RibbonAction::Kettle),
+        },
+    );
     for d in descriptors() {
         place(
             d.tab,

@@ -244,7 +244,7 @@ pub fn ex05_pipe_elbow() -> Document {
     let f = path.sketch.add_point(60.0, 60.0);
     path.sketch.add_line(e, f);
     doc.add_feature(Box::new(path)); // 0
-    doc.add_feature(Box::new(PipeFeature { path: 0, diameter: "12".into() })); // 1
+    doc.add_feature(Box::new(PipeFeature { path: 0, diameter: "12".into(), ..Default::default() })); // 1
     doc.add_feature(Box::new(BoxFeature {
         x: "-2".into(),
         y: "-12".into(),

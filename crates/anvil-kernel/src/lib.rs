@@ -69,6 +69,15 @@ pub trait Kernel {
     fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f64) -> KernelResult<Solid>;
     fn tessellate(&self, solid: &Solid) -> TriMesh;
     fn sweep(&self, plane: &Plane, profile: &[DVec2], path: &[DVec3], closed: bool) -> KernelResult<Solid>;
+    /// Sweep with the section scaled at each path vertex; see `ops::sweep_scaled`.
+    fn sweep_scaled(
+        &self,
+        plane: &Plane,
+        profile: &[DVec2],
+        path: &[DVec3],
+        closed: bool,
+        scales: &[f64],
+    ) -> KernelResult<Solid>;
     fn loft(&self, sections: &[(Plane, Vec<DVec2>)]) -> KernelResult<Solid>;
     fn box_solid(&self, corner: DVec3, size: DVec3) -> KernelResult<Solid>;
     fn cylinder(&self, plane: &Plane, center: DVec2, radius: f64, height: f64) -> KernelResult<Solid>;
@@ -134,6 +143,16 @@ impl Kernel for NativeKernel {
     }
     fn sweep(&self, plane: &Plane, profile: &[DVec2], path: &[DVec3], closed: bool) -> KernelResult<Solid> {
         ops::sweep(plane, profile, path, closed)
+    }
+    fn sweep_scaled(
+        &self,
+        plane: &Plane,
+        profile: &[DVec2],
+        path: &[DVec3],
+        closed: bool,
+        scales: &[f64],
+    ) -> KernelResult<Solid> {
+        ops::sweep_scaled(plane, profile, path, closed, scales)
     }
     fn loft(&self, sections: &[(Plane, Vec<DVec2>)]) -> KernelResult<Solid> {
         ops::loft(sections)

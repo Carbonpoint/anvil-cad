@@ -96,11 +96,18 @@ impl Feature for CoilFeature {
 pub struct PipeFeature {
     pub path: usize,
     pub diameter: String,
+    /// Diameter at the far end of the path. `0` keeps `diameter` all along.
+    #[serde(default = "zero_expr")]
+    pub end_diameter: String,
+}
+
+fn zero_expr() -> String {
+    "0".into()
 }
 
 impl Default for PipeFeature {
     fn default() -> Self {
-        PipeFeature { path: 0, diameter: "4".into() }
+        PipeFeature { path: 0, diameter: "4".into(), end_diameter: "0".into() }
     }
 }
 
@@ -116,12 +123,14 @@ impl Feature for PipeFeature {
         vec![
             ParamSpec::feature_ref("path", "Path sketch", vec!["sketch"], self.path),
             ParamSpec::length("diameter", "Diameter", &self.diameter),
+            ParamSpec::length("end_diameter", "Diameter at end (0 = same)", &self.end_diameter),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
             ("path", ParamValue::FeatureRef(i)) => self.path = i,
             ("diameter", ParamValue::Expr(s)) => self.diameter = s,
+            ("end_diameter", ParamValue::Expr(s)) => self.end_diameter = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -129,13 +138,25 @@ impl Feature for PipeFeature {
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let paths = ctx.paths_of(self.path)?;
         let r = ctx.eval(&self.diameter)? / 2.0;
+        let r_end = ctx.eval(&self.end_diameter)? / 2.0;
         let mut bodies = Vec::new();
         for path in &paths {
             let t = (path[1] - path[0]).normalize_or_zero();
             let helper = if t.dot(DVec3::Z).abs() < 0.9 { DVec3::Z } else { DVec3::X };
             let x = helper.cross(t).normalize();
             let plane = Plane { origin: path[0], x_axis: x, y_axis: t.cross(x) };
-            bodies.push(ctx.kernel.sweep(&plane, &circle(r), path, false)?);
+            // Taper by arc length from `diameter` to `end_diameter`.
+            let scales: Vec<f64> = if r_end > 0.0 && r > 0.0 {
+                let mut cum = vec![0.0];
+                for w in path.windows(2) {
+                    cum.push(cum.last().unwrap() + (w[1] - w[0]).length());
+                }
+                let total = cum.last().copied().unwrap_or(1.0).max(1e-9);
+                cum.iter().map(|c| 1.0 + (r_end / r - 1.0) * c / total).collect()
+            } else {
+                Vec::new()
+            };
+            bodies.push(ctx.kernel.sweep_scaled(&plane, &circle(r), path, false, &scales)?);
         }
         Ok(FeatureOutput { bodies, ..Default::default() })
     }

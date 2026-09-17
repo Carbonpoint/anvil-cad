@@ -280,6 +280,14 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
     }
     let mut fine: HashMap<(usize, usize), VertexId> = HashMap::new();
     let mut frozen: HashSet<VertexId> = HashSet::new();
+    // Fine vertices created on a coarse edge whose other side is not
+    // refined: (edge, fraction along it, vertex). They are sewn into the
+    // neighbouring face loops at the end.
+    let mut seam: HashMap<(VertexId, VertexId), Vec<(f64, VertexId)>> = HashMap::new();
+    let mut sew = |a: VertexId, b: VertexId, t: f64, v: VertexId| {
+        let (key, t) = if a < b { ((a, b), t) } else { ((b, a), 1.0 - t) };
+        seam.entry(key).or_default().push((t, v));
+    };
     let mut new_faces: Vec<(Vec<VertexId>, bool)> = Vec::with_capacity(cells.len() * m_t * 2);
 
     let mut cell_keys: Vec<(usize, usize)> = cells.keys().copied().collect();
@@ -334,6 +342,15 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
                         || (on_ch && !col_hi_free);
                     if f {
                         frozen.insert(v);
+                        if on_lo {
+                            sew(corner(i, j), corner(i, jn), fb, v);
+                        } else if on_hi {
+                            sew(corner(i + 1, j), corner(i + 1, jn), fb, v);
+                        } else if on_cl {
+                            sew(corner(i, j), corner(i + 1, j), fa, v);
+                        } else {
+                            sew(corner(i, jn), corner(i + 1, jn), fa, v);
+                        }
                     }
                     v
                 };
@@ -391,8 +408,43 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
         }
         out.push_face(loop_ids, tag);
     }
+    // Sew the seam vertices into the faces that were not refined.
+    if !seam.is_empty() {
+        for list in seam.values_mut() {
+            list.sort_by(|x, y| x.0.total_cmp(&y.0));
+        }
+        let ids: Vec<crate::FaceId> = out.faces.keys().collect();
+        for fid in ids {
+            let face = &out.faces[fid];
+            let mut loops: Vec<Vec<VertexId>> =
+                std::iter::once(face.outer.clone()).chain(face.inner.iter().cloned()).collect();
+            let mut changed = false;
+            for lp in &mut loops {
+                let n = lp.len();
+                let mut new_lp = Vec::with_capacity(n);
+                for k in 0..n {
+                    let (a, b) = (lp[k], lp[(k + 1) % n]);
+                    new_lp.push(a);
+                    let key = if a < b { (a, b) } else { (b, a) };
+                    if let Some(list) = seam.get(&key) {
+                        changed = true;
+                        if a < b {
+                            new_lp.extend(list.iter().map(|x| x.1));
+                        } else {
+                            new_lp.extend(list.iter().rev().map(|x| x.1));
+                        }
+                    }
+                }
+                *lp = new_lp;
+            }
+            if changed {
+                let f = &mut out.faces[fid];
+                f.outer = loops.remove(0);
+                f.inner = loops;
+            }
+        }
+    }
     out.rebuild_edges();
-    out.fix_t_junctions();
     out.make_consistent();
     Ok(out)
 }

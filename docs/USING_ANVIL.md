@@ -234,8 +234,51 @@ Defaults: diameter 50 mm, height 80 mm, neck diameter 25 mm, neck length
 closes over and holds its heat longer. When blind is off, the top is
 flat and open.
 
+## Pattern on face (hobnail dots)
+
+Raised dots over one continuous curved surface, as on a cast iron
+kettle. The dots become part of the body as one watertight mesh.
+
+1. Make a body of revolution with Revolve. Set Segments per turn to 96
+   or more for a smooth body (the default is 64).
+2. Click the surface you want. Every facet of that surface counts as one
+   face: a click on the dome selects the whole dome.
+3. Solid > Pattern on face. The feature takes the surface from the pick.
+4. Set Layout, Pitch, Dot diameter, Dot height, Margin, and Mesh step.
+
+Layouts: `hobnail` (arare) is one dot size in staggered rows. Each row
+has the same number of dots, so the dots line up in spiral columns and
+shrink toward the narrow end. `tortoiseshell` (kikko) is one large dot
+ringed by ten small ones in each cell. Dots per row (0 = from pitch)
+fixes the count. Dot diameter at far end (0 = scale with the radius)
+gives a linear taper instead.
+
+Only the picked surface changes. The inner wall, the rim, and every
+other face stay as they were. Put the pattern after the cuts and joins
+that touch that surface: a cell that a cut has touched stays smooth, so
+the dots stop around a spout or a lug. The pattern refines the surface
+to the mesh step, so a kettle body has about 200 thousand faces. A
+boolean on that body still takes about one second, because the boolean
+only rebuilds the faces near the tool.
+
+![Kettle sample](kettle.png)
+
+## Tapered pipe
+
+Pipe has a second value, Diameter at end. Leave it at 0 for one
+diameter along the whole path. Set it for a spout that narrows toward
+the tip: the section scales linearly by arc length.
+
+## Kettle sample
+
+File > Samples > Kettle loads a cast iron kettle: body, bail, and lid as
+three bodies. It uses the pattern, the tapered pipe, the wedge cut, the
+lug bosses, and the holes. Read docs/KETTLE.md for the dimensions, the
+build order, and the casting plan.
+
 ## What is not there yet
 
-Fillet, Chamfer, Shell, Combine, and Hole are on the ribbon but report
-"not supported by this kernel yet". Extrude cannot cut into another body.
-These wait on the kernel decision in ADR 0001.
+Shell reports "not supported by this kernel yet". Booleans are a BSP
+method on planar facets (ADR 0001): they leave a few sliver faces at a
+seam, so an edge there can be shared by more than two faces. Slicers
+accept the result. A tolerant kernel is planned for milestone M3.

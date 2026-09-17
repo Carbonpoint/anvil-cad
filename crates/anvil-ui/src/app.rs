@@ -477,6 +477,17 @@ impl AnvilApp {
                     }
                 }
             }
+            RibbonAction::Kettle => {
+                self.doc = anvil_io::kettle::kettle();
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.camera.fit(&self.scene.bounds);
+                self.file_path = "kettle.anvil".into();
+                self.status = "Kettle loaded. Pick the dome and add Pattern on face to change the dots.".into();
+            }
             RibbonAction::Workbook(i) => {
                 let (name, build) = anvil_io::workbook::EXERCISES[i as usize % 6];
                 self.doc = build();
