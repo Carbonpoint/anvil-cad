@@ -279,6 +279,31 @@ lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
 ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
 dimensions, the build order, and the casting plan.
 
+## Export
+
+File > Export opens a dialog. Pick a format, then a native save dialog
+asks where to write. If the file exists, a second window asks before it
+is replaced. File > Save As does the same for the .anvil document.
+
+| Format | What you get |
+| --- | --- |
+| STL (one file) | Every body in one binary STL |
+| STL (one file per feature) | One STL per feature next to the chosen name |
+| 3MF (one object per feature) | Slicers load each feature as its own object |
+| 3MF (one object) | One object with one part per feature; the slicer merges overlaps and prints one piece |
+| OBJ | One group per feature, names kept |
+| PLY (binary) | One mesh, for MeshLab and point cloud tools |
+| OFF | One mesh, for CGAL and research tools |
+| AMF | One object with one volume per feature |
+| glTF 2.0 | One file with the buffer embedded, metres and Y up, for web viewers |
+| STEP AP214 | Faceted B-rep: every planar face as a face with polygon loops, one solid per body |
+| Anvil document | The history, same as Save |
+
+The STEP file is exact for this kernel because its faces are planar. A
+STEP reader shows the facets as faces; it will not turn them back into
+cylinders. The writer follows the standard but has not yet been checked
+against a reader here.
+
 ## Healing after a boolean
 
 A join whose tool grazes a face used to leave a sliver hole. The
