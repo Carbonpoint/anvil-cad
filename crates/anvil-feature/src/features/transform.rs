@@ -77,11 +77,13 @@ impl Feature for MoveFeature {
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let t = DVec3::new(ctx.eval(&self.dx)?, ctx.eval(&self.dy)?, ctx.eval(&self.dz)?);
+        // glam's ZYX takes the Z angle first and applies X first, so the
+        // fields go in reversed: Rotate X really turns about X.
         let q = DQuat::from_euler(
             anvil_math::glam_euler(),
-            ctx.eval(&self.rx)?.to_radians(),
-            ctx.eval(&self.ry)?.to_radians(),
             ctx.eval(&self.rz)?.to_radians(),
+            ctx.eval(&self.ry)?.to_radians(),
+            ctx.eval(&self.rx)?.to_radians(),
         );
         let bodies = ctx.bodies_of(self.body)?.iter().map(|b| b.transformed(|p| q * p + t, false)).collect();
         Ok(FeatureOutput { bodies, consumes: consumed(self.copy, self.body), ..Default::default() })
@@ -345,3 +347,30 @@ inventory::submit! { FeatureDescriptor { id: "scale", label: "Scale", tab: "Soli
 inventory::submit! { FeatureDescriptor { id: "mirror", label: "Mirror", tab: "Solid", group: "Create", tooltip: "Mirror a body across a datum plane", order: 60, create: || Box::new(MirrorFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "rect_pattern", label: "Rect Pattern", tab: "Solid", group: "Create", tooltip: "Rectangular pattern of a body", order: 61, create: || Box::new(RectPatternFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "circ_pattern", label: "Circ Pattern", tab: "Solid", group: "Create", tooltip: "Circular pattern of a body about a datum axis", order: 62, create: || Box::new(CircPatternFeature::default()) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::primitives::BoxFeature;
+    use crate::Document;
+
+    #[test]
+    fn rotate_x_turns_about_x() {
+        let mut doc = Document::new("t");
+        doc.add_feature(Box::new(BoxFeature {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0".into(),
+            width: "10".into(),
+            depth: "2".into(),
+            height: "4".into(),
+        }));
+        doc.add_feature(Box::new(MoveFeature { body: 0, rx: "90".into(), ..Default::default() }));
+        let bb = doc.features[1].output.as_ref().unwrap().bodies[0].bounds();
+        // Rotating +90 about X takes +Y to +Z and +Z to -Y: the box now
+        // spans 4 along Y (negative) and 2 along Z.
+        assert!((bb.max.x - 10.0).abs() < 1e-9, "{bb:?}");
+        assert!((bb.min.y + 4.0).abs() < 1e-9 && bb.max.y.abs() < 1e-9, "{bb:?}");
+        assert!((bb.max.z - 2.0).abs() < 1e-9, "{bb:?}");
+    }
+}

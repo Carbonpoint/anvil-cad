@@ -813,6 +813,14 @@ pub fn boolean(a: &Solid, b: &Solid, op: BooleanOp) -> Solid {
     if timing {
         eprintln!("  csg after t-fix: {:?}", out.open_edge_report());
     }
+    // A tool that grazes a face leaves a sliver hole a few facets long.
+    // Cap those; a hole bigger than one percent of the body is a real
+    // defect and stays visible.
+    let healed = out.close_small_holes(0.01 * diag);
+    mark("heal");
+    if timing && healed > 0 {
+        eprintln!("  csg healed {healed} small holes: {:?}", out.open_edge_report());
+    }
     let before = out.open_edge_report();
     let mut merged = out.clone();
     merged.merge_coplanar_faces_within(Some(region));

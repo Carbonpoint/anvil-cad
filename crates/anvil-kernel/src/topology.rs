@@ -522,6 +522,175 @@ impl Solid {
         }
         (uses.values().filter(|&&u| u == 1).count(), uses.values().filter(|&&u| u > 2).count())
     }
+
+    /// Vertex pairs of every edge used by exactly one face loop.
+    pub fn open_edges_ids(&self) -> Vec<(VertexId, VertexId)> {
+        let mut uses: std::collections::HashMap<(VertexId, VertexId), usize> = std::collections::HashMap::new();
+        for f in self.faces.values() {
+            for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
+                let n = lp.len();
+                for i in 0..n {
+                    let (a, b) = (lp[i], lp[(i + 1) % n]);
+                    if a == b {
+                        continue;
+                    }
+                    *uses.entry(if a < b { (a, b) } else { (b, a) }).or_default() += 1;
+                }
+            }
+        }
+        uses.into_iter().filter(|(_, u)| *u == 1).map(|(k, _)| k).collect()
+    }
+
+    /// End points of every edge used by exactly one face loop, for
+    /// diagnostics: a closed body has none.
+    pub fn open_edges(&self) -> Vec<(DVec3, DVec3)> {
+        let mut uses: std::collections::HashMap<(VertexId, VertexId), usize> = std::collections::HashMap::new();
+        for f in self.faces.values() {
+            for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
+                let n = lp.len();
+                for i in 0..n {
+                    let (a, b) = (lp[i], lp[(i + 1) % n]);
+                    if a == b {
+                        continue;
+                    }
+                    *uses.entry(if a < b { (a, b) } else { (b, a) }).or_default() += 1;
+                }
+            }
+        }
+        uses.iter().filter(|(_, &u)| u == 1).map(|(&(a, b), _)| (self.vertices[a].pos, self.vertices[b].pos)).collect()
+    }
+}
+
+impl Solid {
+    /// Close every open loop whose extent is at most `max_extent` with a
+    /// fan of triangles about its centroid. A boolean whose tool grazes a
+    /// face can leave a sliver hole a few facets long; this heals it so
+    /// the body stays watertight. Bigger loops are left alone, because
+    /// they mean a real defect. Returns the number of loops closed.
+    pub fn close_small_holes(&mut self, max_extent: f64) -> usize {
+        use std::collections::HashMap;
+        // Two open edges that lie on each other with different vertex ids
+        // are one edge the weld missed. Merge their vertices first.
+        let open_now = self.open_edges_ids();
+        if open_now.is_empty() {
+            return 0;
+        }
+        let tol = max_extent * 1e-3;
+        let verts: Vec<VertexId> = {
+            let mut v: Vec<VertexId> = open_now.iter().flat_map(|&(a, b)| [a, b]).collect();
+            v.sort();
+            v.dedup();
+            v
+        };
+        let mut alias: HashMap<VertexId, VertexId> = HashMap::new();
+        for i in 0..verts.len() {
+            for j in 0..i {
+                let (vi, vj) = (verts[i], verts[j]);
+                if alias.contains_key(&vi) {
+                    break;
+                }
+                if alias.contains_key(&vj) {
+                    continue;
+                }
+                if (self.vertices[vi].pos - self.vertices[vj].pos).length() <= tol {
+                    alias.insert(vi, vj);
+                }
+            }
+        }
+        if !alias.is_empty() {
+            for f in self.faces.values_mut() {
+                for lp in std::iter::once(&mut f.outer).chain(f.inner.iter_mut()) {
+                    for v in lp.iter_mut() {
+                        if let Some(&a) = alias.get(v) {
+                            *v = a;
+                        }
+                    }
+                    lp.dedup();
+                    if lp.len() > 1 && lp.first() == lp.last() {
+                        lp.pop();
+                    }
+                }
+            }
+            self.faces.retain(|_, f| f.outer.len() >= 3);
+            self.rebuild_edges();
+        }
+        // Open edges as an undirected graph. A sliver's faces may be
+        // flipped, so the edge directions are not trusted; the cap gets its
+        // orientation from `make_consistent` afterwards.
+        let open_now = self.open_edges_ids();
+        if open_now.is_empty() {
+            return 0;
+        }
+        let open = open_now.len();
+        let key = |a: VertexId, b: VertexId| if a < b { (a, b) } else { (b, a) };
+        let mut next: HashMap<VertexId, Vec<VertexId>> = HashMap::new();
+        for &(a, b) in &open_now {
+            next.entry(a).or_default().push(b);
+            next.entry(b).or_default().push(a);
+        }
+        let mut used: std::collections::HashSet<(VertexId, VertexId)> = std::collections::HashSet::new();
+        let mut loops: Vec<Vec<VertexId>> = Vec::new();
+        let mut starts: Vec<VertexId> = next.keys().copied().collect();
+        starts.sort();
+        for start in starts {
+            for &first in &next[&start] {
+                if used.contains(&key(start, first)) {
+                    continue;
+                }
+                let mut lp = vec![start, first];
+                let mut cur = first;
+                let mut ok = false;
+                while lp.len() <= open + 1 {
+                    let prev = lp[lp.len() - 2];
+                    let Some(cands) = next.get(&cur) else { break };
+                    let Some(&nx) =
+                        cands.iter().find(|&&n| n != prev && !used.contains(&key(cur, n)) && !lp[1..].contains(&n))
+                    else {
+                        break;
+                    };
+                    if nx == start {
+                        ok = true;
+                        break;
+                    }
+                    lp.push(nx);
+                    cur = nx;
+                }
+                if !ok || lp.len() < 3 {
+                    continue;
+                }
+                let n = lp.len();
+                for i in 0..n {
+                    used.insert(key(lp[i], lp[(i + 1) % n]));
+                }
+                let mut lo = DVec3::splat(f64::INFINITY);
+                let mut hi = DVec3::splat(f64::NEG_INFINITY);
+                for &v in &lp {
+                    lo = lo.min(self.vertices[v].pos);
+                    hi = hi.max(self.vertices[v].pos);
+                }
+                if (hi - lo).length() <= max_extent {
+                    loops.push(lp);
+                }
+            }
+        }
+        for lp in &loops {
+            if lp.len() == 3 {
+                self.push_face(lp.clone(), Surface::Plane);
+                continue;
+            }
+            let c = lp.iter().map(|&v| self.vertices[v].pos).sum::<DVec3>() / lp.len() as f64;
+            let cv = self.add_vertex(c);
+            let n = lp.len();
+            for i in 0..n {
+                self.push_face(vec![lp[i], lp[(i + 1) % n], cv], Surface::Plane);
+            }
+        }
+        if !loops.is_empty() {
+            self.make_consistent();
+            self.rebuild_edges();
+        }
+        loops.len()
+    }
 }
 
 /// Surface ids at or above this value are temporary tags that CSG gives to

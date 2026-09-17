@@ -574,6 +574,9 @@ impl TimedDoc {
         if let Some(o) = self.0.features[i].output.as_ref() {
             for b in &o.bodies {
                 eprintln!("    edges {:?}", b.open_edge_report());
+                for (a, c) in b.open_edges().iter().take(8) {
+                    eprintln!("    open edge {:.5} {:.5} {:.5} to {:.5} {:.5} {:.5}", a.x, a.y, a.z, c.x, c.y, c.z);
+                }
             }
         }
         eprintln!(
