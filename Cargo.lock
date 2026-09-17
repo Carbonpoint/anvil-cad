@@ -190,6 +190,7 @@ dependencies = [
  "anvil-feature",
  "anvil-kernel",
  "anvil-math",
+ "anvil-sketch",
  "thiserror 2.0.20",
 ]
 
