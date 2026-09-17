@@ -64,7 +64,13 @@ pub trait Kernel {
     ) -> KernelResult<Solid>;
     /// Refine the facets of one curved surface to about `step` mm and move
     /// them outward by `height(s, theta)`; see `relief`.
-    fn relief(&self, solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) -> f64) -> KernelResult<Solid>;
+    fn relief(
+        &self,
+        solid: &Solid,
+        surface: u32,
+        step: f64,
+        field: &mut dyn relief::HeightField,
+    ) -> KernelResult<Solid>;
     fn boolean(&self, a: &Solid, b: &Solid, op: BooleanOp) -> KernelResult<Solid>;
     fn fillet(&self, solid: &Solid, edges: &[EdgeId], radius: f64) -> KernelResult<Solid>;
     fn tessellate(&self, solid: &Solid) -> TriMesh;
@@ -125,8 +131,14 @@ impl Kernel for NativeKernel {
     ) -> KernelResult<Solid> {
         ops::revolve_n(plane, profile, axis, angle, segments)
     }
-    fn relief(&self, solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) -> f64) -> KernelResult<Solid> {
-        relief::relief(solid, surface, step, height)
+    fn relief(
+        &self,
+        solid: &Solid,
+        surface: u32,
+        step: f64,
+        field: &mut dyn relief::HeightField,
+    ) -> KernelResult<Solid> {
+        relief::relief(solid, surface, step, field)
     }
     fn boolean(&self, a: &Solid, b: &Solid, op: BooleanOp) -> KernelResult<Solid> {
         let r = csg::boolean(a, b, op);

@@ -165,9 +165,27 @@ impl RevolvedParam {
     }
 }
 
+/// A height field over a surface of revolution in `(s, theta)`.
+pub trait HeightField {
+    /// Height along the normal at arc length `s` and angle `theta`.
+    fn height(&self, s: f64, theta: f64) -> f64;
+    /// Called once before displacement with the parameters of every
+    /// vertex that will not move: the boundary of the refined region and
+    /// the edges of facets a cut has touched. A field made of discrete
+    /// bumps can drop every bump that reaches one, so no bump is cut in
+    /// half. The default keeps the field as it is.
+    fn exclude_near(&mut self, _fixed: &[(f64, f64)], _param: &RevolvedParam) {}
+}
+
+impl<F: Fn(f64, f64) -> f64> HeightField for F {
+    fn height(&self, s: f64, theta: f64) -> f64 {
+        self(s, theta)
+    }
+}
+
 /// Refine the facets tagged `Surface::Revolved { id: surface }` to about
-/// `step` mm and move each vertex outward by `height(s, theta)`.
-pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) -> f64) -> KernelResult<Solid> {
+/// `step` mm and move each vertex outward by the field's height.
+pub fn relief(solid: &Solid, surface: u32, step: f64, field: &mut dyn HeightField) -> KernelResult<Solid> {
     let tag = Surface::Revolved { id: surface };
     let Some(geom) = solid.surfaces.get(&surface) else {
         return Err(KernelError::InvalidInput("the picked face is not a surface of revolution".into()));
@@ -409,6 +427,35 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
         }
     }
 
+    // Surface parameters of a vertex: arc length by projecting onto the
+    // nearer of the two run segments at the nearest run vertex.
+    let params_of = |p: DVec3| -> (f64, f64) {
+        let (rz, theta) = param.frame(p);
+        let (i, _) = param.nearest_run_vertex(rz);
+        let mut best = (param.cum[i], f64::INFINITY);
+        for k in [i.saturating_sub(1), i.min(param.run.len() - 2)] {
+            let a = param.run[k];
+            let d = param.run[k + 1] - a;
+            let l2 = d.length_squared();
+            if l2 < 1e-18 {
+                continue;
+            }
+            let t = ((rz - a).dot(d) / l2).clamp(0.0, 1.0);
+            let dist = (a + d * t - rz).length();
+            if dist < best.1 {
+                best = (param.cum[k] + t * l2.sqrt(), dist);
+            }
+        }
+        (best.0, theta)
+    };
+    // Tell the field where the surface stays fixed: frozen fine vertices
+    // and the extra vertices on cut edges.
+    let mut fixed: Vec<(f64, f64)> = frozen.iter().map(|&v| params_of(out.pos(v))).collect();
+    for list in extras.values() {
+        fixed.extend(list.iter().map(|x| params_of(out.pos(x.1))));
+    }
+    field.exclude_near(&fixed, &param);
+
     // Displace every free vertex of the refined cells along the normal.
     let mut moved: HashSet<VertexId> = HashSet::new();
     for (loop_ids, _) in &new_faces {
@@ -417,27 +464,8 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, height: &dyn Fn(f64, f64) 
                 continue;
             }
             let p = out.pos(v);
-            let (rz, theta) = param.frame(p);
-            let (i, _) = param.nearest_run_vertex(rz);
-            // Arc length: project onto the nearer of the two adjacent segments.
-            let s = {
-                let mut best = (param.cum[i], f64::INFINITY);
-                for k in [i.saturating_sub(1), i.min(param.run.len() - 2)] {
-                    let a = param.run[k];
-                    let d = param.run[k + 1] - a;
-                    let l2 = d.length_squared();
-                    if l2 < 1e-18 {
-                        continue;
-                    }
-                    let t = ((rz - a).dot(d) / l2).clamp(0.0, 1.0);
-                    let dist = (a + d * t - rz).length();
-                    if dist < best.1 {
-                        best = (param.cum[k] + t * l2.sqrt(), dist);
-                    }
-                }
-                best.0
-            };
-            let h = height(s, theta);
+            let (s, theta) = params_of(p);
+            let h = field.height(s, theta);
             if h.abs() > 1e-12 {
                 let n = param.normal(s, theta);
                 out.vertices[v].pos = p + n * h;
@@ -554,7 +582,7 @@ mod tests {
         assert!(s.surfaces.contains_key(&0));
         let v0 = s.volume();
         // One bump of height 1 everywhere: the sphere grows to radius 11.
-        let r = relief(&s, 0, 1.0, &|_, _| 1.0).unwrap();
+        let r = relief(&s, 0, 1.0, &mut |_, _| 1.0).unwrap();
         let v1 = r.volume();
         let expect = v0 * (11.0f64 / 10.0).powi(3);
         assert!((v1 - expect).abs() / expect < 0.03, "{v1} vs {expect}");
@@ -595,7 +623,7 @@ mod tests {
             .map(|(k, _)| k)
             .expect("outer wall run");
         let v0 = cup.volume();
-        let r = relief(&cup, outer, 1.0, &|_, _| 0.5).unwrap();
+        let r = relief(&cup, outer, 1.0, &mut |_, _| 0.5).unwrap();
         assert_eq!(r.open_edge_report(), (0, 0), "watertight");
         // The outer wall moved out by 0.5 except at the two frozen rings
         // (29 of 30 rows), and the refined facets sit on the true circle
@@ -644,7 +672,7 @@ mod tests {
         let tag = Surface::Revolved { id: outer };
         let with_extras = cut.faces.values().filter(|f| f.surface == tag && f.outer.len() > 4).count();
         assert!(with_extras > 0, "the cut leaves split vertices on neighbouring cells");
-        let r = relief(&cut, outer, 1.0, &|_, _| 0.5).unwrap();
+        let r = relief(&cut, outer, 1.0, &mut |_, _| 0.5).unwrap();
         assert_eq!(r.open_edge_report(), before, "no new seam defects");
         // Nearly every cell is refined: only the merged fragments around
         // the hole stay coarse, and they have many vertices.

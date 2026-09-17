@@ -922,7 +922,8 @@ mod manifold_tests {
     fn booleans_on_a_relief_mesh_stay_manifold() {
         let ball = sphere(DVec3::ZERO, 10.0).unwrap();
         let bumpy =
-            crate::relief::relief(&ball, 0, 0.4, &|s, t| 0.4 * (1.0 + (9.0 * t).sin() * (2.0 * s).sin())).unwrap();
+            crate::relief::relief(&ball, 0, 0.4, &mut |s: f64, t: f64| 0.4 * (1.0 + (9.0 * t).sin() * (2.0 * s).sin()))
+                .unwrap();
         report("bumpy sphere", &bumpy);
         let side = Plane { origin: DVec3::new(-20.0, 0.0, 0.0), x_axis: DVec3::Y, y_axis: DVec3::Z };
         let spout = cylinder(&side, DVec2::new(0.0, 0.0), 2.5, 40.0).unwrap();
@@ -971,7 +972,8 @@ mod manifold_tests {
     fn relief_seam_defects_stay_few() {
         let ball = sphere(DVec3::ZERO, 10.0).unwrap();
         let bumpy =
-            crate::relief::relief(&ball, 0, 0.4, &|s, t| 0.4 * (1.0 + (9.0 * t).sin() * (2.0 * s).sin())).unwrap();
+            crate::relief::relief(&ball, 0, 0.4, &mut |s: f64, t: f64| 0.4 * (1.0 + (9.0 * t).sin() * (2.0 * s).sin()))
+                .unwrap();
         let side = Plane { origin: DVec3::new(-20.0, 0.0, 0.0), x_axis: DVec3::Y, y_axis: DVec3::Z };
         let spout = cylinder(&side, DVec2::new(0.0, 0.0), 2.5, 40.0).unwrap();
         let joined = boolean(&bumpy, &spout, BooleanOp::Union);

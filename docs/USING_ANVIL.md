@@ -256,9 +256,9 @@ gives a linear taper instead.
 Only the picked surface changes. The inner wall, the rim, and every
 other face stay as they were. Put the pattern after the cuts and joins
 that touch that surface: the facets a cut passes through stay smooth, so
-the dots stop at the edge of a spout or a lug. Facets that only carry
-split vertices from a neighbouring cut are refined like the rest, and
-those vertices are kept, so the mesh stays closed. The pattern refines the surface
+the dots stop at the edge of a spout or a lug. A dot is either whole or
+absent: any dot that would reach a cut edge or the end of the surface
+is dropped, and the feature note says how many. The pattern refines the surface
 to the mesh step, so a kettle body has about 200 thousand faces. A
 boolean on that body still takes about one second, because the boolean
 only rebuilds the faces near the tool.

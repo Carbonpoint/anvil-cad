@@ -12,6 +12,9 @@ fn main() {
         if let Some(e) = &f.error {
             eprintln!("feature {i} {}: {e}", f.feature.name());
         }
+        if let Some(n) = f.output.as_ref().and_then(|o| o.note.as_ref()) {
+            eprintln!("feature {i} {}: {n}", f.feature.name());
+        }
     }
     for b in doc.bodies() {
         eprintln!("body: {} faces, volume {:.0} mm3, open edges {:?}", b.faces.len(), b.volume(), b.open_edge_report());

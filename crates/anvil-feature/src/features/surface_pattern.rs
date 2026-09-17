@@ -11,7 +11,7 @@
 //! small dots in each cell.
 
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError};
-use anvil_kernel::relief::RevolvedParam;
+use anvil_kernel::relief::{HeightField, RevolvedParam};
 use anvil_kernel::{KernelError, Surface};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -73,7 +73,10 @@ pub struct DotField {
     cells: HashMap<(i64, i64), Vec<Dot>>,
     cell_s: f64,
     cell_t: f64,
+    r_max: f64,
     pub count: usize,
+    /// Dots dropped because they reached a fixed part of the surface.
+    pub dropped: usize,
 }
 
 impl DotField {
@@ -85,11 +88,15 @@ impl DotField {
         for d in &dots {
             cells.entry(((d.s / cell_s).floor() as i64, (d.theta / cell_t).floor() as i64)).or_default().push(*d);
         }
-        DotField { cells, cell_s, cell_t, count: dots.len() }
+        DotField { cells, cell_s, cell_t, r_max, count: dots.len(), dropped: 0 }
+    }
+
+    fn cell_of(&self, s: f64, theta: f64) -> (i64, i64) {
+        ((s / self.cell_s).floor() as i64, (theta / self.cell_t).floor() as i64)
     }
 
     /// Spherical cap height of the nearest dot at `(s, theta)`.
-    pub fn height(&self, s: f64, theta: f64) -> f64 {
+    pub fn height_at(&self, s: f64, theta: f64) -> f64 {
         let ks = (s / self.cell_s).floor() as i64;
         let kt = (theta / self.cell_t).floor() as i64;
         let nt = (std::f64::consts::TAU / self.cell_t).ceil() as i64;
@@ -118,6 +125,57 @@ impl DotField {
             }
         }
         best
+    }
+}
+
+impl HeightField for DotField {
+    fn height(&self, s: f64, theta: f64) -> f64 {
+        self.height_at(s, theta)
+    }
+
+    /// Drop every dot whose footprint reaches a fixed vertex, so a dot is
+    /// either whole or absent. Fixed vertices sit on the edges of cut
+    /// facets and on the region boundary, about one mesh step apart.
+    fn exclude_near(&mut self, fixed: &[(f64, f64)], _param: &RevolvedParam) {
+        let nt = (std::f64::consts::TAU / self.cell_t).ceil() as i64;
+        let mut doomed: Vec<(i64, i64, usize)> = Vec::new();
+        for &(s, theta) in fixed {
+            let (ks, kt) = self.cell_of(s, theta);
+            for ds in -1..=1 {
+                for dt in -2..=2 {
+                    let key = (ks + ds, (kt + dt).rem_euclid(nt));
+                    let Some(list) = self.cells.get(&key) else { continue };
+                    for (n, d) in list.iter().enumerate() {
+                        let mut dth = theta - d.theta;
+                        while dth > std::f64::consts::PI {
+                            dth -= std::f64::consts::TAU;
+                        }
+                        while dth < -std::f64::consts::PI {
+                            dth += std::f64::consts::TAU;
+                        }
+                        let dist2 = (s - d.s).powi(2) + (d.r * dth).powi(2);
+                        // A small margin so a dot never ends exactly on a fixed edge.
+                        let reach = d.rho * 1.05;
+                        if dist2 < reach * reach {
+                            doomed.push((key.0, key.1, n));
+                        }
+                    }
+                }
+            }
+        }
+        doomed.sort_unstable();
+        doomed.dedup();
+        // Remove from the back of each cell list so indices stay valid.
+        for (a, b, n) in doomed.into_iter().rev() {
+            if let Some(list) = self.cells.get_mut(&(a, b)) {
+                if n < list.len() {
+                    list.remove(n);
+                    self.dropped += 1;
+                }
+            }
+        }
+        self.count -= self.dropped.min(self.count);
+        let _ = self.r_max;
     }
 }
 
@@ -261,9 +319,14 @@ impl Feature for SurfacePatternFeature {
                 .ok_or_else(|| KernelError::InvalidInput("surface run is too short".into()))?;
             let dots = layout_dots(&param, &self.layout, columns, pitch, dot, dot_end, height, margin);
             let r_max = param.run.iter().map(|p| p.x).fold(0.0, f64::max);
-            let field = DotField::new(dots, r_max);
-            let out = ctx.kernel.relief(b, surface, step, &|s, t| field.height(s, t))?;
-            note = Some(format!("{} dots, {} faces", field.count, out.faces.len()));
+            let mut field = DotField::new(dots, r_max);
+            let out = ctx.kernel.relief(b, surface, step, &mut field)?;
+            note = Some(format!(
+                "{} dots ({} dropped at cut edges), {} faces",
+                field.count,
+                field.dropped,
+                out.faces.len()
+            ));
             bodies.push(out);
         }
         if note.is_none() {
