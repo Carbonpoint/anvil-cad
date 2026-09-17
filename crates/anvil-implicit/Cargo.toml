@@ -1,0 +1,10 @@
+[package]
+name = "anvil-implicit"
+description = "Implicit (field) modelling: signed distance fields, lattices, and a surface mesher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+anvil-math.workspace = true

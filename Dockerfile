@@ -17,7 +17,7 @@ RUN cargo build --release --locked -p anvil-cli
 # ---- test: run the tests of every crate that needs no display ------------
 FROM build AS test
 RUN cargo test --locked \
-    -p anvil-math -p anvil-expr -p anvil-sketch -p anvil-kernel \
+    -p anvil-math -p anvil-expr -p anvil-sketch -p anvil-kernel -p anvil-implicit \
     -p anvil-feature -p anvil-cam -p anvil-io -p anvil-cli
 
 # ---- runtime: small image with just the binary ---------------------------

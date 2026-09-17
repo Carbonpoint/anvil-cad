@@ -170,6 +170,7 @@ name = "anvil-feature"
 version = "0.1.0"
 dependencies = [
  "anvil-expr",
+ "anvil-implicit",
  "anvil-kernel",
  "anvil-math",
  "anvil-sketch",
@@ -181,6 +182,13 @@ dependencies = [
  "thiserror 2.0.20",
  "ttf-parser",
  "typetag",
+]
+
+[[package]]
+name = "anvil-implicit"
+version = "0.1.0"
+dependencies = [
+ "anvil-math",
 ]
 
 [[package]]

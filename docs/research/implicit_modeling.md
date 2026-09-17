@@ -1,0 +1,86 @@
+# Field driven design: an open nTop beside Anvil
+
+Written 2026-09-17. This is the plan for the second product in this
+repository: an implicit modeller for lattices, shells, and field driven
+geometry, of the kind nTop sells, built open source on the same crates
+as Anvil CAD.
+
+## What nTop does that a B-rep CAD cannot
+
+nTop represents a part as an implicit function: for every point in
+space, a signed distance to the surface. Booleans become min and max,
+offsets become subtraction, a fillet is a smooth minimum, and a lattice
+is a periodic function. None of these operations can fail, none produce
+sliver faces, and the cost does not grow with the number of features.
+The price: the shape has no faces or edges to pick, no exact surfaces,
+and every export is a mesh, so a field driven part is meshed at the end
+at a chosen resolution.
+
+Its strengths, in the order users pay for them:
+
+1. Lattices: beam lattices on a unit cell, sheet lattices on a TPMS
+   (gyroid, Schwarz, diamond, and others), conformal lattices that follow
+   a surface, and graded cells whose size or wall follows a field.
+2. Shells and infill: a skin of one thickness with a lattice core.
+3. Field driven parameters: a wall thickness, a cell size, or a blend
+   radius that varies with a scalar field from a simulation (stress,
+   temperature) or from distance to a feature.
+4. Topology optimization import: a density field from a solver becomes a
+   smooth implicit body.
+5. Robust booleans and blends between imported meshes and CAD bodies.
+6. Meshing and export for printing and for FE: STL, 3MF, and slices
+   straight from the field.
+
+## What exists in the open
+
+| Project | Language | Notes |
+| --- | --- | --- |
+| libfive | C++ with Scheme and Python bindings | Implicit kernel with an expression tree, meshing by dual contouring, an editor. The closest open cousin of nTop's kernel. |
+| OpenVDB | C++ | Sparse voxel grids and level sets, used by every film studio. Booleans, offsets, meshing by marching cubes. Heavy build. |
+| ImplicitCAD | Haskell | Implicit modeller with a script language. |
+| Curv | C++ | Signed distance modelling language with a GPU renderer. |
+| Fidget | Rust | JIT compiled implicit expressions with meshing. Active in 2026, from the libfive author. |
+| OpenSCAD | C++ | CSG on meshes, not implicit. |
+
+None of them has a feature history with editable parameters, a body
+picked from a B-rep, or a print oriented workflow. That gap is where an
+open field tool next to Anvil fits.
+
+## The plan
+
+The product is a crate, `anvil-implicit`, and the features that wrap it.
+It shares the math, the expression parser, the feature history, the
+document format, and the viewport with Anvil, so a lattice fill is a
+feature in the same tree as the revolve it fills. A separate desktop
+front end is a later decision; the ribbon gets a Field tab first.
+
+Milestones:
+
+* F1 (done 2026-09-17): the `Field` trait, sphere and box, union,
+  intersection, subtraction, smooth union, offset, shell, skin, TPMS
+  sheet lattices (gyroid, Schwarz P, diamond), a sampled field from any
+  closed mesh (ray parity plus an exact distance transform), and surface
+  nets meshing. The Lattice fill feature: skin plus lattice core on any
+  body.
+* F2: beam lattices on a unit cell (cubic, octet, kelvin) with beam
+  radius as a field; graded cells; conformal lattices by warping the
+  field with a surface parameterization.
+* F3: fields from data: a scalar field sampled on a grid loaded from a
+  CSV or a VTK file, with wall thickness and cell size driven by it.
+  Fields from Anvil geometry: distance to a picked face or body.
+* F4: quality: adaptive surface nets on an octree so a fine lattice does
+  not need a fine grid everywhere; sharp feature preservation (dual
+  contouring); a smoothing pass for print surfaces.
+* F5: Fidget as an optional back end for the expression tree, so a field
+  built from primitives is compiled and evaluated on all cores, and a GPU
+  path for the viewport.
+* F6: print preparation from the field: slices at layer height directly
+  from the field, overhang maps, and a 3MF with beam lattice extensions.
+
+## What is exact and what is not
+
+A sampled field is a distance accurate to one voxel; the lattice
+functions are scaled level sets, close to a distance near the sheet.
+Surface nets meshes are closed and stay within a voxel of the surface.
+For a printed part at 0.4 mm resolution that is below the nozzle width.
+For analysis or machining, Anvil's B-rep is still the reference.

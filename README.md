@@ -84,6 +84,7 @@ crates/anvil-expr      expression parser and evaluation table
 crates/anvil-sketch    2D entities, constraints, solver, profiles
 crates/anvil-kernel    B-rep topology, tessellation, extrude, revolve
 crates/anvil-feature   Feature trait, Document, registry, built-in features
+crates/anvil-implicit  implicit modelling: fields, TPMS lattices, sampled fields, surface nets
 crates/anvil-cam       tools, toolpaths, operations, post-processors
 crates/anvil-io        .anvil documents and mesh export
 crates/anvil-ui        ribbon, panels, viewport (eframe/egui)

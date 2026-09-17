@@ -279,6 +279,32 @@ lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
 ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
 dimensions, the build order, and the casting plan.
 
+## Healing after a boolean
+
+A join whose tool grazes a face used to leave a sliver hole. The
+boolean now closes any open loop smaller than one percent of the body
+after the seam repair, so a long chain of joins stays watertight. A bigger hole still shows in the open edge count, because
+it means a real defect.
+
+## Lattice fill
+
+Lattice fill (Solid tab, Field group) replaces the inside of a body with
+a sheet lattice under a solid skin, the way nTop lightens a part. Pick
+the body, choose gyroid, schwarz, or diamond, and set the cell size, the
+wall thickness of the sheet, the skin thickness, and the resolution.
+The body is sampled into a signed distance grid at that resolution, the
+skin and the lattice are combined as fields, and the zero surface is
+meshed back into a body with surface nets. No B-rep boolean runs, so it
+works on any closed body, including a patterned one, and the time
+depends only on the grid size. The note gives the triangle count, the
+volume as a percentage of the solid body, and the voxel count. Keep the
+wall at least two voxels thick; the feature refuses thinner walls. A
+lattice body is a mesh: later features can move, pattern, split, and
+export it, but a boolean on it is slow.
+
+docs/research/implicit_modeling.md is the plan for the field driven
+product that grows from this feature.
+
 ## Casting check and the Truchas export
 
 Casting check (Casting tab, Check group) takes the casting body, an

@@ -59,3 +59,11 @@ Open:
 * Incremental regeneration (only features downstream of the edit).
 * Level of detail tessellation for assemblies.
 * WASM plugin boundary with `wasmtime`.
+
+## F: Field driven design (started 2026-09-17)
+
+An implicit modeller beside the B-rep, in the spirit of nTop, open
+source. The plan and milestones F1 to F6 are in
+docs/research/implicit_modeling.md. F1 is done: the `anvil-implicit`
+crate (fields, TPMS lattices, sampled fields from meshes, surface nets)
+and the Lattice fill feature on the Solid tab.

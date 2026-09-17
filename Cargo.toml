@@ -5,6 +5,7 @@ members = [
     "crates/anvil-kernel",
     "crates/anvil-sketch",
     "crates/anvil-expr",
+    "crates/anvil-implicit",
     "crates/anvil-feature",
     "crates/anvil-cam",
     "crates/anvil-io",
@@ -25,6 +26,7 @@ anvil-math = { path = "crates/anvil-math" }
 anvil-kernel = { path = "crates/anvil-kernel" }
 anvil-sketch = { path = "crates/anvil-sketch" }
 anvil-expr = { path = "crates/anvil-expr" }
+anvil-implicit = { path = "crates/anvil-implicit" }
 anvil-feature = { path = "crates/anvil-feature" }
 anvil-cam = { path = "crates/anvil-cam" }
 anvil-io = { path = "crates/anvil-io" }

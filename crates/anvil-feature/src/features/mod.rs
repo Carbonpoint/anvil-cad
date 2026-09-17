@@ -8,6 +8,7 @@ pub mod emboss;
 pub mod extrude;
 pub mod fillet;
 pub mod hole;
+pub mod lattice;
 pub mod loft;
 pub mod pending;
 pub mod primitives;
