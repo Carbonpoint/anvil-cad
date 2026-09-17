@@ -435,6 +435,35 @@ pub fn relief(solid: &Solid, surface: u32, step: f64, field: &mut dyn HeightFiel
                     v
                 } else if let Some(&v) = fine.get(&key) {
                     v
+                } else if let Some(v) = {
+                    // A coarse edge whose other side was refined earlier
+                    // already carries split vertices at this step. Reuse
+                    // one that sits where this fine vertex would go, or
+                    // the two sides end up with twin vertices and a seam
+                    // of open edges.
+                    let fa = a as f64 / ms as f64;
+                    let fb = b as f64 / m_t as f64;
+                    let want = if on_lo {
+                        Some((corner(i, j), corner(i, jn), fb))
+                    } else if on_hi {
+                        Some((corner(i + 1, j), corner(i + 1, jn), fb))
+                    } else if on_cl {
+                        Some((corner(i, j), corner(i + 1, j), fa))
+                    } else if on_ch {
+                        Some((corner(i, jn), corner(i + 1, jn), fa))
+                    } else {
+                        None
+                    };
+                    want.and_then(|(ea, eb, t)| {
+                        let (ekey, tt) = if ea < eb { ((ea, eb), t) } else { ((eb, ea), 1.0 - t) };
+                        let list = extras.get_mut(&ekey)?;
+                        let k = list.iter().position(|x| (x.0 - tt).abs() < 1e-6)?;
+                        Some(list.remove(k).1)
+                    })
+                } {
+                    fine.insert(key, v);
+                    frozen.insert(v);
+                    v
                 } else {
                     let fa = a as f64 / ms as f64;
                     let fb = b as f64 / m_t as f64;
@@ -694,6 +723,44 @@ mod tests {
         let inner_ok =
             r.vertices.values().any(|v| ((v.pos.x * v.pos.x + v.pos.y * v.pos.y).sqrt() - 17.0).abs() < 1e-9);
         assert!(inner_ok);
+    }
+
+    #[test]
+    fn relief_on_the_run_next_to_a_refined_run_stays_watertight() {
+        // A drum with a 45 degree underside: two runs that share a circle.
+        let profile = [
+            DVec2::new(0.0, 0.0),
+            DVec2::new(9.0, 0.0),
+            DVec2::new(22.0, 13.0),
+            DVec2::new(22.0, 38.0),
+            DVec2::new(0.0, 38.0),
+        ];
+        let plane = Plane { origin: DVec3::ZERO, x_axis: DVec3::X, y_axis: DVec3::Z };
+        let axis = Axis::new(DVec3::ZERO, DVec3::Z);
+        let drum = revolve_n(&plane, &profile, &axis, std::f64::consts::TAU, 48).unwrap();
+        let run_id = |s: &Solid, pick: &dyn Fn(&[DVec2]) -> bool| {
+            *s.surfaces
+                .iter()
+                .find(|(_, g)| {
+                    let SurfaceGeom::Revolved { run, .. } = g;
+                    pick(run)
+                })
+                .map(|(k, _)| k)
+                .expect("run")
+        };
+        let wall = run_id(&drum, &|run| run.iter().all(|p| (p.x - 22.0).abs() < 1e-9));
+        let under = run_id(&drum, &|run| {
+            run.iter().any(|p| (p.x - 9.0).abs() < 1e-9) && run.iter().any(|p| (p.x - 22.0).abs() < 1e-9)
+        });
+        let v0 = drum.volume();
+        let mut bumps = |s: f64, theta: f64| 0.4 * (s * 1.3).sin().abs() * (theta * 5.0).cos().abs();
+        let first = relief(&drum, wall, 0.5, &mut bumps).unwrap();
+        assert_eq!(first.open_edge_report().0, 0, "first relief is watertight");
+        let mut bumps2 = |s: f64, theta: f64| 0.3 * (s * 0.9).cos().abs() * (theta * 7.0).sin().abs();
+        let second = relief(&first, under, 0.5, &mut bumps2).unwrap();
+        let (open, _) = second.open_edge_report();
+        assert_eq!(open, 0, "second relief next to the first is watertight");
+        assert!(second.volume() > first.volume() && first.volume() > v0);
     }
 
     #[test]

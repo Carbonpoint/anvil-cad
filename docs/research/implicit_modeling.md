@@ -62,9 +62,12 @@ Milestones:
   closed mesh (ray parity plus an exact distance transform), and surface
   nets meshing. The Lattice fill feature: skin plus lattice core on any
   body.
-* F2: beam lattices on a unit cell (cubic, octet, kelvin) with beam
-  radius as a field; graded cells; conformal lattices by warping the
-  field with a surface parameterization.
+* F2 (done 2026-09-17): beam lattices on a unit cell (cubic, bcc, octet,
+  kelvin) as the distance to a fixed list of segments; `Graded` thickens
+  any centreline or mid sheet by a scalar field (`Ramp`, `Radial`, or
+  any `Field`); `Warp` evaluates a field in mapped coordinates, with a
+  cylindrical map so cells follow a round wall. Lattice fill exposes
+  all of it, and `anvil-cli lattice` runs it on any closed STL.
 * F3: fields from data: a scalar field sampled on a grid loaded from a
   CSV or a VTK file, with wall thickness and cell size driven by it.
   Fields from Anvil geometry: distance to a picked face or body.

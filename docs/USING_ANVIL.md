@@ -323,21 +323,30 @@ it means a real defect.
 ## Lattice fill
 
 Lattice fill (Solid tab, Field group) replaces the inside of a body with
-a sheet lattice under a solid skin, the way nTop lightens a part. Pick
-the body, choose gyroid, schwarz, or diamond, and set the cell size, the
-wall thickness of the sheet, the skin thickness, and the resolution.
-The body is sampled into a signed distance grid at that resolution, the
+a lattice under a solid skin, the way nTop lightens a part. Pick the
+body, choose the lattice, and set the cell size, the thickness (sheet
+wall or beam diameter), the skin thickness, and the resolution.
+
+Lattices: three sheet lattices on a minimal surface (gyroid, schwarz,
+diamond) and four beam lattices on a unit cell (cubic, bcc, octet,
+kelvin). Grade along x, y, z, or radially to ramp the thickness from
+Thickness to Thickness at far end across the body. Conform to cylinder
+wraps the cells around the Z axis so they follow a round wall.
+
+The body is sampled into a signed distance grid at the resolution, the
 skin and the lattice are combined as fields, and the zero surface is
 meshed back into a body with surface nets. No B-rep boolean runs, so it
 works on any closed body, including a patterned one, and the time
 depends only on the grid size. The note gives the triangle count, the
 volume as a percentage of the solid body, and the voxel count. Keep the
-wall at least two voxels thick; the feature refuses thinner walls. A
+thickness at least two voxels; the feature refuses thinner walls. A
 lattice body is a mesh: later features can move, pattern, split, and
 export it, but a boolean on it is slow.
 
-docs/research/implicit_modeling.md is the plan for the field driven
-product that grows from this feature.
+Headless: `anvil-cli lattice --stl part.stl --kind octet --cell 8
+--wall 1.2 --grade z --wall-end 2.4 --out DIR` fills any closed STL and
+writes STL, 3MF, and STEP. docs/research/implicit_modeling.md is the
+plan for the field driven product that grows from this feature.
 
 ## Casting check and the Truchas export
 

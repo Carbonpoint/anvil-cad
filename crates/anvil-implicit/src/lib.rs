@@ -14,8 +14,10 @@
 
 use anvil_math::DVec3;
 
+pub mod beam;
 pub mod mesh;
 pub mod sampled;
+pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Radial, Ramp, Warp};
 pub use sampled::Sampled;
 
 /// A scalar field over space. Negative inside, positive outside, zero on

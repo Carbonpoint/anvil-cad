@@ -64,6 +64,7 @@ Open:
 
 An implicit modeller beside the B-rep, in the spirit of nTop, open
 source. The plan and milestones F1 to F6 are in
-docs/research/implicit_modeling.md. F1 is done: the `anvil-implicit`
-crate (fields, TPMS lattices, sampled fields from meshes, surface nets)
-and the Lattice fill feature on the Solid tab.
+docs/research/implicit_modeling.md. F1 and F2 are done: the
+`anvil-implicit` crate (fields, TPMS and beam lattices, graded
+thickness, cylindrical warp, sampled fields from meshes, surface nets),
+the Lattice fill feature on the Solid tab, and `anvil-cli lattice`.
