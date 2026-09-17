@@ -556,3 +556,253 @@ impl Feature for DraftCheckFeature {
 }
 
 inventory::submit! { FeatureDescriptor { id: "draft_check", label: "Draft check", tab: "Casting", group: "Mold", tooltip: "Report faces that face away from the pull direction", order: 10, create: || Box::new(DraftCheckFeature::default()) } }
+
+/// Starting values for the alloys the casting check knows. Every number
+/// is a textbook or datasheet figure from docs/research/casting_simulation.md
+/// and is meant to be calibrated, not trusted blindly. Units: kg/m3, C,
+/// kJ/kg, J/(kg K), W/(m K), and the mold constant in s/mm2 for
+/// Chvorinov's rule with the modulus in mm.
+#[derive(Clone, Copy, Debug)]
+pub struct Alloy {
+    pub name: &'static str,
+    pub density_solid: f64,
+    pub density_liquid: f64,
+    pub liquidus: f64,
+    pub solidus: f64,
+    pub latent_heat: f64,
+    pub specific_heat: f64,
+    pub conductivity: f64,
+    pub pour_min: f64,
+    pub pour_max: f64,
+    /// Sprue : runner : ingate area ratio.
+    pub gating_ratio: [f64; 3],
+    pub pressurized: bool,
+    pub mold_constant: f64,
+}
+
+pub const ALLOYS: [Alloy; 3] = [
+    Alloy {
+        name: "grey cast iron",
+        density_solid: 7150.0,
+        density_liquid: 6980.0,
+        liquidus: 1190.0,
+        solidus: 1150.0,
+        latent_heat: 280.0,
+        specific_heat: 840.0,
+        conductivity: 30.0,
+        pour_min: 1360.0,
+        pour_max: 1450.0,
+        gating_ratio: [1.0, 2.0, 1.0],
+        pressurized: true,
+        mold_constant: 1.5,
+    },
+    Alloy {
+        name: "A356 aluminium",
+        density_solid: 2680.0,
+        density_liquid: 2400.0,
+        liquidus: 615.0,
+        solidus: 555.0,
+        latent_heat: 389.0,
+        specific_heat: 1100.0,
+        conductivity: 80.0,
+        pour_min: 680.0,
+        pour_max: 730.0,
+        gating_ratio: [1.0, 3.0, 3.0],
+        pressurized: false,
+        mold_constant: 0.8,
+    },
+    Alloy {
+        name: "AZ91 magnesium",
+        density_solid: 1810.0,
+        density_liquid: 1650.0,
+        liquidus: 595.0,
+        solidus: 470.0,
+        latent_heat: 373.0,
+        specific_heat: 1200.0,
+        conductivity: 60.0,
+        pour_min: 640.0,
+        pour_max: 675.0,
+        gating_ratio: [1.0, 3.0, 3.0],
+        pressurized: false,
+        mold_constant: 0.5,
+    },
+];
+
+pub fn alloy_by_name(name: &str) -> Alloy {
+    ALLOYS.iter().copied().find(|a| a.name == name).unwrap_or(ALLOYS[0])
+}
+
+/// Surface area of a body in mm2 (all faces, holes included).
+pub fn surface_area(b: &anvil_kernel::Solid) -> f64 {
+    let m = anvil_kernel::mesh::tessellate(b);
+    m.indices
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|t| {
+            let (a, c, d) = (m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]);
+            (c - a).cross(d - a).length() * 0.5
+        })
+        .sum()
+}
+
+/// Casting check: the textbook numbers for a casting, its sprue, and its
+/// riser. Mass, surface area, casting modulus, Chvorinov solidification
+/// time, pouring temperature against the alloy's range, Torricelli fill
+/// time through the sprue choke, the gating areas from the alloy's
+/// ratio, and the riser modulus rule. Nothing is changed; the result is
+/// the feature note.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CastingCheckFeature {
+    pub casting: usize,
+    pub alloy: String,
+    pub pour_temp: String,
+    /// Chvorinov mold constant in s/mm2; 0 takes the alloy's starting value.
+    pub mold_constant: String,
+    pub has_sprue: bool,
+    pub sprue: usize,
+    /// Diameter of the sprue choke (its smallest section).
+    pub choke_diameter: String,
+    pub has_riser: bool,
+    pub riser: usize,
+}
+
+impl Default for CastingCheckFeature {
+    fn default() -> Self {
+        CastingCheckFeature {
+            casting: 1,
+            alloy: "grey cast iron".into(),
+            pour_temp: "1400".into(),
+            mold_constant: "0".into(),
+            has_sprue: false,
+            sprue: 0,
+            choke_diameter: "12".into(),
+            has_riser: false,
+            riser: 0,
+        }
+    }
+}
+
+#[typetag::serde(name = "casting_check")]
+impl Feature for CastingCheckFeature {
+    fn kind(&self) -> &'static str {
+        "casting_check"
+    }
+    fn name(&self) -> String {
+        format!("Casting check ({})", self.alloy)
+    }
+    fn params(&self) -> Vec<ParamSpec> {
+        let names: Vec<&'static str> = ALLOYS.iter().map(|a| a.name).collect();
+        let mut v = vec![
+            ParamSpec::feature_ref("casting", "Casting body", BODY_TYPES.to_vec(), self.casting),
+            ParamSpec::choice("alloy", "Alloy", names, &self.alloy),
+            ParamSpec::length("pour_temp", "Pouring temperature (C)", &self.pour_temp),
+            ParamSpec::length("mold_constant", "Mold constant s/mm2 (0 = alloy default)", &self.mold_constant),
+            ParamSpec::boolean("has_sprue", "Check a sprue", self.has_sprue),
+        ];
+        if self.has_sprue {
+            v.push(ParamSpec::feature_ref("sprue", "Sprue", vec!["sprue"], self.sprue));
+            v.push(ParamSpec::length("choke_diameter", "Choke diameter", &self.choke_diameter));
+        }
+        v.push(ParamSpec::boolean("has_riser", "Check a riser", self.has_riser));
+        if self.has_riser {
+            v.push(ParamSpec::feature_ref("riser", "Riser", vec!["riser"], self.riser));
+        }
+        v
+    }
+    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
+        match (name, value) {
+            ("casting", ParamValue::FeatureRef(i)) => self.casting = i,
+            ("alloy", ParamValue::Choice(a)) => self.alloy = a,
+            ("pour_temp", ParamValue::Expr(s)) => self.pour_temp = s,
+            ("mold_constant", ParamValue::Expr(s)) => self.mold_constant = s,
+            ("has_sprue", ParamValue::Bool(b)) => self.has_sprue = b,
+            ("sprue", ParamValue::FeatureRef(i)) => self.sprue = i,
+            ("choke_diameter", ParamValue::Expr(s)) => self.choke_diameter = s,
+            ("has_riser", ParamValue::Bool(b)) => self.has_riser = b,
+            ("riser", ParamValue::FeatureRef(i)) => self.riser = i,
+            (n, _) => return Err(format!("unknown parameter {n}")),
+        }
+        Ok(())
+    }
+    fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
+        let alloy = alloy_by_name(&self.alloy);
+        let pour = ctx.eval(&self.pour_temp)?;
+        let c_user = ctx.eval(&self.mold_constant)?;
+        let c = if c_user > 0.0 { c_user } else { alloy.mold_constant };
+        let bodies = ctx.bodies_of(self.casting)?;
+        let volume: f64 = bodies.iter().map(|b| b.volume()).sum();
+        let area: f64 = bodies.iter().map(surface_area).sum();
+        if volume <= 0.0 || area <= 0.0 {
+            return Err(RegenError::Other("the casting body has no volume".into()));
+        }
+        let mass_kg = volume * 1e-9 * alloy.density_solid;
+        let modulus = volume / area;
+        let freeze = c * modulus * modulus;
+        let mut parts = vec![
+            format!(
+                "{}: {:.0} cm3, {:.2} kg, area {:.0} cm2, modulus {:.2} mm, freezes in about {:.0} s (C = {} s/mm2, calibrate from one pour)",
+                alloy.name,
+                volume * 1e-3,
+                mass_kg,
+                area * 1e-2,
+                modulus,
+                freeze,
+                c
+            ),
+            if pour >= alloy.pour_min && pour <= alloy.pour_max {
+                format!("pour {pour:.0} C is inside {:.0} to {:.0} C", alloy.pour_min, alloy.pour_max)
+            } else {
+                format!("pour {pour:.0} C is OUTSIDE {:.0} to {:.0} C", alloy.pour_min, alloy.pour_max)
+            },
+        ];
+        if self.has_sprue {
+            let sprue = ctx.bodies_of(self.sprue)?;
+            let choke_d = ctx.eval(&self.choke_diameter)?;
+            let mut lo = f64::INFINITY;
+            let mut hi = f64::NEG_INFINITY;
+            for b in sprue {
+                let bb = b.bounds();
+                lo = lo.min(bb.min.z);
+                hi = hi.max(bb.max.z);
+            }
+            let head_m = (hi - lo).max(0.0) * 1e-3;
+            let v = (2.0 * 9.81 * head_m).sqrt();
+            let choke_area = std::f64::consts::PI * choke_d * choke_d / 4.0;
+            // Tapered sprue efficiency about 0.74.
+            let flow = choke_area * 1e-6 * v * 0.74;
+            let fill = if flow > 0.0 { volume * 1e-9 / flow } else { f64::INFINITY };
+            let r = alloy.gating_ratio;
+            parts.push(format!(
+                "sprue head {:.0} mm gives {:.2} m/s at the choke; a {choke_d:.0} mm choke fills the casting in {fill:.1} s; gating {}:{}:{} ({}) wants runner {:.0} mm2 and ingates {:.0} mm2 in total",
+                head_m * 1e3,
+                v,
+                r[0],
+                r[1],
+                r[2],
+                if alloy.pressurized { "pressurized" } else { "unpressurized" },
+                choke_area * r[1] / r[0],
+                choke_area * r[2] / r[0]
+            ));
+        }
+        if self.has_riser {
+            let riser = ctx.bodies_of(self.riser)?;
+            let rv: f64 = riser.iter().map(|b| b.volume()).sum();
+            let ra: f64 = riser.iter().map(surface_area).sum();
+            if rv > 0.0 && ra > 0.0 {
+                let rm = rv / ra;
+                let need = 1.2 * modulus;
+                parts.push(format!(
+                    "riser modulus {rm:.2} mm against 1.2 x casting {need:.2} mm: {}",
+                    if rm >= need { "OK" } else { "TOO SMALL, the riser freezes first" }
+                ));
+            }
+        }
+        Ok(FeatureOutput { note: Some(parts.join("; ")), ..Default::default() })
+    }
+    fn clone_box(&self) -> Box<dyn Feature> {
+        Box::new(self.clone())
+    }
+}
+
+inventory::submit! { FeatureDescriptor { id: "casting_check", label: "Casting check", tab: "Casting", group: "Check", tooltip: "Mass, modulus, freeze time, fill time, gating areas, riser rule", order: 20, create: || Box::new(CastingCheckFeature::default()) } }

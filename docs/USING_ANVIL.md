@@ -279,6 +279,23 @@ lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
 ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
 dimensions, the build order, and the casting plan.
 
+## Casting check and the Truchas export
+
+Casting check (Casting tab, Check group) takes the casting body, an
+alloy (grey cast iron, A356 aluminium, or AZ91 magnesium), the pouring
+temperature, and optionally a sprue and a riser. Its note gives the
+volume, the mass, the surface area, the casting modulus, the Chvorinov
+solidification time, whether the pour is inside the alloy's range, the
+speed and fill time through the sprue choke, the runner and ingate
+areas from the alloy's gating ratio, and the riser modulus rule. The
+mold constant is a starting value: calibrate it from one real pour.
+
+`anvil-cli kettle --variant gated --out DIR` also writes a Truchas case
+into `DIR/truchas`: `cavity.stl` (casting plus gating as one mesh), a
+`casting.inp` deck with the alloy numbers, and a README with the
+meshing steps. The deck is a template; check it against the Truchas
+reference manual before a run.
+
 ## Mold split
 
 Split body (Solid tab) cuts a body on a datum plane and keeps one or

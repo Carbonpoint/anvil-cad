@@ -3,6 +3,7 @@
 //!
 //! Commands:
 //!   anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
+//!   anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
 //!   anvil-cli fonts
 //!   anvil-cli --help
 
@@ -13,6 +14,7 @@ const USAGE: &str = "anvil-cli: headless Anvil CAD tools
 
 USAGE:
     anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
+    anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
     anvil-cli fonts
     anvil-cli --help
 
@@ -20,7 +22,15 @@ COMMANDS:
     card     Make a 3D-printable business card with a name and a QR code.
              Writes business_card.stl, business_card.3mf, and
              business_card.anvil to DIR (default: current directory).
+    kettle   Build the cast iron kettle sample (docs/KETTLE.md). Writes one
+             STL per part, a 3MF, and the .anvil document. The gated
+             variant also writes a Truchas case (cavity.stl, casting.inp).
     fonts    List the bundled fonts usable with --font.
+
+OPTIONS for kettle:
+    --variant V    plain (default), gated (with sprue, runner, riser), or
+                   mold (pattern halves, core, core box)
+    --out DIR      Output folder (created if missing)
 
 OPTIONS for card:
     --name NAME    Name printed on the card
@@ -97,6 +107,65 @@ fn run_card(a: &CardArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Parsed `kettle` options.
+#[derive(Debug, PartialEq)]
+struct KettleArgs {
+    variant: String,
+    out: PathBuf,
+}
+
+fn parse_kettle(args: &[String]) -> Result<KettleArgs, String> {
+    let mut a = KettleArgs { variant: "plain".into(), out: PathBuf::from(".") };
+    let mut i = 0;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--variant" => {
+                a.variant = args.get(i + 1).ok_or("--variant needs a value")?.clone();
+                i += 2;
+            }
+            "--out" => {
+                a.out = PathBuf::from(args.get(i + 1).ok_or("--out needs a value")?);
+                i += 2;
+            }
+            other => return Err(format!("unknown option {other}")),
+        }
+    }
+    if !["plain", "gated", "mold"].contains(&a.variant.as_str()) {
+        return Err(format!("unknown variant {}; use plain, gated, or mold", a.variant));
+    }
+    Ok(a)
+}
+
+fn run_kettle(a: &KettleArgs) -> Result<(), String> {
+    let doc = match a.variant.as_str() {
+        "gated" => anvil_io::kettle::kettle_gated(),
+        "mold" => anvil_io::kettle::kettle_mold(),
+        _ => anvil_io::kettle::kettle(),
+    };
+    for (i, f) in doc.features.iter().enumerate() {
+        if let Some(e) = &f.error {
+            return Err(format!("feature {i} ({}): {e}", f.feature.name()));
+        }
+        if let Some(note) = f.output.as_ref().and_then(|o| o.note.as_ref()) {
+            println!("{}: {note}", f.feature.name());
+        }
+    }
+    std::fs::create_dir_all(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?;
+    let stem = format!("kettle_{}", a.variant);
+    let files = anvil_io::write_stl_parts(&doc, &a.out.join(format!("{stem}.stl"))).map_err(|e| e.to_string())?;
+    let parts = anvil_io::write_3mf(&doc, &a.out.join(format!("{stem}.3mf"))).map_err(|e| e.to_string())?;
+    anvil_io::save_document(&doc, &a.out.join(format!("{stem}.anvil"))).map_err(|e| e.to_string())?;
+    println!("Wrote {} STL parts, {stem}.3mf ({parts} parts), and {stem}.anvil to {}", files.len(), a.out.display());
+    if a.variant == "gated" {
+        let alloy = anvil_feature::features::casting::ALLOYS[0];
+        let dir = a.out.join("truchas");
+        let written =
+            anvil_io::casting::write_truchas_case(&doc, 15, &alloy, 1400.0, 1.5, &dir).map_err(|e| e.to_string())?;
+        println!("Wrote a Truchas case ({} files) to {}", written.len(), dir.display());
+    }
+    Ok(())
+}
+
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let result = match args.first().map(|s| s.as_str()) {
@@ -111,6 +180,7 @@ fn main() -> ExitCode {
             Ok(())
         }
         Some("card") => parse_card(&args[1..]).and_then(|a| run_card(&a)),
+        Some("kettle") => parse_kettle(&args[1..]).and_then(|a| run_kettle(&a)),
         Some(other) => Err(format!("unknown command {other}\n\n{USAGE}")),
     };
     match result {
@@ -128,6 +198,13 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_kettle_options() {
+        let a = parse_kettle(&["--variant".into(), "gated".into(), "--out".into(), "o".into()]).unwrap();
+        assert_eq!(a, KettleArgs { variant: "gated".into(), out: PathBuf::from("o") });
+        assert!(parse_kettle(&["--variant".into(), "cup".into()]).is_err());
     }
 
     #[test]

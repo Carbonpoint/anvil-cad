@@ -21,7 +21,7 @@ the mold. Stage 5 is the simulation.
 | 2 | Spout, lugs, bail, lid, knob | Tapered pipe, sample document `kettle()` |
 | 3 | Sprue, runner, gates, riser | Casting ribbon tab, first layout on the kettle |
 | 4 | Pattern halves, core, core prints | Parting plane split, draft check, shrink scale (first cut done) |
-| 5 | Fill and solidification | Export to Truchas or OpenFOAM, or a built-in voxel model |
+| 5 | Fill and solidification | Casting check (textbook numbers) and a Truchas case export (first cut done); a voxel model later |
 
 Spout: the shape must pour without dripping. The rules of thumb are a
 sharp thin lip, a bore that narrows toward the tip, an outlet above the
@@ -147,6 +147,21 @@ The gating from stage 3 is not on the pattern yet. It goes onto the
 match plate between the halves, which is the next step, together with
 a plane pick for the parting plane so any body can be split the same way.
 
+## Simulation (stage 5, first cut)
+
+Casting check on the gated kettle (File > Samples > Kettle + gating)
+reports, for grey cast iron poured at 1400 C: 209 cm3 and 1.49 kg,
+surface 1262 cm2, modulus 1.65 mm, and a Chvorinov freeze time of about
+4 s with the starting mold constant of 1.5 s/mm2. The 135 mm sprue head
+gives 1.63 m/s at a 12 mm choke, which fills the casting in 1.5 s, so the
+metal is in before the thin wall freezes, with little margin. The
+pressurized 1:2:1 ratio wants a 226 mm2 runner and 113 mm2 of ingates.
+The riser modulus, 7.1 mm, is far above 1.2 times the casting modulus.
+
+`anvil-cli kettle --variant gated` writes the Truchas case for the real
+fill and freeze run. The numbers are starting values from the survey in
+docs/research/casting_simulation.md and need one calibration pour.
+
 ## Known limits
 
 * Booleans leave a few sliver faces at each seam: the body has about 200
@@ -161,6 +176,8 @@ a plane pick for the parting plane so any body can be split the same way.
 ## Progress log
 
 * 2026-09-16: plan written. Reference photos reviewed.
+* 2026-09-17 (later): mold split (stage 4), casting check and the
+  Truchas case export (stage 5), and the split cap and orientation fixes.
 * 2026-09-17: revolve gives each smooth run its own surface; Pattern on
   face (relief) feature; booleans keep far faces and rebuild only the
   seam; tapered pipe; Casting tab (sprue, runner, riser); kettle sample

@@ -375,6 +375,18 @@ pub fn kettle_gated() -> Document {
         neck_length: "8".into(),
         blind: true,
     }));
+    // 28: the textbook numbers for this pour.
+    doc.add_feature(Box::new(anvil_feature::features::casting::CastingCheckFeature {
+        casting: 15,
+        alloy: "grey cast iron".into(),
+        pour_temp: "1400".into(),
+        mold_constant: "0".into(),
+        has_sprue: true,
+        sprue: 24,
+        choke_diameter: "12".into(),
+        has_riser: true,
+        riser: 27,
+    }));
     let brass = [178, 142, 66];
     for i in 24usize..=27 {
         doc.appearance.insert(i, brass);
@@ -651,6 +663,9 @@ mod tests {
             assert!(f.error.is_none(), "feature {i} ({}): {:?}", f.feature.name(), f.error);
         }
         assert_eq!(doc.bodies().len(), 7, "kettle bodies plus sprue, runner, ingate, riser");
+        let note = doc.features[28].output.as_ref().unwrap().note.clone().unwrap_or_default();
+        eprintln!("{note}");
+        assert!(note.contains("grey cast iron") && note.contains("choke") && note.contains("riser modulus"));
         let sprue = &doc.features[24].output.as_ref().unwrap().bodies[0];
         let bb = sprue.bounds();
         assert!((bb.max.z - 150.0).abs() < 1e-6 && (bb.min.z - 15.0).abs() < 1e-6, "sprue spans {bb:?}");

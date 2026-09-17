@@ -72,6 +72,9 @@ docker run --rm -v "$PWD/out:/out" anvil-cad card --name "Your Name" --url "http
 On Windows PowerShell, use `-v "${PWD}\out:/out"`. The card files appear in
 the `out` folder. `docker run --rm anvil-cad fonts` lists the fonts, and
 `docker build --target test .` runs the tests that need no display.
+`docker run --rm -v "$PWD/out:/out" anvil-cad kettle --variant gated --out /out`
+writes the kettle sample with its gating, one STL per part, and a Truchas
+case; `--variant mold` writes the pattern halves, core, and core box.
 
 ## Layout
 
@@ -86,7 +89,7 @@ crates/anvil-io        .anvil documents and mesh export
 crates/anvil-ui        ribbon, panels, viewport (eframe/egui)
 crates/anvil-app       the `anvil` binary
 crates/anvil-cli       headless command-line tools (used by the Docker image)
-docs/KETTLE.md         cast iron kettle sample: Pattern on face, tapered pipe, Casting tab
+docs/KETTLE.md         cast iron kettle sample: Pattern on face, mold split, casting check
 docs/research          four literature reviews that shaped the design
 docs/adr               architecture decision records
 ```
