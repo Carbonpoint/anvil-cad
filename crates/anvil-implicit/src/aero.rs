@@ -151,6 +151,7 @@ pub struct VlmResult {
 /// from Kutta Joukowski on the bound legs with the induced velocity of
 /// every other vortex. Takes sweep into account where lifting line
 /// cannot.
+#[allow(clippy::needless_range_loop)]
 pub fn vortex_lattice(wing: &Wing, alpha_deg: f64, n_span: usize, n_chord: usize) -> VlmResult {
     use anvil_math::DVec3;
     let n_span = n_span.max(2);
