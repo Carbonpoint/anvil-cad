@@ -399,24 +399,12 @@ impl<A: Field, B: Field, W: Field> Field for Blend<A, B, W> {
 }
 
 impl Lattice {
-    /// Level set value and its gradient in the scaled coordinates.
+    /// Level set value, its gradient in the scaled coordinates, and the
+    /// scale (radians per mm).
     fn level(&self, p: DVec3) -> (f64, DVec3, f64) {
         let w = std::f64::consts::TAU / self.cell;
-        let (x, y, z) = (p.x * w, p.y * w, p.z * w);
-        let (sx, cx) = x.sin_cos();
-        let (sy, cy) = y.sin_cos();
-        let (sz, cz) = z.sin_cos();
-        let (g, gx, gy, gz) = match self.kind {
-            Tpms::Gyroid => (sx * cy + sy * cz + sz * cx, cx * cy - sz * sx, cy * cz - sx * sy, cz * cx - sy * sz),
-            Tpms::SchwarzP => (cx + cy + cz, -sx, -sy, -sz),
-            Tpms::Diamond => (
-                sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz,
-                cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz,
-                sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz,
-                sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz,
-            ),
-        };
-        (g, DVec3::new(gx, gy, gz), w)
+        let (g, gr) = self.kind.level_at(p.x * w, p.y * w, p.z * w);
+        (g, gr, w)
     }
 }
 

@@ -544,20 +544,7 @@ impl Solid {
     /// End points of every edge used by exactly one face loop, for
     /// diagnostics: a closed body has none.
     pub fn open_edges(&self) -> Vec<(DVec3, DVec3)> {
-        let mut uses: std::collections::HashMap<(VertexId, VertexId), usize> = std::collections::HashMap::new();
-        for f in self.faces.values() {
-            for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
-                let n = lp.len();
-                for i in 0..n {
-                    let (a, b) = (lp[i], lp[(i + 1) % n]);
-                    if a == b {
-                        continue;
-                    }
-                    *uses.entry(if a < b { (a, b) } else { (b, a) }).or_default() += 1;
-                }
-            }
-        }
-        uses.iter().filter(|(_, &u)| u == 1).map(|(&(a, b), _)| (self.vertices[a].pos, self.vertices[b].pos)).collect()
+        self.open_edges_ids().into_iter().map(|(a, b)| (self.vertices[a].pos, self.vertices[b].pos)).collect()
     }
 }
 

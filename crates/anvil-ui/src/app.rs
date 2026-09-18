@@ -1530,7 +1530,9 @@ impl AnvilApp {
         if path.extension().is_none() {
             path.set_extension(format.extension());
         }
-        self.export_format = format;
+        if format != anvil_io::export::Format::Anvil {
+            self.export_format = format;
+        }
         self.export_dialog = None;
         if path.exists() {
             self.pending_write = Some((path, format));

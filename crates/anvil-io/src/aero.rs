@@ -105,9 +105,7 @@ pub fn write_openfoam_case(doc: &Document, case: &AeroCase, dir: &Path) -> Resul
         .map(|n| format!("                {n} {{ level (5 6); patchInfo {{ type wall; }} }}\n"))
         .collect();
     let patches: String = region_names.iter().map(|n| format!("aircraft_{n}")).collect::<Vec<_>>().join(" ");
-    let scaled_count = count;
 
-    let _ = scaled_count;
     let len = (hi.x - lo.x).max(1e-3);
     let span = (hi.y - lo.y).max(1e-3);
     let height = (hi.z - lo.z).max(1e-3);
