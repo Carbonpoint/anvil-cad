@@ -132,6 +132,7 @@ pub fn lift_to_drag_at(wing: &Wing, cl_target: f64, speed: f64) -> (f64, AeroRes
 }
 
 /// Gaussian elimination with partial pivoting.
+#[allow(clippy::needless_range_loop)]
 fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Vec<f64> {
     let n = b.len();
     for k in 0..n {
@@ -163,6 +164,7 @@ fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Vec<f64> {
 
 /// Nelder Mead minimisation of `f` from `start` with initial steps
 /// `step`, bounded to `lo..hi` per coordinate.
+#[allow(clippy::needless_range_loop)]
 pub fn nelder_mead(
     f: &dyn Fn(&[f64]) -> f64,
     start: &[f64],
