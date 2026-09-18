@@ -192,9 +192,11 @@ pub fn vortex_lattice(wing: &Wing, alpha_deg: f64, n_span: usize, n_chord: usize
             let a = DVec3::new(le(y0) + fq * chord(y0), y0, 0.0);
             let b = DVec3::new(le(y1) + fq * chord(y1), y1, 0.0);
             let ctrl = DVec3::new(le(ym) + fc * chord(ym), ym, 0.0);
-            // Surface slope at the control point: camber slope plus twist.
+            // Surface slope at the control point: the camber slope, less
+            // the twist (nose up twist lowers the trailing edge, so the
+            // surface slopes down along the chord).
             let (_, dz) = sec.camber(fc);
-            panels.push(Panel { a, b, ctrl, slope: dz + twist, strip: j, dy: y1 - y0 });
+            panels.push(Panel { a, b, ctrl, slope: dz - twist, strip: j, dy: y1 - y0 });
         }
     }
     let n = panels.len();
@@ -432,6 +434,32 @@ mod tests {
         let n = v.cl_strips.len();
         assert!((v.cl_strips[0] - v.cl_strips[n - 1]).abs() < 1e-6);
         assert!(v.cl_strips[n / 2] > v.cl_strips[0]);
+    }
+
+    #[test]
+    fn uniform_twist_is_the_same_as_incidence() {
+        let plain = wing(0.6, 0.0);
+        let root = 2.0 / (1.0 + 0.6);
+        let twisted = Wing::new(
+            10.0,
+            root,
+            root * 0.6,
+            0.0,
+            0.0,
+            3.0,
+            3.0,
+            Naca4::parse("0012").unwrap(),
+            Naca4::parse("0012").unwrap(),
+        );
+        let a = vortex_lattice(&plain, 7.0, 12, 4);
+        let b = vortex_lattice(&twisted, 4.0, 12, 4);
+        assert!((a.cl - b.cl).abs() < 0.02, "{} vs {}", a.cl, b.cl);
+        // Camber lifts at zero angle, about as thin airfoil theory says.
+        let cambered =
+            Wing::new(10.0, 1.0, 1.0, 0.0, 0.0, 0.0, 0.0, Naca4::parse("2412").unwrap(), Naca4::parse("2412").unwrap());
+        let v = vortex_lattice(&cambered, 0.0, 12, 6);
+        let ll = lifting_line(&cambered, 0.0, 30.0, 16);
+        assert!(v.cl > 0.1 && (v.cl - ll.cl).abs() / ll.cl < 0.25, "VLM {} vs lifting line {}", v.cl, ll.cl);
     }
 
     #[test]

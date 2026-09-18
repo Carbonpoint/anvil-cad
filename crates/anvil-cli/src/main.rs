@@ -5,12 +5,13 @@
 //!   anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
 //!   anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
 //!   anvil-cli lattice --stl IN [--kind gyroid] [--cell 8] [--wall 1.2] [--skin 1.2] [--res 0.4] [--out DIR]
+//!   anvil-cli aircraft [--out DIR]
 //!   anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR] [--formats 3mf,stl]
 //!                 [--openfoam --speed 20 --alpha 4 --sref M2 --cref M]
 //!   anvil-cli fonts
 //!   anvil-cli --help
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 const USAGE: &str = "anvil-cli: headless Anvil CAD tools
@@ -19,6 +20,7 @@ USAGE:
     anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
     anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
     anvil-cli lattice --stl IN [options] [--out DIR]
+    anvil-cli aircraft [--out DIR]
     anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR]
     anvil-cli fonts
     anvil-cli --help
@@ -32,6 +34,10 @@ COMMANDS:
              variant also writes a Truchas case (cavity.stl, casting.inp).
     lattice  Fill a closed STL with a lattice under a skin and write the
              result as STL, 3MF, and STEP (the field driven tools).
+    aircraft Write plane.anvil: the Aircraft feature with its wing driven
+             by expressions (span, root_chord, taper, sweep, dihedral,
+             twist_tip, resolution), ready for `run --set` and the loop in
+             docs/examples/wing_loop.py.
     run      Open a document, set named expressions from --set pairs or a
              JSON object, rebuild, export the bodies, and write a JSON
              report (expressions, feature notes, volumes, bounds, errors).
@@ -505,6 +511,43 @@ fn run_document(a: &RunArgs) -> Result<(), String> {
     Ok(())
 }
 
+fn run_aircraft(out: &Path) -> Result<(), String> {
+    use anvil_feature::features::aircraft::AircraftFeature;
+    let mut doc = anvil_feature::Document::new("plane");
+    for (k, v) in [
+        ("span", "180"),
+        ("root_chord", "30"),
+        ("taper", "0.5"),
+        ("sweep", "8"),
+        ("dihedral", "4"),
+        ("twist_tip", "-1"),
+        ("resolution", "1.0"),
+    ] {
+        doc.set_expression(k, v).map_err(|e| e.to_string())?;
+    }
+    doc.add_feature(Box::new(AircraftFeature {
+        span: "span".into(),
+        root_chord: "root_chord".into(),
+        tip_chord: "root_chord * taper".into(),
+        sweep: "sweep".into(),
+        dihedral: "dihedral".into(),
+        twist_tip: "twist_tip".into(),
+        resolution: "resolution".into(),
+        ..Default::default()
+    }));
+    if let Some(e) = &doc.features[0].error {
+        return Err(e.to_string());
+    }
+    std::fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    let path = out.join("plane.anvil");
+    anvil_io::save_document(&doc, &path).map_err(|e| e.to_string())?;
+    println!("Wrote {}", path.display());
+    if let Some(n) = doc.features[0].output.as_ref().and_then(|o| o.note.as_ref()) {
+        println!("{n}");
+    }
+    Ok(())
+}
+
 fn anvil_math_bounds_lo() -> [f64; 3] {
     [f64::INFINITY; 3]
 }
@@ -529,6 +572,14 @@ fn main() -> ExitCode {
         Some("kettle") => parse_kettle(&args[1..]).and_then(|a| run_kettle(&a)),
         Some("lattice") => parse_lattice(&args[1..]).and_then(|a| run_lattice(&a)),
         Some("run") => parse_run(&args[1..]).and_then(|a| run_document(&a)),
+        Some("aircraft") => {
+            let out = match args.get(1).map(|s| s.as_str()) {
+                Some("--out") => args.get(2).map(PathBuf::from).ok_or("--out needs a value".to_string()),
+                None => Ok(PathBuf::from(".")),
+                Some(other) => Err(format!("unknown option {other}")),
+            };
+            out.and_then(|o| run_aircraft(&o))
+        }
         Some(other) => Err(format!("unknown command {other}\n\n{USAGE}")),
     };
     match result {

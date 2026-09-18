@@ -384,7 +384,10 @@ grouped 3MF and one STL per feature by default; `--formats` picks
 others), and writes `report.json` with every expression's source and
 value, every feature's name, note, error, mass, and the volume, face
 count, open edge count, and bounds of each body. `--inputs in.json`
-takes the expressions from a JSON object instead. A script can loop
+takes the expressions from a JSON object instead. `anvil-cli aircraft
+--out DIR` writes a plane.anvil whose wing is driven by the expressions
+span, root_chord, taper, sweep, dihedral, twist_tip, and resolution, a
+ready made target for such runs. A script can loop
 over designs, hand each mesh to a solver, and read the numbers back;
 docs/examples/wing_loop.py does that over sweep and taper, and
 docs/research/ntop_capabilities.md describes the loops this mirrors.

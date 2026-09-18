@@ -31,12 +31,25 @@ def run(cli, doc, out, **params):
     return json.loads((out / "report.json").read_text())
 
 
-def lift_to_drag(report):
+def numbers(report):
+    """Lifting line L/D and the vortex lattice CL and CDi from the note.
+
+    Lifting line is blind to sweep; the vortex lattice is not, so the
+    loop ranks by the vortex lattice lift to induced drag when present.
+    """
     for f in report["features"]:
         note = f.get("note") or ""
-        m = re.search(r"L/D ([0-9.]+)", note)
-        if m:
-            return float(m.group(1))
+        ld = re.search(r"L/D ([0-9.]+)", note)
+        vlm = re.search(r"vortex lattice at the same angle: CL ([0-9.]+), CDi ([0-9.]+)", note)
+        cd0 = re.search(r"CD0 ([0-9.]+)", note)
+        if ld:
+            out = {"ld_lifting_line": float(ld.group(1))}
+            if vlm and cd0:
+                cl, cdi = float(vlm.group(1)), float(vlm.group(2))
+                out["cl_vlm"] = cl
+                out["cdi_vlm"] = cdi
+                out["ld_vlm"] = cl / (cdi + float(cd0.group(1)))
+            return out
     return None
 
 
@@ -55,8 +68,12 @@ def main():
             out = Path(tmp) / f"s{sweep}_t{taper}"
             out.mkdir()
             report = run(a.cli, a.doc, out, sweep=sweep, taper=taper)
-            ld = lift_to_drag(report)
-            print(f"sweep {sweep:5.1f}  taper {taper:4.2f}  L/D {ld}")
+            n = numbers(report) or {}
+            ld = n.get("ld_vlm", n.get("ld_lifting_line"))
+            print(
+                f"sweep {sweep:5.1f}  taper {taper:4.2f}  L/D lifting line {n.get('ld_lifting_line')}"
+                f"  vortex lattice {n.get('ld_vlm') and round(n['ld_vlm'], 2)}"
+            )
             if ld is not None and (best is None or ld > best[0]):
                 best = (ld, sweep, taper)
     if best:
