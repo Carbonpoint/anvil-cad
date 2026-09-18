@@ -186,7 +186,8 @@ impl BeamLattice {
     pub fn beams_in(&self, inside: &dyn Field, lo: DVec3, hi: DVec3) -> Vec<(DVec3, DVec3)> {
         let base = self.cell.segments();
         let key = |p: DVec3| ((p.x * 1e4).round() as i64, (p.y * 1e4).round() as i64, (p.z * 1e4).round() as i64);
-        let mut seen: std::collections::HashSet<((i64, i64, i64), (i64, i64, i64))> = std::collections::HashSet::new();
+        type Key = (i64, i64, i64);
+        let mut seen: std::collections::HashSet<(Key, Key)> = std::collections::HashSet::new();
         let mut out = Vec::new();
         let clip = |a: DVec3, b: DVec3| -> DVec3 {
             // a inside, b outside: bisect to the surface.
