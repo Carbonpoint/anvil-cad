@@ -6,6 +6,7 @@
 //!   anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
 //!   anvil-cli lattice --stl IN [--kind gyroid] [--cell 8] [--wall 1.2] [--skin 1.2] [--res 0.4] [--out DIR]
 //!   anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR] [--formats 3mf,stl]
+//!                 [--openfoam --speed 20 --alpha 4 --sref M2 --cref M]
 //!   anvil-cli fonts
 //!   anvil-cli --help
 
@@ -61,6 +62,12 @@ OPTIONS for run:
     --formats L    Comma list of 3mf, 3mf-group, stl, stl-parts, step, obj,
                    ply, off, amf, gltf (default: 3mf-group,stl-parts)
     --out DIR      Output folder (created if missing)
+    --openfoam     Also write an OpenFOAM case (simpleFoam, k omega SST,
+                   force coefficients) for the visible bodies in DIR/openfoam
+    --speed V      Free stream speed for the case, m/s (default 20)
+    --alpha A      Angle of attack, degrees (default 4)
+    --sref S       Reference area, m2 (default: y extent times cref)
+    --cref C       Reference chord, m (default: a quarter of the x extent)
 
 OPTIONS for card:
     --name NAME    Name printed on the card
@@ -291,6 +298,11 @@ struct RunArgs {
     outputs: Option<PathBuf>,
     formats: Vec<String>,
     out: PathBuf,
+    openfoam: bool,
+    speed: f64,
+    alpha: f64,
+    sref: Option<f64>,
+    cref: Option<f64>,
 }
 
 fn parse_run(args: &[String]) -> Result<RunArgs, String> {
@@ -301,11 +313,37 @@ fn parse_run(args: &[String]) -> Result<RunArgs, String> {
         outputs: None,
         formats: vec!["3mf-group".into(), "stl-parts".into()],
         out: PathBuf::from("."),
+        openfoam: false,
+        speed: 20.0,
+        alpha: 4.0,
+        sref: None,
+        cref: None,
     };
     let mut i = 0;
     while i < args.len() {
         let value = || args.get(i + 1).cloned().ok_or(format!("{} needs a value", args[i]));
+        let number = || value()?.parse::<f64>().map_err(|e| format!("{}: {e}", args[i]));
         match args[i].as_str() {
+            "--openfoam" => {
+                a.openfoam = true;
+                i += 1;
+            }
+            "--speed" => {
+                a.speed = number()?;
+                i += 2;
+            }
+            "--alpha" => {
+                a.alpha = number()?;
+                i += 2;
+            }
+            "--sref" => {
+                a.sref = Some(number()?);
+                i += 2;
+            }
+            "--cref" => {
+                a.cref = Some(number()?);
+                i += 2;
+            }
             "--set" => {
                 let v = value()?;
                 let (n, e) = v.split_once('=').ok_or(format!("--set wants name=value, got {v}"))?;
@@ -427,6 +465,26 @@ fn run_document(a: &RunArgs) -> Result<(), String> {
             })
         })
         .collect();
+    if a.openfoam {
+        let mut lo = anvil_math_bounds_lo();
+        let mut hi = anvil_math_bounds_hi();
+        for b in doc.bodies() {
+            let bb = b.bounds();
+            lo = [lo[0].min(bb.min.x), lo[1].min(bb.min.y), lo[2].min(bb.min.z)];
+            hi = [hi[0].max(bb.max.x), hi[1].max(bb.max.y), hi[2].max(bb.max.z)];
+        }
+        let cref = a.cref.unwrap_or(0.25 * (hi[0] - lo[0]).max(1.0) * 0.001);
+        let sref = a.sref.unwrap_or((hi[1] - lo[1]).max(1.0) * 0.001 * cref);
+        let case = anvil_io::aero::AeroCase { speed: a.speed, alpha_deg: a.alpha, area_m2: sref, chord_m: cref };
+        let dir = a.out.join("openfoam");
+        let written = anvil_io::aero::write_openfoam_case(&doc, &case, &dir).map_err(|e| e.to_string())?;
+        println!(
+            "Wrote an OpenFOAM case ({} files) to {} (Aref {sref:.4} m2, cref {cref:.4} m)",
+            written.len(),
+            dir.display()
+        );
+        files.push(dir.display().to_string());
+    }
     let errors = doc.features.iter().filter(|f| f.error.is_some()).count();
     let report = serde_json::json!({
         "document": a.doc.display().to_string(),
@@ -445,6 +503,13 @@ fn run_document(a: &RunArgs) -> Result<(), String> {
         return Err(format!("{errors} feature(s) failed; see {}", out_path.display()));
     }
     Ok(())
+}
+
+fn anvil_math_bounds_lo() -> [f64; 3] {
+    [f64::INFINITY; 3]
+}
+fn anvil_math_bounds_hi() -> [f64; 3] {
+    [f64::NEG_INFINITY; 3]
 }
 
 fn main() -> ExitCode {

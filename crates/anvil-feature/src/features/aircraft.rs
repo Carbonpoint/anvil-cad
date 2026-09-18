@@ -6,7 +6,7 @@
 //! Lengths in mm; the aero estimate scales them to metres.
 
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError};
-use anvil_implicit::aero::{lift_to_drag_at, optimize_taper_and_twist};
+use anvil_implicit::aero::{lift_to_drag_at, optimize_taper_and_twist, vortex_lattice};
 use anvil_implicit::wing::{Fuselage, MirrorY, Naca4, Placed, Wing};
 use anvil_implicit::{Func, Intersect, SmoothUnion, Union};
 use anvil_math::DVec3;
@@ -256,6 +256,8 @@ impl Feature for AircraftFeature {
             result.span_efficiency,
             result.lift_to_drag
         );
+        let vlm = vortex_lattice(&wing_m, result.alpha_deg, 12, 4);
+        note.push_str(&format!("; vortex lattice at the same angle: CL {:.2}, CDi {:.4}", vlm.cl, vlm.cd_induced));
         if changed {
             note.push_str(&format!(
                 "; optimised from L/D {:.1} (taper {:.2}, tip twist {:.1}) to taper {:.2}, tip twist {:.1}",

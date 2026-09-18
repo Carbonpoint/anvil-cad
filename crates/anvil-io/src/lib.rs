@@ -6,6 +6,7 @@
 //! * `export`: STL, 3MF, OBJ, PLY, OFF, AMF, glTF, and STEP (faceted
 //!   B-rep) behind one `Format` list for the Export dialog.
 
+pub mod aero;
 pub mod casting;
 pub mod export;
 pub mod kettle;

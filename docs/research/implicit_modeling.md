@@ -88,8 +88,11 @@ Milestones:
   uses them. `anvil-cli run` sets expressions from `--set` or a JSON
   file, rebuilds, exports, and writes a JSON report, the hook for a
   design loop. The TPMS fields now divide by their analytic gradient,
-  so wall thickness is even across the cell. Still open: VTK input,
-  distance to a picked face or body, cell size grading.
+  so wall thickness is even across the cell. A vortex lattice solver
+  sits beside the lifting line, `anvil-cli run --openfoam` writes a
+  simpleFoam case for the visible bodies, and docs/examples/wing_loop.py
+  is a scripted sweep and taper loop. Still open: VTK input, distance to
+  a picked face or body, cell size grading.
 * F4: quality: adaptive surface nets on an octree so a fine lattice does
   not need a fine grid everywhere; sharp feature preservation (dual
   contouring); a smoothing pass for print surfaces.

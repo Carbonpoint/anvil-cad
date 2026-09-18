@@ -131,6 +131,137 @@ pub fn lift_to_drag_at(wing: &Wing, cl_target: f64, speed: f64) -> (f64, AeroRes
     (r.lift_to_drag, r)
 }
 
+/// Result of a vortex lattice solution.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VlmResult {
+    pub alpha_deg: f64,
+    pub cl: f64,
+    pub cd_induced: f64,
+    /// Section lift coefficient per span strip from the left tip to the
+    /// right tip.
+    pub cl_strips: Vec<f64>,
+    pub panels: usize,
+}
+
+/// Vortex lattice method on the wing planform: `n_span` strips per half
+/// wing and `n_chord` panels per strip, one horseshoe vortex per panel
+/// with its bound leg at the panel quarter chord and its trailing legs
+/// downstream. Sweep, taper, twist, and camber slope enter the boundary
+/// condition; dihedral and thickness do not. Lift and induced drag come
+/// from Kutta Joukowski on the bound legs with the induced velocity of
+/// every other vortex. Takes sweep into account where lifting line
+/// cannot.
+pub fn vortex_lattice(wing: &Wing, alpha_deg: f64, n_span: usize, n_chord: usize) -> VlmResult {
+    use anvil_math::DVec3;
+    let n_span = n_span.max(2);
+    let n_chord = n_chord.max(1);
+    let half = 0.5 * wing.span;
+    let alpha = alpha_deg.to_radians();
+    let v_inf = DVec3::new(alpha.cos(), 0.0, alpha.sin());
+    let tan_sweep = wing.sweep.to_radians().tan();
+    // Cosine spaced strips from the left tip to the right tip.
+    let ny = 2 * n_span;
+    let ys: Vec<f64> = (0..=ny).map(|k| -half * (std::f64::consts::PI * k as f64 / ny as f64).cos()).collect();
+    let le = |y: f64| (y.abs() / half) * half * tan_sweep;
+    let chord = |y: f64| wing.chord(y.abs() / half);
+    struct Panel {
+        a: DVec3,
+        b: DVec3,
+        ctrl: DVec3,
+        slope: f64,
+        strip: usize,
+        dy: f64,
+    }
+    let mut panels: Vec<Panel> = Vec::with_capacity(ny * n_chord);
+    for j in 0..ny {
+        let (y0, y1) = (ys[j], ys[j + 1]);
+        let ym = 0.5 * (y0 + y1);
+        let eta = ym.abs() / half;
+        let twist = wing.twist(eta).to_radians();
+        let sec = crate::wing::Naca4 {
+            m: wing.root.m + (wing.tip.m - wing.root.m) * eta,
+            p: wing.root.p + (wing.tip.p - wing.root.p) * eta,
+            t: wing.root.t + (wing.tip.t - wing.root.t) * eta,
+        };
+        for i in 0..n_chord {
+            let f0 = i as f64 / n_chord as f64;
+            let f1 = (i + 1) as f64 / n_chord as f64;
+            let fq = f0 + 0.25 * (f1 - f0);
+            let fc = f0 + 0.75 * (f1 - f0);
+            let a = DVec3::new(le(y0) + fq * chord(y0), y0, 0.0);
+            let b = DVec3::new(le(y1) + fq * chord(y1), y1, 0.0);
+            let ctrl = DVec3::new(le(ym) + fc * chord(ym), ym, 0.0);
+            // Surface slope at the control point: camber slope plus twist.
+            let (_, dz) = sec.camber(fc);
+            panels.push(Panel { a, b, ctrl, slope: dz + twist, strip: j, dy: y1 - y0 });
+        }
+    }
+    let n = panels.len();
+    let far = 1e4 * wing.span.max(1.0);
+    // Velocity at p induced by a unit strength vortex segment a to b.
+    let segment = |a: DVec3, b: DVec3, p: DVec3| -> DVec3 {
+        let r1 = p - a;
+        let r2 = p - b;
+        let r0 = b - a;
+        let cross = r1.cross(r2);
+        let c2 = cross.length_squared();
+        let (l1, l2) = (r1.length(), r2.length());
+        if c2 < 1e-18 || l1 < 1e-12 || l2 < 1e-12 {
+            return DVec3::ZERO;
+        }
+        cross / c2 * (r0.dot(r1) / l1 - r0.dot(r2) / l2) / (4.0 * std::f64::consts::PI)
+    };
+    // Unit horseshoe j at point p, optionally without its bound leg.
+    let horseshoe = |j: usize, p: DVec3, with_bound: bool| -> DVec3 {
+        let (a, b) = (panels[j].a, panels[j].b);
+        let a_far = a + DVec3::new(far, 0.0, 0.0);
+        let b_far = b + DVec3::new(far, 0.0, 0.0);
+        let mut v = segment(a_far, a, p) + segment(b, b_far, p);
+        if with_bound {
+            v += segment(a, b, p);
+        }
+        v
+    };
+    let mut mat = vec![vec![0.0; n]; n];
+    let mut rhs = vec![0.0; n];
+    for i in 0..n {
+        let s = panels[i].slope;
+        // Flow tangency with the local normal (-slope, 0, 1).
+        rhs[i] = -(v_inf.z - s * v_inf.x);
+        for j in 0..n {
+            let v = horseshoe(j, panels[i].ctrl, true);
+            mat[i][j] = v.z - s * v.x;
+        }
+    }
+    let gamma = solve(mat, rhs);
+    // Forces by Kutta Joukowski on each bound leg, with the velocity of
+    // every other vortex at the leg midpoint (free stream speed 1).
+    let mut force = DVec3::ZERO;
+    let mut strip_lift = vec![0.0; ny];
+    for i in 0..n {
+        let mid = 0.5 * (panels[i].a + panels[i].b);
+        let mut v = v_inf;
+        for j in 0..n {
+            v += horseshoe(j, mid, j != i) * gamma[j];
+        }
+        let l = panels[i].b - panels[i].a;
+        let f = v.cross(l) * gamma[i];
+        force += f;
+        strip_lift[panels[i].strip] += f.z * alpha.cos() - f.x * alpha.sin();
+    }
+    let area = wing.area();
+    let lift = force.z * alpha.cos() - force.x * alpha.sin();
+    let drag = force.x * alpha.cos() + force.z * alpha.sin();
+    let q = 0.5;
+    let cl_strips: Vec<f64> = (0..ny)
+        .map(|j| {
+            let ym = 0.5 * (ys[j] + ys[j + 1]);
+            strip_lift[j] / (q * chord(ym) * panels[j * n_chord].dy)
+        })
+        .collect();
+    VlmResult { alpha_deg, cl: lift / (q * area), cd_induced: drag / (q * area), cl_strips, panels: n }
+}
+
 /// Gaussian elimination with partial pivoting.
 #[allow(clippy::needless_range_loop)]
 fn solve(mut a: Vec<Vec<f64>>, mut b: Vec<f64>) -> Vec<f64> {
@@ -285,6 +416,51 @@ mod tests {
         let expect = 2.0 * std::f64::consts::PI / (1.0 + 2.0 / 10.0);
         assert!((slope - expect).abs() / expect < 0.08, "{slope} vs {expect}");
         assert!(r.cd_induced > 0.0 && r.cd_profile > 0.0);
+    }
+
+    #[test]
+    fn vortex_lattice_agrees_with_lifting_line_on_a_straight_wing() {
+        let w = wing(1.0, 0.0);
+        let ll = lifting_line(&w, 5.0, 30.0, 16);
+        let v = vortex_lattice(&w, 5.0, 12, 4);
+        assert!((v.cl - ll.cl).abs() / ll.cl < 0.1, "VLM CL {} vs lifting line {}", v.cl, ll.cl);
+        assert!(v.cd_induced > 0.0);
+        let e = v.cl * v.cl / (std::f64::consts::PI * w.aspect_ratio() * v.cd_induced);
+        assert!(e > 0.8 && e < 1.15, "span efficiency from VLM {e}");
+        // Symmetric loading, highest near the root.
+        let n = v.cl_strips.len();
+        assert!((v.cl_strips[0] - v.cl_strips[n - 1]).abs() < 1e-6);
+        assert!(v.cl_strips[n / 2] > v.cl_strips[0]);
+    }
+
+    #[test]
+    fn sweep_lowers_the_lift_slope() {
+        let root = 2.0 / (1.0 + 0.5);
+        let straight = Wing::new(
+            10.0,
+            root,
+            root * 0.5,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            Naca4::parse("0012").unwrap(),
+            Naca4::parse("0012").unwrap(),
+        );
+        let swept = Wing::new(
+            10.0,
+            root,
+            root * 0.5,
+            35.0,
+            0.0,
+            0.0,
+            0.0,
+            Naca4::parse("0012").unwrap(),
+            Naca4::parse("0012").unwrap(),
+        );
+        let a = vortex_lattice(&straight, 5.0, 12, 4);
+        let b = vortex_lattice(&swept, 5.0, 12, 4);
+        assert!(b.cl < a.cl * 0.95, "swept CL {} should be well below straight {}", b.cl, a.cl);
     }
 
     #[test]

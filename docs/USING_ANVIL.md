@@ -386,7 +386,19 @@ value, every feature's name, note, error, mass, and the volume, face
 count, open edge count, and bounds of each body. `--inputs in.json`
 takes the expressions from a JSON object instead. A script can loop
 over designs, hand each mesh to a solver, and read the numbers back;
+docs/examples/wing_loop.py does that over sweep and taper, and
 docs/research/ntop_capabilities.md describes the loops this mirrors.
+
+`--openfoam --speed 20 --alpha 4` also writes `DIR/openfoam`: the
+visible bodies as one STL in metres, a blockMesh box, snappyHexMesh
+around the body, simpleFoam with k omega SST, and a forceCoeffs function
+with the lift and drag directions for that angle. `./Allrun` inside an
+OpenFOAM shell runs it; the coefficients land in `postProcessing`. The
+case is written from the standard tutorials and has not been run here.
+
+The Aircraft feature's note also carries a vortex lattice result at the
+same angle. Lifting line ignores sweep; the vortex lattice sees it, so
+the two agree on a straight wing and part on a swept one.
 
 ## Casting check and the Truchas export
 
