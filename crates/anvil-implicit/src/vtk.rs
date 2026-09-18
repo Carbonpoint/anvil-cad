@@ -20,7 +20,7 @@ pub struct GridField {
 
 impl GridField {
     pub fn new(origin: DVec3, spacing: DVec3, dims: [usize; 3], values: Vec<f64>) -> Result<GridField, String> {
-        if dims.iter().any(|&d| d == 0) {
+        if dims.contains(&0) {
             return Err("grid has a zero dimension".into());
         }
         if values.len() != dims[0] * dims[1] * dims[2] {

@@ -10,6 +10,7 @@ use anvil_math::DVec3;
 pub struct PointMap {
     pts: Vec<(DVec3, f64)>,
     lo: DVec3,
+    hi: DVec3,
     cell: f64,
     n: [usize; 3],
     buckets: Vec<Vec<u32>>,
@@ -49,7 +50,7 @@ impl PointMap {
             let (i, j, l) = Self::cell_of(lo, cell, n, *p);
             buckets[(i * n[1] + j) * n[2] + l].push(k as u32);
         }
-        PointMap { pts, lo, cell, n, buckets, fallback, reach, power: 2.0 }
+        PointMap { pts, lo, hi, cell, n, buckets, fallback, reach, power: 2.0 }
     }
 
     fn cell_of(lo: DVec3, cell: f64, n: [usize; 3], p: DVec3) -> (usize, usize, usize) {
@@ -101,6 +102,11 @@ impl PointMap {
 
     pub fn is_empty(&self) -> bool {
         self.pts.is_empty()
+    }
+
+    /// Corners of the box the samples span.
+    pub fn bounds(&self) -> (DVec3, DVec3) {
+        (self.lo, self.hi)
     }
 
     /// Smallest and largest sample value.

@@ -93,37 +93,25 @@ impl Feature for DensityBodyFeature {
                 (Box::new(g.clone()), g.origin, ext, sp, what)
             }
             ScalarData::Points(p) => {
-                // Rebuild the map in mm.
-                let text = std::fs::read_to_string(&self.file).map_err(|e| RegenError::Other(e.to_string()))?;
-                let pts = PointMap::parse_csv(&text).or_else(|_| {
-                    Err(RegenError::Other("point data from VTK cannot be rescaled yet; use scale 1".into()))
-                });
-                let pts = match pts {
-                    Ok(v) => v.into_iter().map(|(q, v)| (q * scale, v)).collect(),
-                    Err(e) => {
-                        if (scale - 1.0).abs() > 1e-12 {
-                            return Err(e);
-                        }
-                        let _ = &p;
-                        return Err(RegenError::Other(
-                            "VTK point data: use a grid (STRUCTURED_POINTS) for a density body".into(),
-                        ));
+                let is_vtk = self.file.to_ascii_lowercase().ends_with(".vtk");
+                let m = if is_vtk {
+                    if (scale - 1.0).abs() > 1e-12 {
+                        return Err(RegenError::Other("VTK point data cannot be rescaled; use scale 1".into()));
                     }
+                    p
+                } else {
+                    let text = std::fs::read_to_string(&self.file).map_err(|e| RegenError::Other(e.to_string()))?;
+                    let pts: Vec<(DVec3, f64)> = PointMap::parse_csv(&text)
+                        .map_err(RegenError::Other)?
+                        .into_iter()
+                        .map(|(q, v)| (q * scale, v))
+                        .collect();
+                    PointMap::new(pts, 0.0, lo)
                 };
-                let m = PointMap::new(pts, 0.0, lo);
-                let mut plo = DVec3::splat(f64::INFINITY);
-                let mut phi = DVec3::splat(f64::NEG_INFINITY);
-                for line in text.lines().skip(1) {
-                    let f: Vec<f64> =
-                        line.split(|c: char| c == ',' || c.is_whitespace()).filter_map(|t| t.parse().ok()).collect();
-                    if f.len() >= 3 {
-                        let q = DVec3::new(f[0], f[1], f[2]) * scale;
-                        plo = plo.min(q);
-                        phi = phi.max(q);
-                    }
-                }
+                let (plo, phi) = m.bounds();
                 let sp = ((phi - plo).length() / (m.len() as f64).cbrt()).max(1e-3);
-                (Box::new(m), plo, phi, sp, format!("{} points", 0))
+                let what = format!("{} points", m.len());
+                (Box::new(m), plo, phi, sp, what)
             }
         };
         let step = if res > 0.0 { res } else { spacing };
