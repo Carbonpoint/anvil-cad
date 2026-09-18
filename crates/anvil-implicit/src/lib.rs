@@ -19,6 +19,7 @@ pub mod beam;
 pub mod mesh;
 pub mod pointmap;
 pub mod sampled;
+pub mod slice;
 pub mod vtk;
 pub mod wing;
 pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Honeycomb, Radial, Ramp, Warp};

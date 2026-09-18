@@ -379,6 +379,16 @@ value range, the triangle count, and the volume. Lattice fill's grade
 "map" reads the same VTK files, so a density can drive lattice
 thickness instead of becoming a body.
 
+## Slices from a field
+
+`anvil-cli slice --stl part.stl --layer 0.2 --res 0.4 --out DIR` samples a
+closed mesh into a distance field and writes one SVG per layer straight
+from the field by marching squares, with the crossings bisected on the
+field, plus `layers.json` with the area and perimeter of every layer.
+No mesh sits between the field and the layer, so the layer height is
+free and the contours are as exact as the field. Holes come out as
+loops of the opposite turn and the SVG fills them by the even odd rule.
+
 ## Aircraft
 
 Aircraft (Solid tab, Field group) builds a fuselage, a lofted NACA wing,

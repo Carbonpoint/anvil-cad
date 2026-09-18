@@ -6,6 +6,7 @@
 //!   anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
 //!   anvil-cli lattice --stl IN [--kind gyroid] [--cell 8] [--wall 1.2] [--skin 1.2] [--res 0.4] [--out DIR]
 //!   anvil-cli aircraft [--out DIR]
+//!   anvil-cli slice --stl IN [--layer 0.2] [--res 0.4] [--out DIR]
 //!   anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR] [--formats 3mf,stl]
 //!                 [--openfoam --speed 20 --alpha 4 --sref M2 --cref M]
 //!   anvil-cli fonts
@@ -21,6 +22,7 @@ USAGE:
     anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
     anvil-cli lattice --stl IN [options] [--out DIR]
     anvil-cli aircraft [--out DIR]
+    anvil-cli slice --stl IN [--layer 0.2] [--res 0.4] [--out DIR]
     anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR]
     anvil-cli fonts
     anvil-cli --help
@@ -38,6 +40,9 @@ COMMANDS:
              by expressions (span, root_chord, taper, sweep, dihedral,
              twist_tip, resolution), ready for `run --set` and the loop in
              docs/examples/wing_loop.py.
+    slice    Sample a closed STL into a distance field and write one SVG
+             per layer straight from the field, plus layers.json with the
+             area and perimeter of each layer.
     run      Open a document, set named expressions from --set pairs or a
              JSON object, rebuild, export the bodies, and write a JSON
              report (expressions, feature notes, volumes, bounds, errors).
@@ -59,6 +64,12 @@ OPTIONS for lattice:
     --conform C    none (default) or cylinder
     --skin S       Solid skin thickness, default 1.2 (0 = none)
     --res R        Voxel size, default 0.4
+    --out DIR      Output folder (created if missing)
+
+OPTIONS for slice:
+    --stl IN       Closed mesh to slice (millimetres)
+    --layer H      Layer height, default 0.2
+    --res R        Sampling voxel size, default 0.4
     --out DIR      Output folder (created if missing)
 
 OPTIONS for run:
@@ -511,6 +522,77 @@ fn run_document(a: &RunArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Parsed `slice` options.
+#[derive(Debug, PartialEq)]
+struct SliceArgs {
+    stl: PathBuf,
+    layer: f64,
+    res: f64,
+    out: PathBuf,
+}
+
+fn parse_slice(args: &[String]) -> Result<SliceArgs, String> {
+    let mut a = SliceArgs { stl: PathBuf::new(), layer: 0.2, res: 0.4, out: PathBuf::from(".") };
+    let mut i = 0;
+    while i < args.len() {
+        let value = || args.get(i + 1).cloned().ok_or(format!("{} needs a value", args[i]));
+        match args[i].as_str() {
+            "--stl" => a.stl = PathBuf::from(value()?),
+            "--layer" => a.layer = value()?.parse().map_err(|e| format!("--layer: {e}"))?,
+            "--res" => a.res = value()?.parse().map_err(|e| format!("--res: {e}"))?,
+            "--out" => a.out = PathBuf::from(value()?),
+            other => return Err(format!("unknown option {other}")),
+        }
+        i += 2;
+    }
+    if a.stl.as_os_str().is_empty() {
+        return Err("--stl is required".into());
+    }
+    if a.layer <= 0.0 || a.res <= 0.0 {
+        return Err("layer and res must be positive".into());
+    }
+    Ok(a)
+}
+
+fn run_slice(a: &SliceArgs) -> Result<(), String> {
+    use anvil_implicit::slice::{area, contours, length, svg};
+    use anvil_implicit::Sampled;
+    let tris = anvil_feature::mesh_loader::load(&a.stl.display().to_string())?;
+    if tris.is_empty() {
+        return Err("no triangles".into());
+    }
+    let field = Sampled::from_triangles(&tris, a.res, 3);
+    let mut lo = anvil_math::DVec3::splat(f64::INFINITY);
+    let mut hi = anvil_math::DVec3::splat(f64::NEG_INFINITY);
+    for t in &tris {
+        for p in t {
+            lo = lo.min(*p);
+            hi = hi.max(*p);
+        }
+    }
+    std::fs::create_dir_all(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?;
+    let plo = anvil_math::DVec2::new(lo.x - a.res, lo.y - a.res);
+    let phi = anvil_math::DVec2::new(hi.x + a.res, hi.y + a.res);
+    let mut layers = Vec::new();
+    let mut z = lo.z + 0.5 * a.layer;
+    let mut n = 0usize;
+    while z < hi.z {
+        let loops = contours(&field, z, plo, phi, a.res);
+        let total_area: f64 = loops.iter().map(|l| area(l)).sum();
+        let perimeter: f64 = loops.iter().map(|l| length(l)).sum();
+        let name = format!("layer_{n:04}.svg");
+        std::fs::write(a.out.join(&name), svg(&loops, plo, phi)).map_err(|e| e.to_string())?;
+        layers.push(serde_json::json!({ "z": z, "file": name, "loops": loops.len(), "area_mm2": total_area, "perimeter_mm": perimeter }));
+        n += 1;
+        z += a.layer;
+    }
+    let report = serde_json::json!({ "stl": a.stl.display().to_string(), "layer": a.layer, "layers": layers });
+    std::fs::write(a.out.join("layers.json"), serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    println!("Wrote {n} layers to {}", a.out.display());
+    Ok(())
+}
+
 fn run_aircraft(out: &Path) -> Result<(), String> {
     use anvil_feature::features::aircraft::AircraftFeature;
     let mut doc = anvil_feature::Document::new("plane");
@@ -572,6 +654,7 @@ fn main() -> ExitCode {
         Some("kettle") => parse_kettle(&args[1..]).and_then(|a| run_kettle(&a)),
         Some("lattice") => parse_lattice(&args[1..]).and_then(|a| run_lattice(&a)),
         Some("run") => parse_run(&args[1..]).and_then(|a| run_document(&a)),
+        Some("slice") => parse_slice(&args[1..]).and_then(|a| run_slice(&a)),
         Some("aircraft") => {
             let out = match args.get(1).map(|s| s.as_str()) {
                 Some("--out") => args.get(2).map(PathBuf::from).ok_or("--out needs a value".to_string()),
@@ -655,6 +738,13 @@ mod tests {
         assert_eq!(report["expressions"]["w"]["value"].as_f64().unwrap(), 20.0);
         assert!(dir.join("box.stl").exists());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parses_slice_options() {
+        let a = parse_slice(&s(&["--stl", "p.stl", "--layer", "0.3"])).unwrap();
+        assert_eq!(a.layer, 0.3);
+        assert!(parse_slice(&s(&["--layer", "0.3"])).is_err());
     }
 
     #[test]
