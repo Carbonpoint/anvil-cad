@@ -100,9 +100,13 @@ Milestones:
   Cell size at far end. Faces of an Aircraft body carry a component tag
   (`from_tagged_triangles`), and the OpenFOAM export writes one named
   STL solid and one patch per component (boundary tagged export).
-  Still open: distance to a picked face or body,
-  cell size grading for beam lattices, and a better than first order
-  sheet distance (a Newton step jumps between sheets).
+  `Honeycomb` is the ribs pattern (hexagonal cell walls extruded along
+  Z, the simplest of nTop's ribbing blocks), and Lattice fill's grade
+  "distance" thickens by the sampled distance to a picked body. Still
+  open: cell size grading for beam lattices, a better than first order
+  sheet distance (a Newton step jumps between sheets), ribs projected
+  onto a curved surface, slices from the field, the 3MF beam extension,
+  a Fidget back end.
 * F4 (first half done 2026-09-17): `Field::grad` (central differences by
   default; analytic for sphere, box, TPMS, beam lattices, and forwarded
   through the combinators), and surface nets place each cell vertex by

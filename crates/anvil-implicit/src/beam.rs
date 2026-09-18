@@ -187,6 +187,65 @@ impl Field for BeamLattice {
     }
 }
 
+/// A honeycomb of ribs: the walls of a regular hexagonal tiling in the
+/// XY plane, `cell` across between opposite walls, extruded along Z.
+/// The distance is to the nearest wall centreline, so `Graded` and the
+/// conformal warp work on it like on any lattice.
+pub struct Honeycomb {
+    pub cell: f64,
+    pub wall: f64,
+}
+
+impl Honeycomb {
+    /// Distance in the plane from `p` to the nearest cell wall centreline.
+    pub fn wall_distance(&self, p: DVec3) -> f64 {
+        // Cell centres on a triangular lattice with spacing `cell`.
+        let s = self.cell.max(1e-9);
+        let e1 = anvil_math::DVec2::new(s, 0.0);
+        let e2 = anvil_math::DVec2::new(0.5 * s, s * 3f64.sqrt() * 0.5);
+        let q = anvil_math::DVec2::new(p.x, p.y);
+        // Lattice coordinates of q, then the nearest centre among the
+        // neighbours of the rounded coordinates.
+        let det = e1.x * e2.y - e1.y * e2.x;
+        let a = (q.x * e2.y - q.y * e2.x) / det;
+        let b = (e1.x * q.y - e1.y * q.x) / det;
+        let (ia, ib) = (a.round() as i64, b.round() as i64);
+        let mut centres: Vec<anvil_math::DVec2> = Vec::with_capacity(9);
+        for da in -1..=1 {
+            for db in -1..=1 {
+                centres.push(e1 * (ia + da) as f64 + e2 * (ib + db) as f64);
+            }
+        }
+        let (mut best_i, mut best_d) = (0usize, f64::INFINITY);
+        for (i, c) in centres.iter().enumerate() {
+            let d = (q - *c).length_squared();
+            if d < best_d {
+                best_d = d;
+                best_i = i;
+            }
+        }
+        let c1 = centres[best_i];
+        // Distance to the Voronoi boundary: the nearest bisector plane
+        // between the home centre and any other centre.
+        let mut wall = f64::INFINITY;
+        for (i, c) in centres.iter().enumerate() {
+            if i == best_i {
+                continue;
+            }
+            let sep = (*c - c1).length();
+            let d = ((q - *c).length_squared() - (q - c1).length_squared()) / (2.0 * sep);
+            wall = wall.min(d);
+        }
+        wall
+    }
+}
+
+impl Field for Honeycomb {
+    fn at(&self, p: DVec3) -> f64 {
+        self.wall_distance(p) - 0.5 * self.wall
+    }
+}
+
 /// A lattice whose thickness follows a scalar field: beams or sheets get
 /// thicker where `thickness` is larger. `core` must return the distance
 /// to the lattice centreline or mid sheet (a `BeamLattice` with radius 0
@@ -266,6 +325,18 @@ pub fn cylindrical(radius: f64) -> impl Fn(DVec3) -> DVec3 + Sync {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn honeycomb_walls_are_where_they_should_be() {
+        let h = Honeycomb { cell: 10.0, wall: 1.0 };
+        // Midway between two neighbouring centres is on a wall.
+        assert!((h.at(DVec3::new(5.0, 0.0, 3.0)) + 0.5).abs() < 1e-9);
+        // A cell centre is half a cell from the walls: cell across between
+        // walls is 10, so the inscribed radius is 5.
+        assert!((h.at(DVec3::ZERO) - 4.5).abs() < 1e-9, "{}", h.at(DVec3::ZERO));
+        // Same at a far cell and independent of z.
+        assert!((h.at(DVec3::new(35.0, 8.66, -20.0)) - 4.5).abs() < 0.05);
+    }
 
     #[test]
     fn cubic_beams_sit_on_the_cell_edges() {

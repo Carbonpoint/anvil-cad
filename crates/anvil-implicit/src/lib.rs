@@ -21,7 +21,7 @@ pub mod pointmap;
 pub mod sampled;
 pub mod vtk;
 pub mod wing;
-pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Radial, Ramp, Warp};
+pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Honeycomb, Radial, Ramp, Warp};
 // CellRamp and Blend live in this file.
 pub use pointmap::{PointMap, Remap};
 pub use sampled::Sampled;

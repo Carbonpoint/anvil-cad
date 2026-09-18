@@ -48,6 +48,10 @@ pub struct LatticeFillFeature {
     /// that drives the thickness when `grade` is "map": `wall` where the
     /// value is `map_lo`, `wall_end` where it is `map_hi`. Both zero
     /// means the map's own range.
+    /// Body whose surface drives the thickness when `grade` is
+    /// "distance": `wall` at the surface, `wall_end` at `map_hi` mm away.
+    #[serde(default)]
+    pub ref_body: usize,
     #[serde(default)]
     pub map_file: String,
     #[serde(default = "zero")]
@@ -76,6 +80,7 @@ impl Default for LatticeFillFeature {
             cell_end: "0".into(),
             grade: "none".into(),
             conform: "none".into(),
+            ref_body: 0,
             map_file: String::new(),
             map_lo: "0".into(),
             map_hi: "0".into(),
@@ -85,7 +90,7 @@ impl Default for LatticeFillFeature {
 
 /// The lattice kinds the feature offers: three TPMS sheets and four beam
 /// cells.
-pub const KINDS: [&str; 7] = ["gyroid", "schwarz", "diamond", "cubic", "bcc", "octet", "kelvin"];
+pub const KINDS: [&str; 8] = ["gyroid", "schwarz", "diamond", "cubic", "bcc", "octet", "kelvin", "honeycomb"];
 
 #[typetag::serde(name = "lattice_fill")]
 impl Feature for LatticeFillFeature {
@@ -105,7 +110,13 @@ impl Feature for LatticeFillFeature {
             ParamSpec::length("resolution", "Resolution", &self.resolution),
             ParamSpec::length("wall_end", "Thickness at far end (0 = same)", &self.wall_end),
             ParamSpec::length("cell_end", "Cell size at far end (0 = same)", &self.cell_end),
-            ParamSpec::choice("grade", "Grade along", vec!["none", "x", "y", "z", "radial", "map"], &self.grade),
+            ParamSpec::choice(
+                "grade",
+                "Grade along",
+                vec!["none", "x", "y", "z", "radial", "map", "distance"],
+                &self.grade,
+            ),
+            ParamSpec::feature_ref("ref_body", "Distance to body", BODY_TYPES.to_vec(), self.ref_body),
             ParamSpec::choice("conform", "Conform to", vec!["none", "cylinder"], &self.conform),
             ParamSpec {
                 name: "map_file",
@@ -129,6 +140,7 @@ impl Feature for LatticeFillFeature {
             ("cell_end", ParamValue::Expr(s)) => self.cell_end = s,
             ("grade", ParamValue::Choice(s)) => self.grade = s,
             ("conform", ParamValue::Choice(s)) => self.conform = s,
+            ("ref_body", ParamValue::FeatureRef(i)) => self.ref_body = i,
             ("map_file", ParamValue::Expr(s)) => self.map_file = s,
             ("map_lo", ParamValue::Expr(s)) => self.map_lo = s,
             ("map_hi", ParamValue::Expr(s)) => self.map_hi = s,
@@ -139,7 +151,8 @@ impl Feature for LatticeFillFeature {
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let tpms = Tpms::parse(&self.lattice);
         let beam = BeamCell::parse(&self.lattice);
-        if tpms.is_none() && beam.is_none() {
+        let honeycomb = self.lattice.eq_ignore_ascii_case("honeycomb");
+        if tpms.is_none() && beam.is_none() && !honeycomb {
             return Err(RegenError::Other(format!(
                 "unknown lattice {}; use one of {}",
                 self.lattice,
@@ -159,6 +172,34 @@ impl Feature for LatticeFillFeature {
         } else {
             None
         };
+        // Distance to another body's surface as the thickness driver.
+        let reference: Option<(std::sync::Arc<dyn Field + Send>, f64)> =
+            if self.grade == "distance" {
+                let reach = ctx.eval(&self.map_hi)?;
+                if reach <= 0.0 {
+                    return Err(RegenError::Other(
+                        "grade by distance needs Map value for Thickness at far end as the reach in mm".into(),
+                    ));
+                }
+                let src = ctx.bodies_of(self.ref_body)?;
+                let mut tris: Vec<[DVec3; 3]> = Vec::new();
+                for b in src {
+                    let m = anvil_kernel::mesh::tessellate(b);
+                    tris.extend(
+                        m.indices.as_chunks::<3>().0.iter().map(|t| {
+                            [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]]
+                        }),
+                    );
+                }
+                if tris.is_empty() {
+                    return Err(RegenError::Other("the distance body has no faces".into()));
+                }
+                let step_ref = ctx.eval(&self.resolution)?.max(0.05) * 2.0;
+                let sampled = Sampled::from_triangles(&tris, step_ref, 3);
+                Some((std::sync::Arc::new(sampled), reach))
+            } else {
+                None
+            };
         let cell = ctx.eval(&self.cell)?;
         let wall = ctx.eval(&self.wall)?;
         let skin = ctx.eval(&self.skin)?;
@@ -223,6 +264,15 @@ impl Feature for LatticeFillFeature {
                     let (pm, in_lo, in_hi) = map.as_ref().expect("map loaded above");
                     Box::new(Remap { field: pm.clone(), in_lo: *in_lo, in_hi: *in_hi, a: wall, b: far })
                 }
+                "distance" => {
+                    let (sd, reach) = reference.as_ref().expect("reference sampled above");
+                    // Unsigned distance to the reference surface.
+                    let d = anvil_implicit::Dyn(Box::new(anvil_implicit::Func({
+                        let sd = sd.clone();
+                        move |p: DVec3| sd.at(p).abs()
+                    })));
+                    Box::new(Remap { field: d, in_lo: 0.0, in_hi: *reach, a: wall, b: far })
+                }
                 _ => Box::new(anvil_implicit::Func(move |_p: DVec3| wall)),
             };
             let ramp_axis = match self.grade.as_str() {
@@ -232,6 +282,7 @@ impl Feature for LatticeFillFeature {
                 _ => None,
             };
             let centre: Box<dyn Field> = match (tpms, beam) {
+                _ if honeycomb => Box::new(anvil_implicit::Honeycomb { cell, wall: 0.0 }),
                 (Some(k), _) if cell_end > 0.0 && ramp_axis.is_some() => {
                     let ax = ramp_axis.unwrap_or(0);
                     let (from, to) = ([bb.min.x, bb.min.y, bb.min.z][ax], [bb.max.x, bb.max.y, bb.max.z][ax]);
@@ -277,6 +328,7 @@ impl Feature for LatticeFillFeature {
                 match self.grade.as_str() {
                     "none" => "lattice".to_string(),
                     "map" => format!("thickness from {}", self.map_file),
+                    "distance" => format!("thickness by distance to feature {}", self.ref_body),
                     g if cell_end > 0.0 => format!("graded along {g}, cell {cell} to {cell_end}"),
                     g => format!("graded along {g}"),
                 },
@@ -416,6 +468,62 @@ mod tests {
         assert!(lo > 500.0 && hi > 500.0 && (lo - hi).abs() > 0.05 * lo, "small cells {lo} vs large cells {hi}");
         let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
         assert!(note.contains("cell 5 to 15"), "{note}");
+    }
+
+    #[test]
+    fn honeycomb_ribs_thicken_near_a_reference_body() {
+        use crate::features::primitives::{BoxFeature, CylinderFeature};
+        let mut doc = Document::new("t");
+        doc.add_feature(Box::new(BoxFeature {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0".into(),
+            width: "60".into(),
+            depth: "30".into(),
+            height: "6".into(),
+        }));
+        // A bolt boss at one end drives the rib thickness.
+        doc.add_feature(Box::new(CylinderFeature {
+            plane: "XY".into(),
+            cx: "50".into(),
+            cy: "15".into(),
+            radius: "4".into(),
+            height: "6".into(),
+        }));
+        doc.add_feature(Box::new(LatticeFillFeature {
+            body: 0,
+            lattice: "honeycomb".into(),
+            cell: "8".into(),
+            wall: "1.0".into(),
+            wall_end: "3.0".into(),
+            grade: "distance".into(),
+            ref_body: 1,
+            map_hi: "25".into(),
+            skin: "0.8".into(),
+            resolution: "0.4".into(),
+            ..Default::default()
+        }));
+        let f = &doc.features[2];
+        assert!(f.error.is_none(), "{:?}", f.error);
+        let b = &f.output.as_ref().unwrap().bodies[0];
+        assert_eq!(b.open_edge_report().0, 0);
+        // Ribs are thick near the boss (x near 50) and thin far away, so
+        // the near half holds more material.
+        let m = anvil_kernel::mesh::tessellate(b);
+        let (mut near, mut far) = (0.0, 0.0);
+        for t in m.indices.as_chunks::<3>().0 {
+            let p = [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]];
+            let v6 = p[0].dot(p[1].cross(p[2])) / 6.0;
+            if (p[0].x + p[1].x + p[2].x) / 3.0 > 30.0 {
+                near += v6;
+            } else {
+                far += v6;
+            }
+        }
+        // Thickness 1 far from the boss, 3 at it: the near half is denser.
+        assert!(near > far * 1.2, "near the boss {near} vs far {far}");
+        let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
+        assert!(note.contains("thickness by distance"), "{note}");
     }
 
     #[test]

@@ -328,8 +328,9 @@ body, choose the lattice, and set the cell size, the thickness (sheet
 wall or beam diameter), the skin thickness, and the resolution.
 
 Lattices: three sheet lattices on a minimal surface (gyroid, schwarz,
-diamond) and four beam lattices on a unit cell (cubic, bcc, octet,
-kelvin). Grade along x, y, z, or radially to ramp the thickness from
+diamond), four beam lattices on a unit cell (cubic, bcc, octet,
+kelvin), and honeycomb, the walls of a hexagonal tiling in the XY plane
+running through the part as ribs. Grade along x, y, z, or radially to ramp the thickness from
 Thickness to Thickness at far end across the body; with Cell size at
 far end set, a sheet lattice's cell size ramps along the same axis too,
 by a phase integral so the cells never tear. Keep the sheet wall under
@@ -347,6 +348,12 @@ volume as a percentage of the solid body, and the voxel count. Keep the
 thickness at least two voxels; the feature refuses thinner walls. A
 lattice body is a mesh: later features can move, pattern, split, and
 export it, but a boolean on it is slow.
+
+Grade along "distance" takes the thickness from another body: pick it
+as Distance to body, and the lattice is `wall` thick at that body's
+surface and `wall_end` thick at Map value for Thickness at far end
+millimetres away and beyond. Ribs thicken around a boss, a lattice
+firms up under a load pad.
 
 Grade along "map" takes the thickness from data: a CSV of `x, y, z,
 value` samples (a stress or temperature map from a solver), read into a
