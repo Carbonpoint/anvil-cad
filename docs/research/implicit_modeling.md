@@ -94,8 +94,12 @@ Milestones:
   is a scripted sweep and taper loop. Later the same day: `vtk.rs` reads
   legacy VTK grids and point scalars, `GridField` interpolates a grid,
   `Threshold` makes a body from a density, and the Density body feature
-  wraps them (topology optimisation import). Still open: distance to a
-  picked face or body, cell size grading.
+  wraps them (topology optimisation import). `CellRamp` grades a sheet
+  lattice's cell size along an axis by the phase integral, and `Blend`
+  mixes two fields by a weight field; Lattice fill exposes the ramp as
+  Cell size at far end. Still open: distance to a picked face or body,
+  cell size grading for beam lattices, and a better than first order
+  sheet distance (a Newton step jumps between sheets).
 * F4 (first half done 2026-09-17): `Field::grad` (central differences by
   default; analytic for sphere, box, TPMS, beam lattices, and forwarded
   through the combinators), and surface nets place each cell vertex by

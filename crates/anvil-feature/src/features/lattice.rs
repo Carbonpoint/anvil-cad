@@ -31,6 +31,10 @@ pub struct LatticeFillFeature {
     /// everywhere.
     #[serde(default = "zero")]
     pub wall_end: String,
+    /// Cell size at the far end of the grade (sheet lattices, grades
+    /// along x, y, or z); 0 keeps `cell` everywhere.
+    #[serde(default = "zero")]
+    pub cell_end: String,
     /// "none", "x", "y", "z" (thickness ramps along that axis from `wall`
     /// to `wall_end`), or "radial" (from `wall` at the centre to
     /// `wall_end` at the outside).
@@ -69,6 +73,7 @@ impl Default for LatticeFillFeature {
             skin: "1.2".into(),
             resolution: "0.4".into(),
             wall_end: "0".into(),
+            cell_end: "0".into(),
             grade: "none".into(),
             conform: "none".into(),
             map_file: String::new(),
@@ -99,6 +104,7 @@ impl Feature for LatticeFillFeature {
             ParamSpec::length("skin", "Skin thickness", &self.skin),
             ParamSpec::length("resolution", "Resolution", &self.resolution),
             ParamSpec::length("wall_end", "Thickness at far end (0 = same)", &self.wall_end),
+            ParamSpec::length("cell_end", "Cell size at far end (0 = same)", &self.cell_end),
             ParamSpec::choice("grade", "Grade along", vec!["none", "x", "y", "z", "radial", "map"], &self.grade),
             ParamSpec::choice("conform", "Conform to", vec!["none", "cylinder"], &self.conform),
             ParamSpec {
@@ -120,6 +126,7 @@ impl Feature for LatticeFillFeature {
             ("skin", ParamValue::Expr(s)) => self.skin = s,
             ("resolution", ParamValue::Expr(s)) => self.resolution = s,
             ("wall_end", ParamValue::Expr(s)) => self.wall_end = s,
+            ("cell_end", ParamValue::Expr(s)) => self.cell_end = s,
             ("grade", ParamValue::Choice(s)) => self.grade = s,
             ("conform", ParamValue::Choice(s)) => self.conform = s,
             ("map_file", ParamValue::Expr(s)) => self.map_file = s,
@@ -140,6 +147,7 @@ impl Feature for LatticeFillFeature {
             )));
         }
         let wall_end = ctx.eval(&self.wall_end)?;
+        let cell_end = ctx.eval(&self.cell_end)?;
         // A point map drives the thickness when the grade is "map".
         let map: Option<(std::sync::Arc<dyn Field + Send>, f64, f64)> = if self.grade == "map" {
             let data = anvil_implicit::vtk::load_scalar_file(std::path::Path::new(&self.map_file))
@@ -217,7 +225,26 @@ impl Feature for LatticeFillFeature {
                 }
                 _ => Box::new(anvil_implicit::Func(move |_p: DVec3| wall)),
             };
+            let ramp_axis = match self.grade.as_str() {
+                "x" => Some(0),
+                "y" => Some(1),
+                "z" => Some(2),
+                _ => None,
+            };
             let centre: Box<dyn Field> = match (tpms, beam) {
+                (Some(k), _) if cell_end > 0.0 && ramp_axis.is_some() => {
+                    let ax = ramp_axis.unwrap_or(0);
+                    let (from, to) = ([bb.min.x, bb.min.y, bb.min.z][ax], [bb.max.x, bb.max.y, bb.max.z][ax]);
+                    Box::new(anvil_implicit::CellRamp {
+                        kind: k,
+                        axis: ax,
+                        from,
+                        to,
+                        cell_a: cell,
+                        cell_b: cell_end,
+                        wall: 0.0,
+                    })
+                }
                 (Some(k), _) => Box::new(Lattice { kind: k, cell, wall: 0.0 }),
                 (_, Some(b)) => Box::new(BeamLattice::new(b, cell, 0.0)),
                 _ => unreachable!(),
@@ -250,6 +277,7 @@ impl Feature for LatticeFillFeature {
                 match self.grade.as_str() {
                     "none" => "lattice".to_string(),
                     "map" => format!("thickness from {}", self.map_file),
+                    g if cell_end > 0.0 => format!("graded along {g}, cell {cell} to {cell_end}"),
                     g => format!("graded along {g}"),
                 },
                 tris_out.len(),
@@ -344,6 +372,50 @@ mod tests {
         let _ = (lo, hi);
         let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
         assert!(note.contains("graded along z"), "{note}");
+    }
+
+    #[test]
+    fn cell_size_ramps_along_x() {
+        use crate::features::primitives::BoxFeature;
+        let mut doc = Document::new("t");
+        doc.add_feature(Box::new(BoxFeature {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0".into(),
+            width: "60".into(),
+            depth: "20".into(),
+            height: "20".into(),
+        }));
+        doc.add_feature(Box::new(LatticeFillFeature {
+            body: 0,
+            lattice: "gyroid".into(),
+            cell: "5".into(),
+            cell_end: "15".into(),
+            wall: "1.0".into(),
+            grade: "x".into(),
+            skin: "0".into(),
+            resolution: "0.5".into(),
+            ..Default::default()
+        }));
+        let f = &doc.features[1];
+        assert!(f.error.is_none(), "{:?}", f.error);
+        let b = &f.output.as_ref().unwrap().bodies[0];
+        assert_eq!(b.open_edge_report().0, 0);
+        // Both halves hold material and differ: the ramp did something.
+        let m = anvil_kernel::mesh::tessellate(b);
+        let (mut lo, mut hi) = (0.0, 0.0);
+        for t in m.indices.as_chunks::<3>().0 {
+            let p = [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]];
+            let v6 = p[0].dot(p[1].cross(p[2])) / 6.0;
+            if (p[0].x + p[1].x + p[2].x) / 3.0 < 30.0 {
+                lo += v6;
+            } else {
+                hi += v6;
+            }
+        }
+        assert!(lo > 500.0 && hi > 500.0 && (lo - hi).abs() > 0.05 * lo, "small cells {lo} vs large cells {hi}");
+        let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
+        assert!(note.contains("cell 5 to 15"), "{note}");
     }
 
     #[test]

@@ -330,8 +330,12 @@ wall or beam diameter), the skin thickness, and the resolution.
 Lattices: three sheet lattices on a minimal surface (gyroid, schwarz,
 diamond) and four beam lattices on a unit cell (cubic, bcc, octet,
 kelvin). Grade along x, y, z, or radially to ramp the thickness from
-Thickness to Thickness at far end across the body. Conform to cylinder
-wraps the cells around the Z axis so they follow a round wall.
+Thickness to Thickness at far end across the body; with Cell size at
+far end set, a sheet lattice's cell size ramps along the same axis too,
+by a phase integral so the cells never tear. Keep the sheet wall under
+about a fifth of the cell: the sheet distance is a first order estimate
+and thick walls in small cells come out thinner than asked. Conform to
+cylinder wraps the cells around the Z axis so they follow a round wall.
 
 The body is sampled into a signed distance grid at the resolution, the
 skin and the lattice are combined as fields, and the zero surface is

@@ -22,6 +22,7 @@ pub mod sampled;
 pub mod vtk;
 pub mod wing;
 pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Radial, Ramp, Warp};
+// CellRamp and Blend live in this file.
 pub use pointmap::{PointMap, Remap};
 pub use sampled::Sampled;
 pub use vtk::{GridField, Threshold};
@@ -266,6 +267,135 @@ pub struct Lattice {
     pub cell: f64,
     pub wall: f64,
 }
+impl Tpms {
+    /// Level set value and its gradient at scaled coordinates (one cell
+    /// is a full turn of each coordinate).
+    pub fn level_at(self, x: f64, y: f64, z: f64) -> (f64, DVec3) {
+        let (sx, cx) = x.sin_cos();
+        let (sy, cy) = y.sin_cos();
+        let (sz, cz) = z.sin_cos();
+        let (g, gx, gy, gz) = match self {
+            Tpms::Gyroid => (sx * cy + sy * cz + sz * cx, cx * cy - sz * sx, cy * cz - sx * sy, cz * cx - sy * sz),
+            Tpms::SchwarzP => (cx + cy + cz, -sx, -sy, -sz),
+            Tpms::Diamond => (
+                sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz,
+                cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz,
+                sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz,
+                sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz,
+            ),
+        };
+        (g, DVec3::new(gx, gy, gz))
+    }
+}
+
+/// A sheet lattice whose cell size ramps linearly along one axis, from
+/// `cell_a` at `from` to `cell_b` at `to` (clamped beyond). The phase
+/// along that axis is the integral of `2 pi / cell`, so the local period
+/// is the local cell size everywhere and the cells never tear; across
+/// the other two axes the local cell size scales the coordinate.
+pub struct CellRamp {
+    pub kind: Tpms,
+    pub axis: usize,
+    pub from: f64,
+    pub to: f64,
+    pub cell_a: f64,
+    pub cell_b: f64,
+    pub wall: f64,
+}
+
+impl CellRamp {
+    /// Local cell size, its slope, and the phase along the ramp axis at
+    /// coordinate `t`.
+    fn cell_and_phase(&self, t: f64) -> (f64, f64, f64) {
+        use std::f64::consts::TAU;
+        let (a, b) = (self.from, self.to);
+        let span = (b - a).abs().max(1e-12);
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        let (ca, cb) = if a <= b { (self.cell_a, self.cell_b) } else { (self.cell_b, self.cell_a) };
+        let k = (cb - ca) / span;
+        let phase_in = |u: f64| -> f64 {
+            if k.abs() < 1e-12 {
+                TAU * (u - lo) / ca
+            } else {
+                TAU / k * ((ca + k * (u - lo)) / ca).ln()
+            }
+        };
+        if t < lo {
+            (ca, 0.0, TAU * (t - lo) / ca)
+        } else if t > hi {
+            (cb, 0.0, phase_in(hi) + TAU * (t - hi) / cb)
+        } else {
+            (ca + k * (t - lo), k, phase_in(t))
+        }
+    }
+
+    /// Level set value and its world gradient.
+    fn level(&self, p: DVec3) -> (f64, DVec3) {
+        use std::f64::consts::TAU;
+        let c = [p.x, p.y, p.z];
+        let (cell, slope, phase) = self.cell_and_phase(c[self.axis]);
+        let w = TAU / cell;
+        // d(w)/d(axis coordinate): the other coordinates are scaled by w.
+        let dw = -TAU * slope / (cell * cell);
+        let mut u = [c[0] * w, c[1] * w, c[2] * w];
+        u[self.axis] = phase;
+        let (g, gu) = self.kind.level_at(u[0], u[1], u[2]);
+        let gu = [gu.x, gu.y, gu.z];
+        // Chain rule: along the ramp axis the phase moves at w and the
+        // other scaled coordinates drift at c_i * dw; across it, plain w.
+        let mut grad = [0.0; 3];
+        for i in 0..3 {
+            if i == self.axis {
+                let mut d = gu[i] * w;
+                for j in 0..3 {
+                    if j != self.axis {
+                        d += gu[j] * c[j] * dw;
+                    }
+                }
+                grad[i] = d;
+            } else {
+                grad[i] = gu[i] * w;
+            }
+        }
+        (g, DVec3::new(grad[0], grad[1], grad[2]))
+    }
+}
+
+impl Field for CellRamp {
+    fn at(&self, p: DVec3) -> f64 {
+        let (g, gr) = self.level(p);
+        let mag = (gr.length_squared() + 0.001).sqrt();
+        g.abs() / mag - self.wall * 0.5
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        let (g, gr) = self.level(p);
+        (gr * g.signum()).normalize_or_zero()
+    }
+}
+
+/// A mix of two fields by a weight field (0 gives `a`, 1 gives `b`),
+/// for a transition between two lattices or two cell sizes. Both sides
+/// stay exact; pick commensurate cells (one twice the other) so the
+/// transition reads as a subdivision.
+pub struct Blend<A, B, W> {
+    pub a: A,
+    pub b: B,
+    pub weight: W,
+}
+
+impl<A: Field, B: Field, W: Field> Field for Blend<A, B, W> {
+    fn at(&self, p: DVec3) -> f64 {
+        let w = self.weight.at(p).clamp(0.0, 1.0);
+        if w <= 0.0 {
+            self.a.at(p)
+        } else if w >= 1.0 {
+            self.b.at(p)
+        } else {
+            self.a.at(p) * (1.0 - w) + self.b.at(p) * w
+        }
+    }
+}
+
 impl Lattice {
     /// Level set value and its gradient in the scaled coordinates.
     fn level(&self, p: DVec3) -> (f64, DVec3, f64) {
@@ -292,9 +422,12 @@ impl Field for Lattice {
     fn at(&self, p: DVec3) -> f64 {
         // Dividing by the gradient magnitude (Taubin's first order
         // distance) keeps the wall thickness even across the cell.
+        // A Newton step from the foot of this estimate would sharpen it
+        // but jumps between sheets where the wall is thick against the
+        // cell, so it is not used: keep the wall under a fifth of the cell.
         let (g, gr, w) = self.level(p);
-        let mag = (gr.length_squared() + 0.05 * 0.05).sqrt();
-        g.abs() / (mag * w) - self.wall * 0.5
+        let mag = (gr.length_squared() + 0.05 * 0.05).sqrt() * w;
+        g.abs() / mag - self.wall * 0.5
     }
     fn grad(&self, p: DVec3) -> DVec3 {
         let (g, gr, _) = self.level(p);
@@ -316,6 +449,89 @@ impl Field for Dyn {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cell_ramp_keeps_the_local_period() {
+        // Cell 4 at x = 0 growing to 12 at x = 60, sheet along x at y = z = 0.
+        let r = CellRamp { kind: Tpms::SchwarzP, axis: 0, from: 0.0, to: 60.0, cell_a: 4.0, cell_b: 12.0, wall: 0.0 };
+        // Zero crossings of the Schwarz P level along x at y = z = 0 (cos x + 2 = 0
+        // has none), so probe the gyroid instead: at y = z = 0 the gyroid is sin x.
+        let g = CellRamp { kind: Tpms::Gyroid, axis: 0, from: 0.0, to: 60.0, cell_a: 4.0, cell_b: 12.0, wall: 0.0 };
+        let mut crossings = Vec::new();
+        let mut prev = g.at(DVec3::new(-0.05, 0.0, 0.0)) - g.wall;
+        let mut x = 0.0;
+        while x < 70.0 {
+            let v = g.kind.level_at(g.cell_and_phase(x).2, 0.0, 0.0).0;
+            if prev.signum() != v.signum() {
+                crossings.push(x);
+            }
+            prev = v;
+            x += 0.01;
+        }
+        // Half period near the start is about 2, near the end about 6.
+        let first = crossings[1] - crossings[0];
+        let last = crossings[crossings.len() - 1] - crossings[crossings.len() - 2];
+        assert!((first - 2.0).abs() < 0.3, "first half period {first}");
+        assert!((last - 6.0).abs() < 0.4, "last half period {last}");
+        assert!(r.at(DVec3::ZERO).is_finite());
+    }
+
+    #[test]
+    fn cell_ramp_wall_thickness_is_even() {
+        let r = CellRamp { kind: Tpms::Gyroid, axis: 0, from: 0.0, to: 60.0, cell_a: 5.0, cell_b: 15.0, wall: 1.0 };
+        // Near the sheet the field must change at the rate of a distance:
+        // gradient magnitude near one. Sample a lattice of points.
+        for x in [2.0, 10.0, 30.0, 50.0, 58.0] {
+            let mut mags = Vec::new();
+            let mut y = -10.0;
+            while y < 10.0 {
+                let mut z = -10.0;
+                while z < 10.0 {
+                    let p = DVec3::new(x, y, z);
+                    let v = r.at(p);
+                    if v.abs() < 0.8 {
+                        // Finite differences of the value, not the analytic
+                        // unit normal, so the distance property is tested.
+                        let h = 1e-4;
+                        let fd = DVec3::new(
+                            r.at(p + DVec3::new(h, 0.0, 0.0)) - r.at(p - DVec3::new(h, 0.0, 0.0)),
+                            r.at(p + DVec3::new(0.0, h, 0.0)) - r.at(p - DVec3::new(0.0, h, 0.0)),
+                            r.at(p + DVec3::new(0.0, 0.0, h)) - r.at(p - DVec3::new(0.0, 0.0, h)),
+                        ) / (2.0 * h);
+                        mags.push(fd.length());
+                    }
+                    z += 0.37;
+                }
+                y += 0.31;
+            }
+            let mean = mags.iter().sum::<f64>() / mags.len().max(1) as f64;
+            let lo = mags.iter().cloned().fold(f64::INFINITY, f64::min);
+            let hi = mags.iter().cloned().fold(0.0, f64::max);
+            eprintln!(
+                "x {x}: {} samples near the sheet, gradient magnitude mean {mean:.3}, min {lo:.3}, max {hi:.3}",
+                mags.len()
+            );
+            // First order distance: within about half at a wall of a fifth
+            // of the cell, better as the cells grow.
+            assert!(mean > 0.8 && mean < 1.6, "gradient magnitude {mean} at x {x}");
+        }
+        // Volume in the two halves of a 60 x 20 x 20 box at two resolutions.
+        use crate::mesh::{surface_nets, volume};
+        for step in [0.5, 0.25] {
+            let boxed = Intersect(&r, BoxField { lo: DVec3::ZERO, hi: DVec3::new(60.0, 20.0, 20.0) });
+            let tris = surface_nets(&boxed, DVec3::splat(-1.0), DVec3::new(61.0, 21.0, 21.0), step);
+            let (mut lo, mut hi) = (0.0, 0.0);
+            for t in &tris {
+                let v6 = t[0].dot(t[1].cross(t[2])) / 6.0;
+                if (t[0].x + t[1].x + t[2].x) / 3.0 < 30.0 {
+                    lo += v6;
+                } else {
+                    hi += v6;
+                }
+            }
+            eprintln!("step {step}: small cell half {lo:.0}, large cell half {hi:.0}, total {:.0}", volume(&tris));
+        }
+    }
 
     #[test]
     fn sphere_and_box_are_signed() {
