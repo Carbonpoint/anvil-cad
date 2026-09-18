@@ -70,4 +70,8 @@ thickness, cylindrical warp, sampled fields from meshes, surface nets),
 the Lattice fill feature on the Solid tab, `anvil-cli lattice`, and the
 Aircraft feature (lofted NACA wing, fuselage, tail, lifting line
 estimate, taper and twist optimisation). Three research reports in
-docs/research set the order of the next steps.
+docs/research set the order of the next steps; as of 2026-09-17 every
+item on their list has a first cut: sharp meshing, VTK and density
+import, cell size grading, tagged export, honeycomb ribs, distance
+grading, slices from the field, 3MF beam lattices, and an optional
+Fidget back end (`--features fidget`).

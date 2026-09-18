@@ -8,3 +8,9 @@ repository.workspace = true
 
 [dependencies]
 anvil-math.workspace = true
+fidget = { version = "0.5", default-features = false, features = ["jit", "mesh"], optional = true }
+nalgebra = { version = "0.35", optional = true }
+
+[features]
+default = []
+fidget = ["dep:fidget", "dep:nalgebra"]

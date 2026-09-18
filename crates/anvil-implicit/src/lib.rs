@@ -16,6 +16,7 @@ use anvil_math::DVec3;
 
 pub mod aero;
 pub mod beam;
+pub mod expr;
 pub mod mesh;
 pub mod pointmap;
 pub mod sampled;

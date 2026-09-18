@@ -108,7 +108,7 @@ Milestones:
   surface and `anvil-cli beams` writes them under the 3MF beam lattice
   extension. Still open: cell size grading for beam lattices, a better
   than first order sheet distance (a Newton step jumps between sheets),
-  ribs projected onto a curved surface, a Fidget back end.
+  ribs projected onto a curved surface.
 * F4 (first half done 2026-09-17): `Field::grad` (central differences by
   default; analytic for sphere, box, TPMS, beam lattices, and forwarded
   through the combinators), and surface nets place each cell vertex by
@@ -117,9 +117,16 @@ Milestones:
   crease. Box corners land within 0.02 mm at a 0.5 mm step. Blocks far
   from the surface are skipped. Still open: an octree with interval
   pruning, the manifold clustering rule, smoothing and decimation.
-* F5: Fidget as an optional back end for the expression tree, so a field
-  built from primitives is compiled and evaluated on all cores, and a GPU
-  path for the viewport.
+* F5 (first step done 2026-09-17): `expr.rs` is a closed form expression
+  tree (sphere, box, union, intersection, subtraction, offset, shell,
+  smooth union, gyroid, Schwarz) that evaluates natively; behind the
+  `fidget` cargo feature it compiles to Fidget 0.5's JIT (`Compiled::
+  eval_many`) and meshes by Fidget's manifold dual contouring
+  (`Compiled::mesh`), tested against the native fields and the exact
+  volume. The feature is off by default so CI and the Docker image stay
+  light; build with `cargo test -p anvil-implicit --features fidget`.
+  Still open: a GPU path, and routing Lattice fill through the tree
+  when every part of its field is closed form.
 * F6: print preparation from the field: slices at layer height directly
   from the field, overhang maps, and a 3MF with beam lattice extensions.
 
