@@ -7,6 +7,7 @@
 //!   anvil-cli lattice --stl IN [--kind gyroid] [--cell 8] [--wall 1.2] [--skin 1.2] [--res 0.4] [--out DIR]
 //!   anvil-cli aircraft [--out DIR]
 //!   anvil-cli slice --stl IN [--layer 0.2] [--res 0.4] [--out DIR]
+//!   anvil-cli beams --stl IN [--kind cubic] [--cell 8] [--radius 0.6] [--res 0.4] [--out DIR]
 //!   anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR] [--formats 3mf,stl]
 //!                 [--openfoam --speed 20 --alpha 4 --sref M2 --cref M]
 //!   anvil-cli fonts
@@ -23,6 +24,7 @@ USAGE:
     anvil-cli lattice --stl IN [options] [--out DIR]
     anvil-cli aircraft [--out DIR]
     anvil-cli slice --stl IN [--layer 0.2] [--res 0.4] [--out DIR]
+    anvil-cli beams --stl IN [--kind cubic] [--cell 8] [--radius 0.6] [--out DIR]
     anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR]
     anvil-cli fonts
     anvil-cli --help
@@ -43,6 +45,9 @@ COMMANDS:
     slice    Sample a closed STL into a distance field and write one SVG
              per layer straight from the field, plus layers.json with the
              area and perimeter of each layer.
+    beams    Fill a closed STL with a beam lattice and write it as a 3MF
+             beam lattice (the 3MF extension: nodes and beams with a
+             radius, not triangles), clipped to the surface.
     run      Open a document, set named expressions from --set pairs or a
              JSON object, rebuild, export the bodies, and write a JSON
              report (expressions, feature notes, volumes, bounds, errors).
@@ -70,6 +75,14 @@ OPTIONS for slice:
     --stl IN       Closed mesh to slice (millimetres)
     --layer H      Layer height, default 0.2
     --res R        Sampling voxel size, default 0.4
+    --out DIR      Output folder (created if missing)
+
+OPTIONS for beams:
+    --stl IN       Closed mesh to fill (millimetres)
+    --kind K       cubic (default), bcc, octet, kelvin
+    --cell C       Cell size, default 8
+    --radius R     Beam radius, default 0.6
+    --res R        Sampling voxel size for the inside test, default 0.4
     --out DIR      Output folder (created if missing)
 
 OPTIONS for run:
@@ -593,6 +606,81 @@ fn run_slice(a: &SliceArgs) -> Result<(), String> {
     Ok(())
 }
 
+/// Parsed `beams` options.
+#[derive(Debug, PartialEq)]
+struct BeamsArgs {
+    stl: PathBuf,
+    kind: String,
+    cell: f64,
+    radius: f64,
+    res: f64,
+    out: PathBuf,
+}
+
+fn parse_beams(args: &[String]) -> Result<BeamsArgs, String> {
+    let mut a = BeamsArgs {
+        stl: PathBuf::new(),
+        kind: "cubic".into(),
+        cell: 8.0,
+        radius: 0.6,
+        res: 0.4,
+        out: PathBuf::from("."),
+    };
+    let mut i = 0;
+    while i < args.len() {
+        let value = || args.get(i + 1).cloned().ok_or(format!("{} needs a value", args[i]));
+        let number = || value()?.parse::<f64>().map_err(|e| format!("{}: {e}", args[i]));
+        match args[i].as_str() {
+            "--stl" => a.stl = PathBuf::from(value()?),
+            "--kind" => a.kind = value()?,
+            "--cell" => a.cell = number()?,
+            "--radius" => a.radius = number()?,
+            "--res" => a.res = number()?,
+            "--out" => a.out = PathBuf::from(value()?),
+            other => return Err(format!("unknown option {other}")),
+        }
+        i += 2;
+    }
+    if a.stl.as_os_str().is_empty() {
+        return Err("--stl is required".into());
+    }
+    Ok(a)
+}
+
+fn run_beams(a: &BeamsArgs) -> Result<(), String> {
+    use anvil_implicit::{BeamCell, BeamLattice, Sampled};
+    let cell =
+        BeamCell::parse(&a.kind).ok_or(format!("unknown beam cell {}; use cubic, bcc, octet, or kelvin", a.kind))?;
+    let tris = anvil_feature::mesh_loader::load(&a.stl.display().to_string())?;
+    if tris.is_empty() {
+        return Err("no triangles".into());
+    }
+    let inside = Sampled::from_triangles(&tris, a.res, 3);
+    let mut lo = anvil_math::DVec3::splat(f64::INFINITY);
+    let mut hi = anvil_math::DVec3::splat(f64::NEG_INFINITY);
+    for t in &tris {
+        for p in t {
+            lo = lo.min(*p);
+            hi = hi.max(*p);
+        }
+    }
+    let lattice = BeamLattice::new(cell, a.cell, a.radius);
+    let beams = lattice.beams_in(&inside, lo, hi);
+    std::fs::create_dir_all(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?;
+    let stem = a.stl.file_stem().and_then(|s| s.to_str()).unwrap_or("part");
+    let path = a.out.join(format!("{stem}_beams.3mf"));
+    let nodes = anvil_io::beams::write_3mf_beams(&beams, a.radius, stem, &path).map_err(|e| e.to_string())?;
+    let length: f64 = beams.iter().map(|(p, q)| (*q - *p).length()).sum();
+    println!(
+        "Wrote {} with {} beams on {nodes} nodes, {:.0} mm of beam, about {:.0} mm3 of material",
+        path.display(),
+        beams.len(),
+        length,
+        length * std::f64::consts::PI * a.radius * a.radius
+    );
+    Ok(())
+}
+
 fn run_aircraft(out: &Path) -> Result<(), String> {
     use anvil_feature::features::aircraft::AircraftFeature;
     let mut doc = anvil_feature::Document::new("plane");
@@ -655,6 +743,7 @@ fn main() -> ExitCode {
         Some("lattice") => parse_lattice(&args[1..]).and_then(|a| run_lattice(&a)),
         Some("run") => parse_run(&args[1..]).and_then(|a| run_document(&a)),
         Some("slice") => parse_slice(&args[1..]).and_then(|a| run_slice(&a)),
+        Some("beams") => parse_beams(&args[1..]).and_then(|a| run_beams(&a)),
         Some("aircraft") => {
             let out = match args.get(1).map(|s| s.as_str()) {
                 Some("--out") => args.get(2).map(PathBuf::from).ok_or("--out needs a value".to_string()),
@@ -738,6 +827,14 @@ mod tests {
         assert_eq!(report["expressions"]["w"]["value"].as_f64().unwrap(), 20.0);
         assert!(dir.join("box.stl").exists());
         std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn parses_beams_options() {
+        let a = parse_beams(&s(&["--stl", "p.stl", "--kind", "octet", "--radius", "0.8"])).unwrap();
+        assert_eq!(a.kind, "octet");
+        assert_eq!(a.radius, 0.8);
+        assert!(parse_beams(&s(&["--kind", "octet"])).is_err());
     }
 
     #[test]

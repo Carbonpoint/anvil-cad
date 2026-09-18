@@ -389,6 +389,16 @@ No mesh sits between the field and the layer, so the layer height is
 free and the contours are as exact as the field. Holes come out as
 loops of the opposite turn and the SVG fills them by the even odd rule.
 
+## Beam lattices as 3MF beams
+
+`anvil-cli beams --stl part.stl --kind octet --cell 8 --radius 0.6 --out
+DIR` fills a closed mesh with a beam lattice and writes it as a 3MF beam
+lattice: nodes and beams with a radius under the 3MF beam lattice
+extension, clipped to the surface, instead of the millions of triangles
+a meshed lattice needs. Slicers and printers that read the extension
+build the geometry themselves. The command prints the beam count, the
+total beam length, and the material it amounts to.
+
 ## Aircraft
 
 Aircraft (Solid tab, Field group) builds a fuselage, a lofted NACA wing,

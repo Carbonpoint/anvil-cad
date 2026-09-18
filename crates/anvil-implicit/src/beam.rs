@@ -178,6 +178,63 @@ impl BeamLattice {
     }
 }
 
+impl BeamLattice {
+    /// The beams of this lattice inside a body, as world space segments:
+    /// every cell edge of every cell that meets the box `lo..hi`, kept
+    /// when both ends are inside (`inside` negative) and clipped to the
+    /// surface when one end is. For the 3MF beam lattice extension.
+    pub fn beams_in(&self, inside: &dyn Field, lo: DVec3, hi: DVec3) -> Vec<(DVec3, DVec3)> {
+        let base = self.cell.segments();
+        let key = |p: DVec3| ((p.x * 1e4).round() as i64, (p.y * 1e4).round() as i64, (p.z * 1e4).round() as i64);
+        let mut seen: std::collections::HashSet<((i64, i64, i64), (i64, i64, i64))> = std::collections::HashSet::new();
+        let mut out = Vec::new();
+        let clip = |a: DVec3, b: DVec3| -> DVec3 {
+            // a inside, b outside: bisect to the surface.
+            let (mut pa, mut pb) = (a, b);
+            for _ in 0..12 {
+                let m = (pa + pb) * 0.5;
+                if inside.at(m) < 0.0 {
+                    pa = m;
+                } else {
+                    pb = m;
+                }
+            }
+            (pa + pb) * 0.5
+        };
+        let c0 = (lo / self.size).floor();
+        let c1 = (hi / self.size).ceil();
+        let mut cz = c0.z;
+        while cz < c1.z {
+            let mut cy = c0.y;
+            while cy < c1.y {
+                let mut cx = c0.x;
+                while cx < c1.x {
+                    let off = DVec3::new(cx, cy, cz) * self.size;
+                    for (a, b) in &base {
+                        let (pa, pb) = (off + *a * self.size, off + *b * self.size);
+                        let (ka, kb) = (key(pa), key(pb));
+                        let k = if ka < kb { (ka, kb) } else { (kb, ka) };
+                        if !seen.insert(k) {
+                            continue;
+                        }
+                        let (ia, ib) = (inside.at(pa) < 0.0, inside.at(pb) < 0.0);
+                        match (ia, ib) {
+                            (true, true) => out.push((pa, pb)),
+                            (true, false) => out.push((pa, clip(pa, pb))),
+                            (false, true) => out.push((clip(pb, pa), pb)),
+                            _ => {}
+                        }
+                    }
+                    cx += 1.0;
+                }
+                cy += 1.0;
+            }
+            cz += 1.0;
+        }
+        out
+    }
+}
+
 impl Field for BeamLattice {
     fn at(&self, p: DVec3) -> f64 {
         self.centreline_distance(p) - self.radius
@@ -347,6 +404,19 @@ mod tests {
         // The cell centre is furthest from every edge: 5 * sqrt 2 away.
         let c = l.at(DVec3::new(5.0, 5.0, 5.0));
         assert!((c - (50.0f64.sqrt() - 1.0)).abs() < 1e-9, "{c}");
+    }
+
+    #[test]
+    fn beams_inside_a_sphere_are_clipped_to_it() {
+        let l = BeamLattice::new(BeamCell::Cubic, 5.0, 0.4);
+        let s = crate::Sphere { c: DVec3::ZERO, r: 12.0 };
+        let beams = l.beams_in(&s, DVec3::splat(-13.0), DVec3::splat(13.0));
+        assert!(beams.len() > 100, "{}", beams.len());
+        for (a, b) in &beams {
+            assert!(a.length() < 12.01 && b.length() < 12.01, "beam end outside the sphere");
+        }
+        // A beam through the centre exists along each axis.
+        assert!(beams.iter().any(|(a, b)| a.y == 0.0 && a.z == 0.0 && b.y == 0.0 && b.z == 0.0));
     }
 
     #[test]

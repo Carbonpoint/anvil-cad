@@ -7,6 +7,7 @@
 //!   B-rep) behind one `Format` list for the Export dialog.
 
 pub mod aero;
+pub mod beams;
 pub mod casting;
 pub mod export;
 pub mod kettle;
@@ -264,7 +265,7 @@ fn crc32(data: &[u8]) -> u32 {
 }
 
 /// Minimal ZIP writer, stored (no compression). Enough for 3MF.
-fn zip_store(files: &[(&str, &[u8])]) -> Vec<u8> {
+pub(crate) fn zip_store(files: &[(&str, &[u8])]) -> Vec<u8> {
     let mut out = Vec::new();
     let mut central = Vec::new();
     for (name, data) in files {

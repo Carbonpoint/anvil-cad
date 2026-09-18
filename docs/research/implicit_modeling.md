@@ -104,10 +104,11 @@ Milestones:
   Z, the simplest of nTop's ribbing blocks), and Lattice fill's grade
   "distance" thickens by the sampled distance to a picked body. `slice.rs` cuts closed contours from any field by marching squares
   with bisected crossings; `anvil-cli slice` writes an SVG per layer and
-  the layer areas and perimeters. Still open: cell size grading for beam
-  lattices, a better than first order sheet distance (a Newton step
-  jumps between sheets), ribs projected onto a curved surface, the 3MF
-  beam extension, a Fidget back end.
+  the layer areas and perimeters. `BeamLattice::beams_in` lists the beams inside a body clipped to its
+  surface and `anvil-cli beams` writes them under the 3MF beam lattice
+  extension. Still open: cell size grading for beam lattices, a better
+  than first order sheet distance (a Newton step jumps between sheets),
+  ribs projected onto a curved surface, a Fidget back end.
 * F4 (first half done 2026-09-17): `Field::grad` (central differences by
   default; analytic for sphere, box, TPMS, beam lattices, and forwarded
   through the combinators), and surface nets place each cell vertex by
