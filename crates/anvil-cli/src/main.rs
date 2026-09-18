@@ -5,6 +5,7 @@
 //!   anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
 //!   anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
 //!   anvil-cli lattice --stl IN [--kind gyroid] [--cell 8] [--wall 1.2] [--skin 1.2] [--res 0.4] [--out DIR]
+//!   anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR] [--formats 3mf,stl]
 //!   anvil-cli fonts
 //!   anvil-cli --help
 
@@ -17,6 +18,7 @@ USAGE:
     anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
     anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
     anvil-cli lattice --stl IN [options] [--out DIR]
+    anvil-cli run DOC.anvil [--set name=value]... [--inputs in.json] [--outputs out.json] [--out DIR]
     anvil-cli fonts
     anvil-cli --help
 
@@ -29,6 +31,10 @@ COMMANDS:
              variant also writes a Truchas case (cavity.stl, casting.inp).
     lattice  Fill a closed STL with a lattice under a skin and write the
              result as STL, 3MF, and STEP (the field driven tools).
+    run      Open a document, set named expressions from --set pairs or a
+             JSON object, rebuild, export the bodies, and write a JSON
+             report (expressions, feature notes, volumes, bounds, errors).
+             This is the hook for design loops driven from a script.
     fonts    List the bundled fonts usable with --font.
 
 OPTIONS for kettle:
@@ -46,6 +52,14 @@ OPTIONS for lattice:
     --conform C    none (default) or cylinder
     --skin S       Solid skin thickness, default 1.2 (0 = none)
     --res R        Voxel size, default 0.4
+    --out DIR      Output folder (created if missing)
+
+OPTIONS for run:
+    --set N=V      Set expression N to V (a number or a formula); repeatable
+    --inputs F     JSON object of expression names to values
+    --outputs F    Where to write the JSON report (default: DIR/report.json)
+    --formats L    Comma list of 3mf, 3mf-group, stl, stl-parts, step, obj,
+                   ply, off, amf, gltf (default: 3mf-group,stl-parts)
     --out DIR      Output folder (created if missing)
 
 OPTIONS for card:
@@ -249,6 +263,7 @@ fn run_lattice(a: &LatticeArgs) -> Result<(), String> {
         conform: a.conform.clone(),
         skin: a.skin.clone(),
         resolution: a.res.clone(),
+        ..Default::default()
     }));
     for (i, f) in doc.features.iter().enumerate() {
         if let Some(e) = &f.error {
@@ -263,6 +278,171 @@ fn run_lattice(a: &LatticeArgs) -> Result<(), String> {
     for fmt in [anvil_io::export::Format::Stl, anvil_io::export::Format::ThreeMf, anvil_io::export::Format::Step] {
         let p = a.out.join(format!("{stem}_lattice.{}", fmt.extension()));
         println!("{}", anvil_io::export::write(&doc, fmt, &p).map_err(|e| e.to_string())?);
+    }
+    Ok(())
+}
+
+/// Parsed `run` options.
+#[derive(Debug, PartialEq)]
+struct RunArgs {
+    doc: PathBuf,
+    sets: Vec<(String, String)>,
+    inputs: Option<PathBuf>,
+    outputs: Option<PathBuf>,
+    formats: Vec<String>,
+    out: PathBuf,
+}
+
+fn parse_run(args: &[String]) -> Result<RunArgs, String> {
+    let mut a = RunArgs {
+        doc: PathBuf::new(),
+        sets: Vec::new(),
+        inputs: None,
+        outputs: None,
+        formats: vec!["3mf-group".into(), "stl-parts".into()],
+        out: PathBuf::from("."),
+    };
+    let mut i = 0;
+    while i < args.len() {
+        let value = || args.get(i + 1).cloned().ok_or(format!("{} needs a value", args[i]));
+        match args[i].as_str() {
+            "--set" => {
+                let v = value()?;
+                let (n, e) = v.split_once('=').ok_or(format!("--set wants name=value, got {v}"))?;
+                a.sets.push((n.trim().to_string(), e.trim().to_string()));
+                i += 2;
+            }
+            "--inputs" => {
+                a.inputs = Some(PathBuf::from(value()?));
+                i += 2;
+            }
+            "--outputs" => {
+                a.outputs = Some(PathBuf::from(value()?));
+                i += 2;
+            }
+            "--formats" => {
+                a.formats =
+                    value()?.split(',').map(|f| f.trim().to_ascii_lowercase()).filter(|f| !f.is_empty()).collect();
+                i += 2;
+            }
+            "--out" => {
+                a.out = PathBuf::from(value()?);
+                i += 2;
+            }
+            other if other.starts_with("--") => return Err(format!("unknown option {other}")),
+            doc => {
+                a.doc = PathBuf::from(doc);
+                i += 1;
+            }
+        }
+    }
+    if a.doc.as_os_str().is_empty() {
+        return Err("give the .anvil document to run".into());
+    }
+    Ok(a)
+}
+
+fn format_of(name: &str) -> Result<anvil_io::export::Format, String> {
+    use anvil_io::export::Format;
+    Ok(match name {
+        "3mf" => Format::ThreeMf,
+        "3mf-group" => Format::ThreeMfGroup,
+        "stl" => Format::Stl,
+        "stl-parts" => Format::StlParts,
+        "step" | "stp" => Format::Step,
+        "obj" => Format::Obj,
+        "ply" => Format::Ply,
+        "off" => Format::Off,
+        "amf" => Format::Amf,
+        "gltf" => Format::Gltf,
+        other => return Err(format!("unknown format {other}")),
+    })
+}
+
+fn run_document(a: &RunArgs) -> Result<(), String> {
+    let mut doc = anvil_io::load_document(&a.doc).map_err(|e| format!("{}: {e}", a.doc.display()))?;
+    let mut sets = a.sets.clone();
+    if let Some(p) = &a.inputs {
+        let text = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
+        let v: serde_json::Value = serde_json::from_str(&text).map_err(|e| format!("{}: {e}", p.display()))?;
+        let obj = v.as_object().ok_or("inputs must be a JSON object of name: value")?;
+        for (k, val) in obj {
+            let src = match val {
+                serde_json::Value::String(s) => s.clone(),
+                other => other.to_string(),
+            };
+            sets.push((k.clone(), src));
+        }
+    }
+    for (name, src) in &sets {
+        doc.set_expression(name, src).map_err(|e| format!("expression {name} = {src}: {e}"))?;
+    }
+    std::fs::create_dir_all(&a.out).map_err(|e| format!("{}: {e}", a.out.display()))?;
+    let stem = a.doc.file_stem().and_then(|s| s.to_str()).unwrap_or("part").to_string();
+    let mut files = Vec::new();
+    for f in &a.formats {
+        let fmt = format_of(f)?;
+        let path = a.out.join(format!("{stem}.{}", fmt.extension()));
+        let note = anvil_io::export::write(&doc, fmt, &path).map_err(|e| e.to_string())?;
+        println!("{note}");
+        files.push(path.display().to_string());
+    }
+    let exprs: serde_json::Map<String, serde_json::Value> = doc
+        .exprs
+        .iter()
+        .map(|p| (p.name.clone(), serde_json::json!({ "source": p.source, "value": p.value })))
+        .collect();
+    let features: Vec<serde_json::Value> = doc
+        .features
+        .iter()
+        .enumerate()
+        .map(|(i, f)| {
+            let bodies: Vec<serde_json::Value> = f
+                .output
+                .as_ref()
+                .map(|o| {
+                    o.bodies
+                        .iter()
+                        .map(|b| {
+                            let bb = b.bounds();
+                            serde_json::json!({
+                                "volume_mm3": b.volume(),
+                                "faces": b.faces.len(),
+                                "open_edges": b.open_edge_report().0,
+                                "min": [bb.min.x, bb.min.y, bb.min.z],
+                                "max": [bb.max.x, bb.max.y, bb.max.z],
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            serde_json::json!({
+                "index": i,
+                "name": f.feature.name(),
+                "kind": f.feature.kind(),
+                "error": f.error.as_ref().map(|e| e.to_string()),
+                "note": f.output.as_ref().and_then(|o| o.note.clone()),
+                "mass_g": doc.mass_of(i),
+                "bodies": bodies,
+            })
+        })
+        .collect();
+    let errors = doc.features.iter().filter(|f| f.error.is_some()).count();
+    let report = serde_json::json!({
+        "document": a.doc.display().to_string(),
+        "inputs": sets.iter().map(|(k, v)| (k.clone(), serde_json::Value::String(v.clone()))).collect::<serde_json::Map<_, _>>(),
+        "expressions": exprs,
+        "features": features,
+        "visible_bodies": doc.bodies().len(),
+        "errors": errors,
+        "files": files,
+    });
+    let out_path = a.outputs.clone().unwrap_or_else(|| a.out.join("report.json"));
+    std::fs::write(&out_path, serde_json::to_string_pretty(&report).map_err(|e| e.to_string())?)
+        .map_err(|e| format!("{}: {e}", out_path.display()))?;
+    println!("Wrote {} ({} features, {errors} errors)", out_path.display(), doc.features.len());
+    if errors > 0 {
+        return Err(format!("{errors} feature(s) failed; see {}", out_path.display()));
     }
     Ok(())
 }
@@ -283,6 +463,7 @@ fn main() -> ExitCode {
         Some("card") => parse_card(&args[1..]).and_then(|a| run_card(&a)),
         Some("kettle") => parse_kettle(&args[1..]).and_then(|a| run_kettle(&a)),
         Some("lattice") => parse_lattice(&args[1..]).and_then(|a| run_lattice(&a)),
+        Some("run") => parse_run(&args[1..]).and_then(|a| run_document(&a)),
         Some(other) => Err(format!("unknown command {other}\n\n{USAGE}")),
     };
     match result {
@@ -300,6 +481,64 @@ mod tests {
 
     fn s(v: &[&str]) -> Vec<String> {
         v.iter().map(|x| x.to_string()).collect()
+    }
+
+    #[test]
+    fn parses_run_options() {
+        let a = parse_run(&s(&[
+            "part.anvil",
+            "--set",
+            "span=200",
+            "--set",
+            "sweep = 5",
+            "--formats",
+            "stl,step",
+            "--out",
+            "o",
+        ]))
+        .unwrap();
+        assert_eq!(a.doc, PathBuf::from("part.anvil"));
+        assert_eq!(a.sets, vec![("span".to_string(), "200".to_string()), ("sweep".to_string(), "5".to_string())]);
+        assert_eq!(a.formats, vec!["stl".to_string(), "step".to_string()]);
+        assert!(parse_run(&s(&["--set", "a=1"])).is_err(), "document is required");
+        assert!(parse_run(&s(&["p.anvil", "--set", "novalue"])).is_err());
+    }
+
+    #[test]
+    fn run_sets_an_expression_and_writes_a_report() {
+        use anvil_feature::features::primitives::BoxFeature;
+        let dir = std::env::temp_dir().join(format!("anvil_run_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut doc = anvil_feature::Document::new("run");
+        doc.set_expression("w", "10").unwrap();
+        doc.add_feature(Box::new(BoxFeature {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0".into(),
+            width: "w".into(),
+            depth: "5".into(),
+            height: "2".into(),
+        }));
+        let path = dir.join("box.anvil");
+        anvil_io::save_document(&doc, &path).unwrap();
+        let a = parse_run(&s(&[
+            path.to_str().unwrap(),
+            "--set",
+            "w=20",
+            "--formats",
+            "stl",
+            "--out",
+            dir.to_str().unwrap(),
+        ]))
+        .unwrap();
+        run_document(&a).unwrap();
+        let report: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("report.json")).unwrap()).unwrap();
+        let vol = report["features"][0]["bodies"][0]["volume_mm3"].as_f64().unwrap();
+        assert!((vol - 200.0).abs() < 1e-6, "volume with w = 20: {vol}");
+        assert_eq!(report["expressions"]["w"]["value"].as_f64().unwrap(), 20.0);
+        assert!(dir.join("box.stl").exists());
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

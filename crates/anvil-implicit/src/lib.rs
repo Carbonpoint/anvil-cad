@@ -17,9 +17,11 @@ use anvil_math::DVec3;
 pub mod aero;
 pub mod beam;
 pub mod mesh;
+pub mod pointmap;
 pub mod sampled;
 pub mod wing;
 pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Radial, Ramp, Warp};
+pub use pointmap::{PointMap, Remap};
 pub use sampled::Sampled;
 
 /// A scalar field over space. Negative inside, positive outside, zero on
@@ -29,6 +31,12 @@ pub trait Field: Sync {
 }
 
 impl<F: Field> Field for &F {
+    fn at(&self, p: DVec3) -> f64 {
+        (**self).at(p)
+    }
+}
+
+impl<F: Field + Send + ?Sized> Field for std::sync::Arc<F> {
     fn at(&self, p: DVec3) -> f64 {
         (**self).at(p)
     }
@@ -174,12 +182,20 @@ impl Field for Lattice {
         let (sx, cx) = x.sin_cos();
         let (sy, cy) = y.sin_cos();
         let (sz, cz) = z.sin_cos();
-        // (level set value, typical |gradient| in the scaled coordinates)
-        let (g, grad) = match self.kind {
-            Tpms::Gyroid => (sx * cy + sy * cz + sz * cx, 1.2),
-            Tpms::SchwarzP => (cx + cy + cz, 1.2),
-            Tpms::Diamond => (sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz, 0.9),
+        // Level set value and its analytic gradient in the scaled
+        // coordinates; dividing by the gradient magnitude (Taubin's first
+        // order distance) keeps the wall thickness even across the cell.
+        let (g, gx, gy, gz) = match self.kind {
+            Tpms::Gyroid => (sx * cy + sy * cz + sz * cx, cx * cy - sz * sx, cy * cz - sx * sy, cz * cx - sy * sz),
+            Tpms::SchwarzP => (cx + cy + cz, -sx, -sy, -sz),
+            Tpms::Diamond => (
+                sx * sy * sz + sx * cy * cz + cx * sy * cz + cx * cy * sz,
+                cx * sy * sz + cx * cy * cz - sx * sy * cz - sx * cy * sz,
+                sx * cy * sz - sx * sy * cz + cx * cy * cz - cx * sy * sz,
+                sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz,
+            ),
         };
+        let grad = (gx * gx + gy * gy + gz * gz + 0.05 * 0.05).sqrt();
         g.abs() / (grad * w) - self.wall * 0.5
     }
 }
@@ -211,8 +227,49 @@ mod tests {
         let l = Lattice { kind: Tpms::Gyroid, cell: 10.0, wall: 1.0 };
         // On the gyroid surface the value is minus half the wall.
         assert!((l.at(DVec3::ZERO) + 0.5).abs() < 1e-12);
-        // Walking away from the sheet, the value grows about linearly.
-        let d = l.at(DVec3::new(0.0, 0.0, 0.3)) - l.at(DVec3::ZERO);
-        assert!(d > 0.15 && d < 0.45, "{d}");
+        // Walking away from the sheet along its normal at the origin
+        // (gradient there is (1, 1, 1)), the value grows like a distance.
+        let n = DVec3::splat(1.0 / 3f64.sqrt());
+        let d = l.at(n * 0.3) - l.at(DVec3::ZERO);
+        assert!((d - 0.3).abs() < 0.03, "{d}");
+        // Same check at another point of the sheet for each family.
+        for kind in [Tpms::Gyroid, Tpms::SchwarzP, Tpms::Diamond] {
+            let l = Lattice { kind, cell: 10.0, wall: 0.0 };
+            let p = DVec3::new(2.5, 0.0, 0.0);
+            // Move to the sheet along x by bisection.
+            let (mut a, mut b) = (p, DVec3::new(7.5, 0.0, 0.0));
+            let sheet_val = |q: DVec3| {
+                let w = std::f64::consts::TAU / 10.0;
+                let (x, y, z) = (q.x * w, q.y * w, q.z * w);
+                match kind {
+                    Tpms::Gyroid => x.sin() * y.cos() + y.sin() * z.cos() + z.sin() * x.cos(),
+                    Tpms::SchwarzP => x.cos() + y.cos() + z.cos(),
+                    Tpms::Diamond => {
+                        x.sin() * y.sin() * z.sin()
+                            + x.sin() * y.cos() * z.cos()
+                            + x.cos() * y.sin() * z.cos()
+                            + x.cos() * y.cos() * z.sin()
+                    }
+                }
+            };
+            if sheet_val(a).signum() == sheet_val(b).signum() {
+                continue;
+            }
+            for _ in 0..60 {
+                let m = (a + b) * 0.5;
+                if sheet_val(m).signum() == sheet_val(a).signum() {
+                    a = m;
+                } else {
+                    b = m;
+                }
+            }
+            let on = (a + b) * 0.5;
+            assert!(l.at(on).abs() < 1e-6, "{kind:?} on the sheet: {}", l.at(on));
+            // A small step off the sheet reads as about that step.
+            let h = 0.05;
+            let off = on + DVec3::new(h, 0.0, 0.0);
+            let ratio = l.at(off) / h;
+            assert!(ratio > 0.3 && ratio <= 1.05, "{kind:?} ratio {ratio}");
+        }
     }
 }

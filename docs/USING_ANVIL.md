@@ -343,6 +343,13 @@ thickness at least two voxels; the feature refuses thinner walls. A
 lattice body is a mesh: later features can move, pattern, split, and
 export it, but a boolean on it is slow.
 
+Grade along "map" takes the thickness from data: a CSV of `x, y, z,
+value` samples (a stress or temperature map from a solver), read into a
+point map and interpolated by inverse distance. Thickness is `wall`
+where the map reads Map value for Thickness and `wall_end` where it
+reads Map value for Thickness at far end; leave both at 0 to use the
+map's own range. That is how a lattice gets thick where the load is.
+
 Headless: `anvil-cli lattice --stl part.stl --kind octet --cell 8
 --wall 1.2 --grade z --wall-end 2.4 --out DIR` fills any closed STL and
 writes STL, 3MF, and STEP. docs/research/implicit_modeling.md is the
@@ -368,6 +375,18 @@ lifting line with a flat plate profile drag: right for trends in early
 design, to be checked with XFOIL or a CFD run before anything flies.
 docs/research/wing_aero_loop.md has the equations and the external tools
 this can connect to.
+
+## Headless parametric runs
+
+`anvil-cli run part.anvil --set span=200 --set sweep=5 --out DIR` opens
+a document, sets named expressions, rebuilds, exports the bodies (a
+grouped 3MF and one STL per feature by default; `--formats` picks
+others), and writes `report.json` with every expression's source and
+value, every feature's name, note, error, mass, and the volume, face
+count, open edge count, and bounds of each body. `--inputs in.json`
+takes the expressions from a JSON object instead. A script can loop
+over designs, hand each mesh to a solver, and read the numbers back;
+docs/research/ntop_capabilities.md describes the loops this mirrors.
 
 ## Casting check and the Truchas export
 

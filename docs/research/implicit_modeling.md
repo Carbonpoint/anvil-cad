@@ -82,9 +82,14 @@ Milestones:
   sharp features, topology optimisation density import, cell size
   grading and general warps, ribs from a projected graph, slices from
   the field, an OpenFOAM bridge, the 3MF beam extension, Fidget.
-* F3: fields from data: a scalar field sampled on a grid loaded from a
-  CSV or a VTK file, with wall thickness and cell size driven by it.
-  Fields from Anvil geometry: distance to a picked face or body.
+* F3 (first half done 2026-09-17): `PointMap` reads `x, y, z, value`
+  CSV samples into a bucket grid with inverse distance weighting, and
+  `Remap` turns any scalar into a thickness; Lattice fill's grade "map"
+  uses them. `anvil-cli run` sets expressions from `--set` or a JSON
+  file, rebuilds, exports, and writes a JSON report, the hook for a
+  design loop. The TPMS fields now divide by their analytic gradient,
+  so wall thickness is even across the cell. Still open: VTK input,
+  distance to a picked face or body, cell size grading.
 * F4: quality: adaptive surface nets on an octree so a fine lattice does
   not need a fine grid everywhere; sharp feature preservation (dual
   contouring); a smoothing pass for print surfaces.

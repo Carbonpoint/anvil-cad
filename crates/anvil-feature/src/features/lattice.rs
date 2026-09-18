@@ -8,8 +8,8 @@
 
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, BODY_TYPES};
 use anvil_implicit::{
-    cylindrical, BeamCell, BeamLattice, Field, Graded, Intersect, Lattice, Offset, Radial, Ramp, Sampled, Skin, Tpms,
-    Union, Warp,
+    cylindrical, BeamCell, BeamLattice, Field, Graded, Intersect, Lattice, Offset, PointMap, Radial, Ramp, Remap,
+    Sampled, Skin, Tpms, Union, Warp,
 };
 use anvil_math::DVec3;
 use serde::{Deserialize, Serialize};
@@ -40,6 +40,16 @@ pub struct LatticeFillFeature {
     /// follow a round wall.
     #[serde(default = "none")]
     pub conform: String,
+    /// CSV file of `x, y, z, value` samples (a stress or temperature map)
+    /// that drives the thickness when `grade` is "map": `wall` where the
+    /// value is `map_lo`, `wall_end` where it is `map_hi`. Both zero
+    /// means the map's own range.
+    #[serde(default)]
+    pub map_file: String,
+    #[serde(default = "zero")]
+    pub map_lo: String,
+    #[serde(default = "zero")]
+    pub map_hi: String,
 }
 
 fn zero() -> String {
@@ -61,6 +71,9 @@ impl Default for LatticeFillFeature {
             wall_end: "0".into(),
             grade: "none".into(),
             conform: "none".into(),
+            map_file: String::new(),
+            map_lo: "0".into(),
+            map_hi: "0".into(),
         }
     }
 }
@@ -86,8 +99,16 @@ impl Feature for LatticeFillFeature {
             ParamSpec::length("skin", "Skin thickness", &self.skin),
             ParamSpec::length("resolution", "Resolution", &self.resolution),
             ParamSpec::length("wall_end", "Thickness at far end (0 = same)", &self.wall_end),
-            ParamSpec::choice("grade", "Grade along", vec!["none", "x", "y", "z", "radial"], &self.grade),
+            ParamSpec::choice("grade", "Grade along", vec!["none", "x", "y", "z", "radial", "map"], &self.grade),
             ParamSpec::choice("conform", "Conform to", vec!["none", "cylinder"], &self.conform),
+            ParamSpec {
+                name: "map_file",
+                label: "Point map CSV (x, y, z, value)",
+                kind: crate::param::ParamKind::Text,
+                value: ParamValue::Expr(self.map_file.clone()),
+            },
+            ParamSpec::length("map_lo", "Map value for Thickness (0, 0 = map range)", &self.map_lo),
+            ParamSpec::length("map_hi", "Map value for Thickness at far end", &self.map_hi),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
@@ -101,6 +122,9 @@ impl Feature for LatticeFillFeature {
             ("wall_end", ParamValue::Expr(s)) => self.wall_end = s,
             ("grade", ParamValue::Choice(s)) => self.grade = s,
             ("conform", ParamValue::Choice(s)) => self.conform = s,
+            ("map_file", ParamValue::Expr(s)) => self.map_file = s,
+            ("map_lo", ParamValue::Expr(s)) => self.map_lo = s,
+            ("map_hi", ParamValue::Expr(s)) => self.map_hi = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -116,6 +140,17 @@ impl Feature for LatticeFillFeature {
             )));
         }
         let wall_end = ctx.eval(&self.wall_end)?;
+        // A point map drives the thickness when the grade is "map".
+        let map: Option<(std::sync::Arc<PointMap>, f64, f64)> = if self.grade == "map" {
+            let text = std::fs::read_to_string(&self.map_file)
+                .map_err(|e| RegenError::Other(format!("point map {}: {e}", self.map_file)))?;
+            let pm = PointMap::from_csv(&text, 0.0, 0.0).map_err(RegenError::Other)?;
+            let (lo_v, hi_v) = (ctx.eval(&self.map_lo)?, ctx.eval(&self.map_hi)?);
+            let (in_lo, in_hi) = if lo_v == 0.0 && hi_v == 0.0 { pm.range() } else { (lo_v, hi_v) };
+            Some((std::sync::Arc::new(pm), in_lo, in_hi))
+        } else {
+            None
+        };
         let cell = ctx.eval(&self.cell)?;
         let wall = ctx.eval(&self.wall)?;
         let skin = ctx.eval(&self.skin)?;
@@ -176,6 +211,10 @@ impl Feature for LatticeFillFeature {
                     b: far,
                 }),
                 "radial" => Box::new(Radial { centre: bb_c, radius: half.x.max(half.y).max(half.z), a: wall, b: far }),
+                "map" => {
+                    let (pm, in_lo, in_hi) = map.as_ref().expect("map loaded above");
+                    Box::new(Remap { field: pm.clone(), in_lo: *in_lo, in_hi: *in_hi, a: wall, b: far })
+                }
                 _ => Box::new(anvil_implicit::Func(move |_p: DVec3| wall)),
             };
             let centre: Box<dyn Field> = match (tpms, beam) {
@@ -208,7 +247,11 @@ impl Feature for LatticeFillFeature {
             note = format!(
                 "{} {}, {} triangles, {:.0} percent of the solid volume, {} voxels",
                 self.lattice,
-                if self.grade == "none" { "lattice".to_string() } else { format!("graded along {}", self.grade) },
+                match self.grade.as_str() {
+                    "none" => "lattice".to_string(),
+                    "map" => format!("thickness from {}", self.map_file),
+                    g => format!("graded along {g}"),
+                },
                 tris_out.len(),
                 100.0 * vol / solid_vol.max(1e-12),
                 sampled.n[0] * sampled.n[1] * sampled.n[2]
@@ -301,5 +344,65 @@ mod tests {
         let _ = (lo, hi);
         let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
         assert!(note.contains("graded along z"), "{note}");
+    }
+
+    #[test]
+    fn thickness_follows_a_point_map() {
+        use crate::features::primitives::BoxFeature;
+        let dir = std::env::temp_dir().join(format!("anvil_map_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let csv = dir.join("stress.csv");
+        // Stress high at x = 30, low at x = 0.
+        let mut text = String::from("x,y,z,stress\n");
+        for i in 0..=6 {
+            for j in 0..=3 {
+                for k in 0..=3 {
+                    let x = 5.0 * i as f64;
+                    text.push_str(&format!("{x},{},{},{}\n", 10.0 * j as f64, 10.0 * k as f64, 100.0 + 10.0 * x));
+                }
+            }
+        }
+        std::fs::write(&csv, text).unwrap();
+        let mut doc = Document::new("t");
+        doc.add_feature(Box::new(BoxFeature {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0".into(),
+            width: "30".into(),
+            depth: "30".into(),
+            height: "30".into(),
+        }));
+        doc.add_feature(Box::new(LatticeFillFeature {
+            body: 0,
+            lattice: "cubic".into(),
+            cell: "10".into(),
+            wall: "1.0".into(),
+            wall_end: "3.0".into(),
+            grade: "map".into(),
+            map_file: csv.display().to_string(),
+            skin: "0".into(),
+            resolution: "0.5".into(),
+            ..Default::default()
+        }));
+        let f = &doc.features[1];
+        assert!(f.error.is_none(), "{:?}", f.error);
+        let b = &f.output.as_ref().unwrap().bodies[0];
+        assert_eq!(b.open_edge_report().0, 0);
+        // More material where the stress is high: compare the two halves.
+        let m = anvil_kernel::mesh::tessellate(b);
+        let (mut lo, mut hi) = (0.0, 0.0);
+        for t in m.indices.as_chunks::<3>().0 {
+            let p = [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]];
+            let v6 = p[0].dot(p[1].cross(p[2])) / 6.0;
+            if (p[0].x + p[1].x + p[2].x) / 3.0 < 15.0 {
+                lo += v6;
+            } else {
+                hi += v6;
+            }
+        }
+        assert!(hi > lo * 1.3, "high stress half {hi} vs low {lo}");
+        let note = f.output.as_ref().unwrap().note.clone().unwrap_or_default();
+        assert!(note.contains("thickness from"), "{note}");
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

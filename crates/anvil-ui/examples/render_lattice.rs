@@ -56,6 +56,7 @@ fn main() {
             conform: conform.into(),
             skin: "1.0".into(),
             resolution: "0.4".into(),
+            ..Default::default()
         }));
         // Cut the front half away so the core shows.
         doc.add_feature(Box::new(SplitBodyFeature {
