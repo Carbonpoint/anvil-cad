@@ -410,9 +410,12 @@ docs/examples/wing_loop.py does that over sweep and taper, and
 docs/research/ntop_capabilities.md describes the loops this mirrors.
 
 `--openfoam --speed 20 --alpha 4` also writes `DIR/openfoam`: the
-visible bodies as one STL in metres, a blockMesh box, snappyHexMesh
-around the body, simpleFoam with k omega SST, and a forceCoeffs function
-with the lift and drag directions for that angle. `./Allrun` inside an
+visible bodies as one STL in metres with a named solid per component
+(an Aircraft body tags its faces fuselage, wing, tail, and fin; other
+bodies are one solid), a blockMesh box, snappyHexMesh around the body
+with a patch per solid, simpleFoam with k omega SST, and a forceCoeffs
+function over all the patches with the lift and drag directions for
+that angle. Split the forces by patch to see what the wing alone does. `./Allrun` inside an
 OpenFOAM shell runs it; the coefficients land in `postProcessing`. The
 case is written from the standard tutorials and has not been run here.
 

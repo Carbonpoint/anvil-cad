@@ -7,7 +7,6 @@
 
 use crate::IoError;
 use anvil_feature::Document;
-use anvil_kernel::mesh::TriMesh;
 use std::path::{Path, PathBuf};
 
 /// Reference values for the force coefficients.
@@ -41,33 +40,74 @@ fn header(class: &str, object: &str) -> String {
 
 /// Write the case into `dir`. Returns the files written.
 pub fn write_openfoam_case(doc: &Document, case: &AeroCase, dir: &Path) -> Result<Vec<PathBuf>, IoError> {
-    let mut mesh = TriMesh::default();
-    for (_, body) in doc.visible_bodies() {
-        mesh.append(anvil_kernel::mesh::tessellate(body));
-    }
-    // Anvil is in millimetres; OpenFOAM wants metres.
-    let scaled = TriMesh {
-        positions: mesh.positions.iter().map(|p| *p * 0.001).collect(),
-        normals: mesh.normals.clone(),
-        indices: mesh.indices.clone(),
-        face_of_tri: mesh.face_of_tri.clone(),
-    };
+    use anvil_feature::features::aircraft::tag_name;
+    // Triangles grouped by the component tag on their face (1 to 4 on an
+    // aircraft body; everything else is "body"), in metres.
+    let mut groups: std::collections::BTreeMap<String, Vec<[anvil_math::DVec3; 3]>> = std::collections::BTreeMap::new();
     let mut lo = anvil_math::DVec3::splat(f64::INFINITY);
     let mut hi = anvil_math::DVec3::splat(f64::NEG_INFINITY);
-    for p in &scaled.positions {
-        lo = lo.min(*p);
-        hi = hi.max(*p);
+    let mut count = 0usize;
+    for (_, body) in doc.visible_bodies() {
+        let m = anvil_kernel::mesh::tessellate(body);
+        for (k, t) in m.indices.as_chunks::<3>().0.iter().enumerate() {
+            let tri = [
+                m.positions[t[0] as usize] * 0.001,
+                m.positions[t[1] as usize] * 0.001,
+                m.positions[t[2] as usize] * 0.001,
+            ];
+            for p in &tri {
+                lo = lo.min(*p);
+                hi = hi.max(*p);
+            }
+            let name = m
+                .face_of_tri
+                .get(k)
+                .and_then(|fid| body.faces.get(*fid))
+                .and_then(|f| match f.surface {
+                    anvil_kernel::Surface::Revolved { id } if (1..=4).contains(&id) => Some(tag_name(id)),
+                    _ => None,
+                })
+                .unwrap_or("body");
+            groups.entry(name.to_string()).or_default().push(tri);
+            count += 1;
+        }
     }
-    if scaled.positions.is_empty() {
+    if count == 0 {
         lo = anvil_math::DVec3::ZERO;
         hi = anvil_math::DVec3::ONE;
     }
     let mut files = Vec::new();
     std::fs::create_dir_all(dir.join("constant/triSurface"))?;
     let stl = dir.join("constant/triSurface/aircraft.stl");
-    crate::write_stl(&scaled, &stl)?;
+    {
+        // ASCII STL with one named solid per component: snappyHexMesh
+        // turns each solid into its own patch.
+        let mut text = String::new();
+        for (name, tris) in &groups {
+            text.push_str(&format!("solid {name}\n"));
+            for t in tris {
+                let n = (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero();
+                text.push_str(&format!("  facet normal {} {} {}\n    outer loop\n", n.x, n.y, n.z));
+                for p in t {
+                    text.push_str(&format!("      vertex {} {} {}\n", p.x, p.y, p.z));
+                }
+                text.push_str("    endloop\n  endfacet\n");
+            }
+            text.push_str(&format!("endsolid {name}\n"));
+        }
+        std::fs::write(&stl, text)?;
+    }
     files.push(stl);
+    let region_names: Vec<String> = groups.keys().cloned().collect();
+    let regions: String = region_names.iter().map(|n| format!("            {n} {{ name {n}; }}\n")).collect();
+    let refine_regions: String = region_names
+        .iter()
+        .map(|n| format!("                {n} {{ level (5 6); patchInfo {{ type wall; }} }}\n"))
+        .collect();
+    let patches: String = region_names.iter().map(|n| format!("aircraft_{n}")).collect::<Vec<_>>().join(" ");
+    let scaled_count = count;
 
+    let _ = scaled_count;
     let len = (hi.x - lo.x).max(1e-3);
     let span = (hi.y - lo.y).max(1e-3);
     let height = (hi.z - lo.z).max(1e-3);
@@ -98,7 +138,7 @@ pub fn write_openfoam_case(doc: &Document, case: &AeroCase, dir: &Path) -> Resul
         dir,
         "system/snappyHexMeshDict",
         &format!(
-            "{}castellatedMesh true;\nsnap            true;\naddLayers       false;\n\ngeometry\n{{\n    aircraft.stl\n    {{\n        type triSurfaceMesh;\n        name aircraft;\n    }}\n    refineBox\n    {{\n        type searchableBox;\n        min ({} {} {});\n        max ({} {} {});\n    }}\n}}\n\ncastellatedMeshControls\n{{\n    maxLocalCells 2000000;\n    maxGlobalCells 8000000;\n    minRefinementCells 10;\n    maxLoadUnbalance 0.10;\n    nCellsBetweenLevels 3;\n    features ();\n    refinementSurfaces\n    {{\n        aircraft\n        {{\n            level (5 6);\n            patchInfo {{ type wall; }}\n        }}\n    }}\n    resolveFeatureAngle 30;\n    refinementRegions\n    {{\n        refineBox {{ mode inside; levels ((1E15 3)); }}\n    }}\n    locationInMesh ({} {} {});\n    allowFreeStandingZoneFaces true;\n}}\n\nsnapControls\n{{\n    nSmoothPatch 3;\n    tolerance 2.0;\n    nSolveIter 30;\n    nRelaxIter 5;\n    nFeatureSnapIter 10;\n    implicitFeatureSnap true;\n    explicitFeatureSnap false;\n    multiRegionFeatureSnap false;\n}}\n\naddLayersControls\n{{\n    relativeSizes true;\n    layers {{}}\n    expansionRatio 1.2;\n    finalLayerThickness 0.3;\n    minThickness 0.1;\n    nGrow 0;\n    featureAngle 60;\n    nRelaxIter 3;\n    nSmoothSurfaceNormals 1;\n    nSmoothNormals 3;\n    nSmoothThickness 10;\n    maxFaceThicknessRatio 0.5;\n    maxThicknessToMedialRatio 0.3;\n    minMedianAxisAngle 90;\n    nBufferCellsNoExtrude 0;\n    nLayerIter 50;\n}}\n\nmeshQualityControls\n{{\n    maxNonOrtho 65;\n    maxBoundarySkewness 20;\n    maxInternalSkewness 4;\n    maxConcave 80;\n    minVol 1e-13;\n    minTetQuality 1e-15;\n    minArea -1;\n    minTwist 0.02;\n    minDeterminant 0.001;\n    minFaceWeight 0.02;\n    minVolRatio 0.01;\n    minTriangleTwist -1;\n    nSmoothScale 4;\n    errorReduction 0.75;\n}}\n\nmergeTolerance 1e-6;\n",
+            "{}castellatedMesh true;\nsnap            true;\naddLayers       false;\n\ngeometry\n{{\n    aircraft.stl\n    {{\n        type triSurfaceMesh;\n        name aircraft;\n        regions\n        {{\n{regions}        }}\n    }}\n    refineBox\n    {{\n        type searchableBox;\n        min ({} {} {});\n        max ({} {} {});\n    }}\n}}\n\ncastellatedMeshControls\n{{\n    maxLocalCells 2000000;\n    maxGlobalCells 8000000;\n    minRefinementCells 10;\n    maxLoadUnbalance 0.10;\n    nCellsBetweenLevels 3;\n    features ();\n    refinementSurfaces\n    {{\n        aircraft\n        {{\n            level (5 6);\n            patchInfo {{ type wall; }}\n            regions\n            {{\n{refine_regions}            }}\n        }}\n    }}\n    resolveFeatureAngle 30;\n    refinementRegions\n    {{\n        refineBox {{ mode inside; levels ((1E15 3)); }}\n    }}\n    locationInMesh ({} {} {});\n    allowFreeStandingZoneFaces true;\n}}\n\nsnapControls\n{{\n    nSmoothPatch 3;\n    tolerance 2.0;\n    nSolveIter 30;\n    nRelaxIter 5;\n    nFeatureSnapIter 10;\n    implicitFeatureSnap true;\n    explicitFeatureSnap false;\n    multiRegionFeatureSnap false;\n}}\n\naddLayersControls\n{{\n    relativeSizes true;\n    layers {{}}\n    expansionRatio 1.2;\n    finalLayerThickness 0.3;\n    minThickness 0.1;\n    nGrow 0;\n    featureAngle 60;\n    nRelaxIter 3;\n    nSmoothSurfaceNormals 1;\n    nSmoothNormals 3;\n    nSmoothThickness 10;\n    maxFaceThicknessRatio 0.5;\n    maxThicknessToMedialRatio 0.3;\n    minMedianAxisAngle 90;\n    nBufferCellsNoExtrude 0;\n    nLayerIter 50;\n}}\n\nmeshQualityControls\n{{\n    maxNonOrtho 65;\n    maxBoundarySkewness 20;\n    maxInternalSkewness 4;\n    maxConcave 80;\n    minVol 1e-13;\n    minTetQuality 1e-15;\n    minArea -1;\n    minTwist 0.02;\n    minDeterminant 0.001;\n    minFaceWeight 0.02;\n    minVolRatio 0.01;\n    minTriangleTwist -1;\n    nSmoothScale 4;\n    errorReduction 0.75;\n}}\n\nmergeTolerance 1e-6;\n",
             header("dictionary", "snappyHexMeshDict"),
             lo.x - len,
             lo.y - 0.3 * span,
@@ -116,7 +156,7 @@ pub fn write_openfoam_case(doc: &Document, case: &AeroCase, dir: &Path) -> Resul
         dir,
         "system/controlDict",
         &format!(
-            "{}application     simpleFoam;\nstartFrom       startTime;\nstartTime       0;\nstopAt          endTime;\nendTime         600;\ndeltaT          1;\nwriteControl    timeStep;\nwriteInterval   100;\npurgeWrite      2;\nwriteFormat     ascii;\nwritePrecision  8;\nwriteCompression off;\ntimeFormat      general;\ntimePrecision   6;\nrunTimeModifiable true;\n\nfunctions\n{{\n    forceCoeffs\n    {{\n        type forceCoeffs;\n        libs (forces);\n        writeControl timeStep;\n        writeInterval 1;\n        patches (aircraft);\n        rho rhoInf;\n        rhoInf 1.225;\n        CofR ({cx} {cy} {cz});\n        liftDir ({} 0 {});\n        dragDir ({} 0 {});\n        pitchAxis (0 1 0);\n        magUInf {};\n        lRef {};\n        Aref {};\n    }}\n}}\n",
+            "{}application     simpleFoam;\nstartFrom       startTime;\nstartTime       0;\nstopAt          endTime;\nendTime         600;\ndeltaT          1;\nwriteControl    timeStep;\nwriteInterval   100;\npurgeWrite      2;\nwriteFormat     ascii;\nwritePrecision  8;\nwriteCompression off;\ntimeFormat      general;\ntimePrecision   6;\nrunTimeModifiable true;\n\nfunctions\n{{\n    forceCoeffs\n    {{\n        type forceCoeffs;\n        libs (forces);\n        writeControl timeStep;\n        writeInterval 1;\n        patches ({patches});\n        rho rhoInf;\n        rhoInf 1.225;\n        CofR ({cx} {cy} {cz});\n        liftDir ({} 0 {});\n        dragDir ({} 0 {});\n        pitchAxis (0 1 0);\n        magUInf {};\n        lRef {};\n        Aref {};\n    }}\n}}\n",
             header("dictionary", "controlDict"),
             -alpha.sin(),
             alpha.cos(),
@@ -163,7 +203,7 @@ pub fn write_openfoam_case(doc: &Document, case: &AeroCase, dir: &Path) -> Resul
     )?;
     let field = |class: &str, object: &str, dims: &str, internal: &str, inlet: &str, wall: &str| {
         format!(
-            "{}dimensions {dims};\ninternalField {internal};\nboundaryField\n{{\n    inlet {{ {inlet} }}\n    outlet {{ type zeroGradient; }}\n    sides {{ type slip; }}\n    aircraft {{ {wall} }}\n}}\n",
+            "{}dimensions {dims};\ninternalField {internal};\nboundaryField\n{{\n    inlet {{ {inlet} }}\n    outlet {{ type zeroGradient; }}\n    sides {{ type slip; }}\n    \"aircraft.*\" {{ {wall} }}\n}}\n",
             header(class, object)
         )
     };
@@ -238,8 +278,9 @@ pub fn write_openfoam_case(doc: &Document, case: &AeroCase, dir: &Path) -> Resul
         dir,
         "README.md",
         &format!(
-            "# OpenFOAM case from Anvil\n\nBody: `constant/triSurface/aircraft.stl`, in metres, {} triangles,\nbounds {:.3} to {:.3} m in x, {:.3} to {:.3} m in y, {:.3} to {:.3} m in z.\nFree stream {} m/s at {} degrees; reference area {} m2, chord {} m.\n\nRun with OpenFOAM v2312 or later:\n\n    ./Allrun\n\n`postProcessing/forceCoeffs/0/coefficient.dat` then holds Cl and Cd per\niteration; take the last converged line. The mesh has no boundary\nlayers (`addLayers false`) and a coarse box, so the numbers are a first\nlook; add layers and refine before trusting drag. This case was written\nfrom the standard tutorials and has not been run by Anvil.\n",
-            scaled.triangle_count(),
+            "# OpenFOAM case from Anvil\n\nBody: `constant/triSurface/aircraft.stl`, in metres, {} triangles, one\nnamed solid per component ({}), so snappyHexMesh makes a patch per\ncomponent and the force coefficients can be split by patch.\nbounds {:.3} to {:.3} m in x, {:.3} to {:.3} m in y, {:.3} to {:.3} m in z.\nFree stream {} m/s at {} degrees; reference area {} m2, chord {} m.\n\nRun with OpenFOAM v2312 or later:\n\n    ./Allrun\n\n`postProcessing/forceCoeffs/0/coefficient.dat` then holds Cl and Cd per\niteration; take the last converged line. The mesh has no boundary\nlayers (`addLayers false`) and a coarse box, so the numbers are a first\nlook; add layers and refine before trusting drag. This case was written\nfrom the standard tutorials and has not been run by Anvil.\n",
+            count,
+            region_names.join(", "),
             lo.x,
             hi.x,
             lo.y,
@@ -281,8 +322,10 @@ mod tests {
         assert!(u.contains("19.95") && u.contains("1.395"), "{u}");
         let ctl = std::fs::read_to_string(dir.join("system/controlDict")).unwrap();
         assert!(ctl.contains("forceCoeffs") && ctl.contains("Aref 0.01"));
-        let stl = std::fs::metadata(dir.join("constant/triSurface/aircraft.stl")).unwrap().len();
-        assert!(stl >= 84 + 12 * 50);
+        let stl = std::fs::read_to_string(dir.join("constant/triSurface/aircraft.stl")).unwrap();
+        assert!(stl.starts_with("solid body") && stl.matches("facet normal").count() == 12, "{}", &stl[..60]);
+        let snappy = std::fs::read_to_string(dir.join("system/snappyHexMeshDict")).unwrap();
+        assert!(snappy.contains("body { name body; }"));
         std::fs::remove_dir_all(&dir).ok();
     }
 }

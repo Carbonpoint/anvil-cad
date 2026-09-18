@@ -97,7 +97,10 @@ Milestones:
   wraps them (topology optimisation import). `CellRamp` grades a sheet
   lattice's cell size along an axis by the phase integral, and `Blend`
   mixes two fields by a weight field; Lattice fill exposes the ramp as
-  Cell size at far end. Still open: distance to a picked face or body,
+  Cell size at far end. Faces of an Aircraft body carry a component tag
+  (`from_tagged_triangles`), and the OpenFOAM export writes one named
+  STL solid and one patch per component (boundary tagged export).
+  Still open: distance to a picked face or body,
   cell size grading for beam lattices, and a better than first order
   sheet distance (a Newton step jumps between sheets).
 * F4 (first half done 2026-09-17): `Field::grad` (central differences by

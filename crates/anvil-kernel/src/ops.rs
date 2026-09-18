@@ -547,18 +547,26 @@ pub fn helix_path(
 /// Build a solid from a closed triangle mesh (for STL import). Every
 /// triangle becomes a face. Vertices closer than `weld` are merged.
 pub fn from_triangles(tris: &[[anvil_math::DVec3; 3]], weld: f64) -> Solid {
+    from_tagged_triangles(tris, None, weld)
+}
+
+/// As `from_triangles`, with a surface tag per triangle (faces get
+/// `Surface::Revolved { id: tag }`), so exporters can group faces by
+/// the part of a field they came from. Without tags every face gets 9.
+pub fn from_tagged_triangles(tris: &[[anvil_math::DVec3; 3]], tags: Option<&[u32]>, weld: f64) -> Solid {
     use std::collections::HashMap;
     let mut s = Solid::new();
     let key = |p: anvil_math::DVec3| -> (i64, i64, i64) {
         ((p.x / weld).round() as i64, (p.y / weld).round() as i64, (p.z / weld).round() as i64)
     };
     let mut map: HashMap<(i64, i64, i64), VertexId> = HashMap::new();
-    for t in tris {
+    for (k, t) in tris.iter().enumerate() {
         let ids: Vec<VertexId> = t.iter().map(|&p| *map.entry(key(p)).or_insert_with(|| s.add_vertex(p))).collect();
         if ids[0] == ids[1] || ids[1] == ids[2] || ids[0] == ids[2] {
             continue;
         }
-        s.faces.insert(crate::topology::Face { outer: ids, inner: Vec::new(), surface: Surface::Revolved { id: 9 } });
+        let id = tags.and_then(|t| t.get(k).copied()).unwrap_or(9);
+        s.faces.insert(crate::topology::Face { outer: ids, inner: Vec::new(), surface: Surface::Revolved { id } });
     }
     // Edges for display: rebuild from faces.
     let faces: Vec<Vec<VertexId>> = s.faces.values().map(|f| f.outer.clone()).collect();

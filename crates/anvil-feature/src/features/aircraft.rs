@@ -12,6 +12,23 @@ use anvil_implicit::{Func, Intersect, SmoothUnion, Union};
 use anvil_math::DVec3;
 use serde::{Deserialize, Serialize};
 
+/// Surface tags on the aircraft body's faces, by component.
+pub const TAG_FUSELAGE: u32 = 1;
+pub const TAG_WING: u32 = 2;
+pub const TAG_TAIL: u32 = 3;
+pub const TAG_FIN: u32 = 4;
+
+/// Name of a component tag, for exports.
+pub fn tag_name(tag: u32) -> &'static str {
+    match tag {
+        TAG_FUSELAGE => "fuselage",
+        TAG_WING => "wing",
+        TAG_TAIL => "tail",
+        TAG_FIN => "fin",
+        _ => "body",
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AircraftFeature {
     pub fuselage_length: String,
@@ -227,8 +244,12 @@ impl Feature for AircraftFeature {
             at: DVec3::new(len - fin_chord * 1.4, 0.0, 0.0),
         };
         let fin = Intersect(MirrorY(fin_full), Func(|p: DVec3| -p.z));
-        let body = SmoothUnion { a: fuselage, b: wing_placed, k: blend.max(0.01) };
-        let plane = Union(Union(body, tail), fin);
+        let body = SmoothUnion { a: &fuselage, b: &wing_placed, k: blend.max(0.01) };
+        let plane = Union(Union(body, &tail), &fin);
+        // Each triangle is tagged by the component nearest its centroid, so
+        // exports can name the wing, the fuselage, the tail, and the fin.
+        let components: [(&dyn anvil_implicit::Field, u32); 4] =
+            [(&fuselage, TAG_FUSELAGE), (&wing_placed, TAG_WING), (&tail, TAG_TAIL), (&fin, TAG_FIN)];
         let lo = DVec3::new(-2.0 * step, -0.5 * span - 2.0 * step, -0.5 * dia - fin_chord - 2.0 * step);
         let hi = DVec3::new(len + 2.0 * step, 0.5 * span + 2.0 * step, fin_height + 0.5 * dia + 2.0 * step);
         let voxels = ((hi - lo) / step).ceil();
@@ -242,7 +263,19 @@ impl Feature for AircraftFeature {
         if tris.is_empty() {
             return Err(RegenError::Other("the aircraft field left nothing to mesh".into()));
         }
-        let out = anvil_kernel::ops::from_triangles(&tris, step * 1e-3);
+        let tags: Vec<u32> = tris
+            .iter()
+            .map(|t| {
+                let c = (t[0] + t[1] + t[2]) / 3.0;
+                components
+                    .iter()
+                    .map(|(f, tag)| (f.at(c), *tag))
+                    .min_by(|a, b| a.0.total_cmp(&b.0))
+                    .map(|(_, tag)| tag)
+                    .unwrap_or(TAG_FUSELAGE)
+            })
+            .collect();
+        let out = anvil_kernel::ops::from_tagged_triangles(&tris, Some(&tags), step * 1e-3);
         let mut note = format!(
             "wing area {:.3} m2, aspect ratio {:.1}, taper {:.2}; at CL {:.2} and {:.0} m/s: alpha {:.1} deg, CDi {:.4}, CD0 {:.4}, e {:.2}, L/D {:.1}",
             wing_m.area(),
@@ -297,6 +330,16 @@ mod tests {
         let note = out.note.clone().unwrap_or_default();
         assert!(note.contains("L/D"), "{note}");
         eprintln!("{note}");
+        // Every component tag is present on the faces.
+        let mut seen = std::collections::HashSet::new();
+        for f in b.faces.values() {
+            if let anvil_kernel::Surface::Revolved { id } = f.surface {
+                seen.insert(id);
+            }
+        }
+        for tag in [TAG_FUSELAGE, TAG_WING, TAG_TAIL, TAG_FIN] {
+            assert!(seen.contains(&tag), "tag {} missing", tag_name(tag));
+        }
     }
 
     #[test]
