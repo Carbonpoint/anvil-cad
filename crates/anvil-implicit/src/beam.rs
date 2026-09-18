@@ -153,25 +153,37 @@ impl BeamLattice {
 
     /// Distance from `p` to the nearest beam centreline, in world units.
     pub fn centreline_distance(&self, p: DVec3) -> f64 {
+        self.nearest(p).0
+    }
+
+    /// Distance to the nearest centreline and the unit direction from
+    /// that centreline point to `p`.
+    pub fn nearest(&self, p: DVec3) -> (f64, DVec3) {
         let q = p / self.size;
         let cell = q.floor();
         let local = q - cell;
         let mut best = f64::INFINITY;
+        let mut dir = DVec3::ZERO;
         for (a, b) in &self.segments {
             let ab = *b - *a;
             let t = ((local - *a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0);
-            let d = (local - (*a + ab * t)).length_squared();
+            let off = local - (*a + ab * t);
+            let d = off.length_squared();
             if d < best {
                 best = d;
+                dir = off;
             }
         }
-        best.sqrt() * self.size
+        (best.sqrt() * self.size, dir.normalize_or_zero())
     }
 }
 
 impl Field for BeamLattice {
     fn at(&self, p: DVec3) -> f64 {
         self.centreline_distance(p) - self.radius
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        self.nearest(p).1
     }
 }
 
@@ -187,6 +199,10 @@ pub struct Graded<C, T> {
 impl<C: Field, T: Field> Field for Graded<C, T> {
     fn at(&self, p: DVec3) -> f64 {
         self.core.at(p) - 0.5 * self.thickness.at(p).max(0.0)
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        // The thickness varies slowly next to the core distance.
+        self.core.grad(p)
     }
 }
 

@@ -28,17 +28,35 @@ pub use sampled::Sampled;
 /// the surface. Values near the surface should be close to a distance.
 pub trait Field: Sync {
     fn at(&self, p: DVec3) -> f64;
+
+    /// Gradient of the field, by central differences unless a type knows
+    /// better. Near the surface of a distance field this is the unit
+    /// normal.
+    fn grad(&self, p: DVec3) -> DVec3 {
+        let h = 1e-4 * (1.0 + p.length());
+        DVec3::new(
+            self.at(p + DVec3::new(h, 0.0, 0.0)) - self.at(p - DVec3::new(h, 0.0, 0.0)),
+            self.at(p + DVec3::new(0.0, h, 0.0)) - self.at(p - DVec3::new(0.0, h, 0.0)),
+            self.at(p + DVec3::new(0.0, 0.0, h)) - self.at(p - DVec3::new(0.0, 0.0, h)),
+        ) / (2.0 * h)
+    }
 }
 
 impl<F: Field> Field for &F {
     fn at(&self, p: DVec3) -> f64 {
         (**self).at(p)
     }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        (**self).grad(p)
+    }
 }
 
 impl<F: Field + Send + ?Sized> Field for std::sync::Arc<F> {
     fn at(&self, p: DVec3) -> f64 {
         (**self).at(p)
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        (**self).grad(p)
     }
 }
 
@@ -59,6 +77,9 @@ impl Field for Sphere {
     fn at(&self, p: DVec3) -> f64 {
         (p - self.c).length() - self.r
     }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        (p - self.c).normalize_or_zero()
+    }
 }
 
 /// Axis aligned box from `lo` to `hi`.
@@ -73,6 +94,23 @@ impl Field for BoxField {
         let q = (p - c).abs() - h;
         q.max(DVec3::ZERO).length() + q.x.max(q.y).max(q.z).min(0.0)
     }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        let c = (self.lo + self.hi) * 0.5;
+        let h = (self.hi - self.lo) * 0.5;
+        let d = p - c;
+        let q = d.abs() - h;
+        let sign = DVec3::new(d.x.signum(), d.y.signum(), d.z.signum());
+        let outside = q.max(DVec3::ZERO);
+        if outside.length_squared() > 0.0 {
+            (outside * sign).normalize()
+        } else if q.x >= q.y && q.x >= q.z {
+            DVec3::new(sign.x, 0.0, 0.0)
+        } else if q.y >= q.z {
+            DVec3::new(0.0, sign.y, 0.0)
+        } else {
+            DVec3::new(0.0, 0.0, sign.z)
+        }
+    }
 }
 
 /// Union: the nearer surface wins.
@@ -80,6 +118,13 @@ pub struct Union<A, B>(pub A, pub B);
 impl<A: Field, B: Field> Field for Union<A, B> {
     fn at(&self, p: DVec3) -> f64 {
         self.0.at(p).min(self.1.at(p))
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        if self.0.at(p) <= self.1.at(p) {
+            self.0.grad(p)
+        } else {
+            self.1.grad(p)
+        }
     }
 }
 
@@ -89,6 +134,13 @@ impl<A: Field, B: Field> Field for Intersect<A, B> {
     fn at(&self, p: DVec3) -> f64 {
         self.0.at(p).max(self.1.at(p))
     }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        if self.0.at(p) >= self.1.at(p) {
+            self.0.grad(p)
+        } else {
+            self.1.grad(p)
+        }
+    }
 }
 
 /// `A` minus `B`.
@@ -96,6 +148,13 @@ pub struct Subtract<A, B>(pub A, pub B);
 impl<A: Field, B: Field> Field for Subtract<A, B> {
     fn at(&self, p: DVec3) -> f64 {
         self.0.at(p).max(-self.1.at(p))
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        if self.0.at(p) >= -self.1.at(p) {
+            self.0.grad(p)
+        } else {
+            -self.1.grad(p)
+        }
     }
 }
 
@@ -111,6 +170,13 @@ impl<A: Field, B: Field> Field for SmoothUnion<A, B> {
         let h = (0.5 + 0.5 * (b - a) / self.k).clamp(0.0, 1.0);
         b + (a - b) * h - self.k * h * (1.0 - h)
     }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        let (a, b) = (self.a.at(p), self.b.at(p));
+        let h = (0.5 + 0.5 * (b - a) / self.k).clamp(0.0, 1.0);
+        // The blend weight varies slowly; the mix of the two gradients is
+        // close enough for a normal.
+        (self.a.grad(p) * h + self.b.grad(p) * (1.0 - h)).normalize_or_zero()
+    }
 }
 
 /// Grow (positive) or shrink (negative) a shape by `d`.
@@ -121,6 +187,9 @@ pub struct Offset<A> {
 impl<A: Field> Field for Offset<A> {
     fn at(&self, p: DVec3) -> f64 {
         self.a.at(p) - self.d
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        self.a.grad(p)
     }
 }
 
@@ -133,6 +202,9 @@ impl<A: Field> Field for Shell<A> {
     fn at(&self, p: DVec3) -> f64 {
         self.a.at(p).abs() - self.t * 0.5
     }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        self.a.grad(p) * self.a.at(p).signum()
+    }
 }
 
 /// Material within `t` inside the surface of a shape (an inward shell).
@@ -144,6 +216,14 @@ impl<A: Field> Field for Skin<A> {
     fn at(&self, p: DVec3) -> f64 {
         let d = self.a.at(p);
         d.max(-(d + self.t))
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        let d = self.a.at(p);
+        if d >= -(d + self.t) {
+            self.a.grad(p)
+        } else {
+            -self.a.grad(p)
+        }
     }
 }
 
@@ -175,16 +255,14 @@ pub struct Lattice {
     pub cell: f64,
     pub wall: f64,
 }
-impl Field for Lattice {
-    fn at(&self, p: DVec3) -> f64 {
+impl Lattice {
+    /// Level set value and its gradient in the scaled coordinates.
+    fn level(&self, p: DVec3) -> (f64, DVec3, f64) {
         let w = std::f64::consts::TAU / self.cell;
         let (x, y, z) = (p.x * w, p.y * w, p.z * w);
         let (sx, cx) = x.sin_cos();
         let (sy, cy) = y.sin_cos();
         let (sz, cz) = z.sin_cos();
-        // Level set value and its analytic gradient in the scaled
-        // coordinates; dividing by the gradient magnitude (Taubin's first
-        // order distance) keeps the wall thickness even across the cell.
         let (g, gx, gy, gz) = match self.kind {
             Tpms::Gyroid => (sx * cy + sy * cz + sz * cx, cx * cy - sz * sx, cy * cz - sx * sy, cz * cx - sy * sz),
             Tpms::SchwarzP => (cx + cy + cz, -sx, -sy, -sz),
@@ -195,8 +273,21 @@ impl Field for Lattice {
                 sx * sy * cz - sx * cy * sz - cx * sy * sz + cx * cy * cz,
             ),
         };
-        let grad = (gx * gx + gy * gy + gz * gz + 0.05 * 0.05).sqrt();
-        g.abs() / (grad * w) - self.wall * 0.5
+        (g, DVec3::new(gx, gy, gz), w)
+    }
+}
+
+impl Field for Lattice {
+    fn at(&self, p: DVec3) -> f64 {
+        // Dividing by the gradient magnitude (Taubin's first order
+        // distance) keeps the wall thickness even across the cell.
+        let (g, gr, w) = self.level(p);
+        let mag = (gr.length_squared() + 0.05 * 0.05).sqrt();
+        g.abs() / (mag * w) - self.wall * 0.5
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        let (g, gr, _) = self.level(p);
+        (gr * g.signum()).normalize_or_zero()
     }
 }
 
@@ -205,6 +296,9 @@ pub struct Dyn(pub Box<dyn Field>);
 impl Field for Dyn {
     fn at(&self, p: DVec3) -> f64 {
         self.0.at(p)
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        self.0.grad(p)
     }
 }
 

@@ -93,9 +93,14 @@ Milestones:
   simpleFoam case for the visible bodies, and docs/examples/wing_loop.py
   is a scripted sweep and taper loop. Still open: VTK input, distance to
   a picked face or body, cell size grading.
-* F4: quality: adaptive surface nets on an octree so a fine lattice does
-  not need a fine grid everywhere; sharp feature preservation (dual
-  contouring); a smoothing pass for print surfaces.
+* F4 (first half done 2026-09-17): `Field::grad` (central differences by
+  default; analytic for sphere, box, TPMS, beam lattices, and forwarded
+  through the combinators), and surface nets place each cell vertex by
+  the dual contouring quadratic error function of its crossings and
+  their normals, with the crossings bisected where the field has a
+  crease. Box corners land within 0.02 mm at a 0.5 mm step. Blocks far
+  from the surface are skipped. Still open: an octree with interval
+  pruning, the manifold clustering rule, smoothing and decimation.
 * F5: Fidget as an optional back end for the expression tree, so a field
   built from primitives is compiled and evaluated on all cores, and a GPU
   path for the viewport.

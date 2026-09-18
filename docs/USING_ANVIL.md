@@ -335,7 +335,8 @@ wraps the cells around the Z axis so they follow a round wall.
 
 The body is sampled into a signed distance grid at the resolution, the
 skin and the lattice are combined as fields, and the zero surface is
-meshed back into a body with surface nets. No B-rep boolean runs, so it
+meshed back into a body with surface nets that place each vertex from
+the surface normals, so edges and corners stay sharp. No B-rep boolean runs, so it
 works on any closed body, including a patterned one, and the time
 depends only on the grid size. The note gives the triangle count, the
 volume as a percentage of the solid body, and the voxel count. Keep the
