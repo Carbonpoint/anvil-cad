@@ -8,8 +8,8 @@
 
 use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, BODY_TYPES};
 use anvil_implicit::{
-    cylindrical, BeamCell, BeamLattice, Field, Graded, Intersect, Lattice, Offset, PointMap, Radial, Ramp, Remap,
-    Sampled, Skin, Tpms, Union, Warp,
+    cylindrical, BeamCell, BeamLattice, Field, Graded, Intersect, Lattice, Offset, Radial, Ramp, Remap, Sampled, Skin,
+    Tpms, Union, Warp,
 };
 use anvil_math::DVec3;
 use serde::{Deserialize, Serialize};
@@ -141,13 +141,13 @@ impl Feature for LatticeFillFeature {
         }
         let wall_end = ctx.eval(&self.wall_end)?;
         // A point map drives the thickness when the grade is "map".
-        let map: Option<(std::sync::Arc<PointMap>, f64, f64)> = if self.grade == "map" {
-            let text = std::fs::read_to_string(&self.map_file)
+        let map: Option<(std::sync::Arc<dyn Field + Send>, f64, f64)> = if self.grade == "map" {
+            let data = anvil_implicit::vtk::load_scalar_file(std::path::Path::new(&self.map_file))
                 .map_err(|e| RegenError::Other(format!("point map {}: {e}", self.map_file)))?;
-            let pm = PointMap::from_csv(&text, 0.0, 0.0).map_err(RegenError::Other)?;
             let (lo_v, hi_v) = (ctx.eval(&self.map_lo)?, ctx.eval(&self.map_hi)?);
-            let (in_lo, in_hi) = if lo_v == 0.0 && hi_v == 0.0 { pm.range() } else { (lo_v, hi_v) };
-            Some((std::sync::Arc::new(pm), in_lo, in_hi))
+            let (in_lo, in_hi) = if lo_v == 0.0 && hi_v == 0.0 { data.range() } else { (lo_v, hi_v) };
+            let field: std::sync::Arc<dyn Field + Send> = std::sync::Arc::from(data.into_field());
+            Some((field, in_lo, in_hi))
         } else {
             None
         };

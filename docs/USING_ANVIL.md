@@ -356,6 +356,18 @@ Headless: `anvil-cli lattice --stl part.stl --kind octet --cell 8
 writes STL, 3MF, and STEP. docs/research/implicit_modeling.md is the
 plan for the field driven product that grows from this feature.
 
+## Density body
+
+Density body (Solid tab, Field group) turns a scalar grid into a part:
+the density a topology optimiser writes per voxel, or any field on a
+grid. Give it a legacy VTK file (STRUCTURED_POINTS with POINT_DATA
+scalars) or a CSV point map, a threshold (0.5 for a density), a
+smoothing radius in cells that takes the checkerboard out, and a
+resolution (0 uses the grid spacing). The note gives the grid size, the
+value range, the triangle count, and the volume. Lattice fill's grade
+"map" reads the same VTK files, so a density can drive lattice
+thickness instead of becoming a body.
+
 ## Aircraft
 
 Aircraft (Solid tab, Field group) builds a fuselage, a lofted NACA wing,

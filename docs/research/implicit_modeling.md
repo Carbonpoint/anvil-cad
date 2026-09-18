@@ -91,8 +91,11 @@ Milestones:
   so wall thickness is even across the cell. A vortex lattice solver
   sits beside the lifting line, `anvil-cli run --openfoam` writes a
   simpleFoam case for the visible bodies, and docs/examples/wing_loop.py
-  is a scripted sweep and taper loop. Still open: VTK input, distance to
-  a picked face or body, cell size grading.
+  is a scripted sweep and taper loop. Later the same day: `vtk.rs` reads
+  legacy VTK grids and point scalars, `GridField` interpolates a grid,
+  `Threshold` makes a body from a density, and the Density body feature
+  wraps them (topology optimisation import). Still open: distance to a
+  picked face or body, cell size grading.
 * F4 (first half done 2026-09-17): `Field::grad` (central differences by
   default; analytic for sphere, box, TPMS, beam lattices, and forwarded
   through the combinators), and surface nets place each cell vertex by

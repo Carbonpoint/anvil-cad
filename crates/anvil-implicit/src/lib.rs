@@ -19,10 +19,12 @@ pub mod beam;
 pub mod mesh;
 pub mod pointmap;
 pub mod sampled;
+pub mod vtk;
 pub mod wing;
 pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Radial, Ramp, Warp};
 pub use pointmap::{PointMap, Remap};
 pub use sampled::Sampled;
+pub use vtk::{GridField, Threshold};
 
 /// A scalar field over space. Negative inside, positive outside, zero on
 /// the surface. Values near the surface should be close to a distance.
@@ -43,6 +45,15 @@ pub trait Field: Sync {
 }
 
 impl<F: Field> Field for &F {
+    fn at(&self, p: DVec3) -> f64 {
+        (**self).at(p)
+    }
+    fn grad(&self, p: DVec3) -> DVec3 {
+        (**self).grad(p)
+    }
+}
+
+impl<F: Field + ?Sized> Field for Box<F> {
     fn at(&self, p: DVec3) -> f64 {
         (**self).at(p)
     }

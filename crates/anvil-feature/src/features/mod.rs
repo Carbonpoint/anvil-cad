@@ -5,6 +5,7 @@
 pub mod aircraft;
 pub mod casting;
 pub mod construct;
+pub mod density;
 pub mod emboss;
 pub mod extrude;
 pub mod fillet;
