@@ -67,4 +67,7 @@ source. The plan and milestones F1 to F6 are in
 docs/research/implicit_modeling.md. F1 and F2 are done: the
 `anvil-implicit` crate (fields, TPMS and beam lattices, graded
 thickness, cylindrical warp, sampled fields from meshes, surface nets),
-the Lattice fill feature on the Solid tab, and `anvil-cli lattice`.
+the Lattice fill feature on the Solid tab, `anvil-cli lattice`, and the
+Aircraft feature (lofted NACA wing, fuselage, tail, lifting line
+estimate, taper and twist optimisation). Three research reports in
+docs/research set the order of the next steps.

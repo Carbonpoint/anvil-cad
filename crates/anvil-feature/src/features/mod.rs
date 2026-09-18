@@ -2,6 +2,7 @@
 //!
 //! To add one, copy `template.rs`, rename, and add a `pub mod` line here.
 
+pub mod aircraft;
 pub mod casting;
 pub mod construct;
 pub mod emboss;

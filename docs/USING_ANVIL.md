@@ -348,6 +348,27 @@ Headless: `anvil-cli lattice --stl part.stl --kind octet --cell 8
 writes STL, 3MF, and STEP. docs/research/implicit_modeling.md is the
 plan for the field driven product that grows from this feature.
 
+## Aircraft
+
+Aircraft (Solid tab, Field group) builds a fuselage, a lofted NACA wing,
+a tailplane, and a fin as one implicit body, and reports a lifting line
+estimate for it. Parameters: fuselage length and diameter, wing
+position, span, root and tip chord, leading edge sweep, dihedral, root
+incidence and tip twist, root and tip airfoils as NACA four digit
+codes, tail and fin sizes, the wing to body blend radius, the trailing
+edge thickness (keep it near the nozzle width for a print), the
+resolution, and the design lift coefficient and speed for the estimate.
+
+The note gives wing area, aspect ratio, taper, the angle of attack that
+reaches the design lift coefficient, induced and profile drag, span
+efficiency, and lift to drag. Tick Optimise to let a Nelder Mead search
+adjust taper and tip twist for the best lift to drag at the same span
+and area; the geometry and the note follow. The estimate is Prandtl's
+lifting line with a flat plate profile drag: right for trends in early
+design, to be checked with XFOIL or a CFD run before anything flies.
+docs/research/wing_aero_loop.md has the equations and the external tools
+this can connect to.
+
 ## Casting check and the Truchas export
 
 Casting check (Casting tab, Check group) takes the casting body, an

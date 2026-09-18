@@ -22,13 +22,71 @@ pub fn surface_nets(field: &dyn Field, lo: DVec3, hi: DVec3, step: f64) -> Vec<[
     let corners = [n[0] + 1, n[1] + 1, n[2] + 1];
     let cidx = |i: usize, j: usize, k: usize| (i * corners[1] + j) * corners[2] + k;
     let pos = |i: usize, j: usize, k: usize| lo + DVec3::new(i as f64, j as f64, k as f64) * step;
+    // Sample the field, skipping blocks of cubes that are far from the
+    // surface: if every corner of a block is more than the block diagonal
+    // (with a safety margin) from the surface and on the same side, the
+    // field, being close to a distance, cannot change sign inside, so the
+    // block's inner corners get that sign without a sample.
+    let sample = |d: f64| if d == 0.0 { f64::MIN_POSITIVE } else { d };
     let mut v = vec![0.0f64; corners[0] * corners[1] * corners[2]];
-    for i in 0..corners[0] {
-        for j in 0..corners[1] {
-            for k in 0..corners[2] {
-                let d = field.at(pos(i, j, k));
-                // A corner exactly on the surface counts as outside.
-                v[cidx(i, j, k)] = if d == 0.0 { f64::MIN_POSITIVE } else { d };
+    let mut done = vec![false; v.len()];
+    const BLOCK: usize = 8;
+    let nb = [corners[0].div_ceil(BLOCK), corners[1].div_ceil(BLOCK), corners[2].div_ceil(BLOCK)];
+    let diag = BLOCK as f64 * step * 3f64.sqrt();
+    let eval = |v: &mut Vec<f64>, done: &mut Vec<bool>, i: usize, j: usize, k: usize| -> f64 {
+        let c = cidx(i, j, k);
+        if !done[c] {
+            v[c] = sample(field.at(pos(i, j, k)));
+            done[c] = true;
+        }
+        v[c]
+    };
+    for bi in 0..nb[0] {
+        for bj in 0..nb[1] {
+            for bk in 0..nb[2] {
+                let (i0, j0, k0) = (bi * BLOCK, bj * BLOCK, bk * BLOCK);
+                let (i1, j1, k1) = (
+                    (i0 + BLOCK).min(corners[0] - 1),
+                    (j0 + BLOCK).min(corners[1] - 1),
+                    (k0 + BLOCK).min(corners[2] - 1),
+                );
+                let mut lo_abs = f64::INFINITY;
+                let mut pos_count = 0;
+                for &(i, j, k) in &[
+                    (i0, j0, k0),
+                    (i1, j0, k0),
+                    (i0, j1, k0),
+                    (i1, j1, k0),
+                    (i0, j0, k1),
+                    (i1, j0, k1),
+                    (i0, j1, k1),
+                    (i1, j1, k1),
+                ] {
+                    let d = eval(&mut v, &mut done, i, j, k);
+                    lo_abs = lo_abs.min(d.abs());
+                    if d > 0.0 {
+                        pos_count += 1;
+                    }
+                }
+                let skip = (pos_count == 0 || pos_count == 8) && lo_abs > 1.5 * diag;
+                let fill = if pos_count == 8 { lo_abs } else { -lo_abs };
+                for i in i0..=i1 {
+                    for j in j0..=j1 {
+                        for k in k0..=k1 {
+                            let c = cidx(i, j, k);
+                            if done[c] {
+                                continue;
+                            }
+                            if skip {
+                                v[c] = fill;
+                                done[c] = true;
+                            } else {
+                                v[c] = sample(field.at(pos(i, j, k)));
+                                done[c] = true;
+                            }
+                        }
+                    }
+                }
             }
         }
     }

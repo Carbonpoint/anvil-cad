@@ -14,9 +14,11 @@
 
 use anvil_math::DVec3;
 
+pub mod aero;
 pub mod beam;
 pub mod mesh;
 pub mod sampled;
+pub mod wing;
 pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Radial, Ramp, Warp};
 pub use sampled::Sampled;
 

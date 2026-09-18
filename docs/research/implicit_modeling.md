@@ -68,6 +68,20 @@ Milestones:
   any `Field`); `Warp` evaluates a field in mapped coordinates, with a
   cylindrical map so cells follow a round wall. Lattice fill exposes
   all of it, and `anvil-cli lattice` runs it on any closed STL.
+* Aircraft demo (done 2026-09-17): `wing.rs` (NACA four digit airfoils
+  with a blunt trailing edge, a lofted wing with taper, sweep, dihedral,
+  twist, and section change, a Sears-Haack fuselage, rigid placement)
+  and `aero.rs` (Prandtl lifting line, flat plate profile drag, Nelder
+  Mead on taper and twist). The Aircraft feature builds the body and
+  reports lift to drag, with an Optimise switch. Surface nets skip
+  blocks far from the surface, a first step of F4.
+* Research (2026-09-17): docs/research/ntop_capabilities.md,
+  implicit_math.md, wing_aero_loop.md. Their priority list for the next
+  steps: field from point map (CSV, VTK), headless parametric run with
+  JSON in and out, boundary tagged mesh export, adaptive meshing with
+  sharp features, topology optimisation density import, cell size
+  grading and general warps, ribs from a projected graph, slices from
+  the field, an OpenFOAM bridge, the 3MF beam extension, Fidget.
 * F3: fields from data: a scalar field sampled on a grid loaded from a
   CSV or a VTK file, with wall thickness and cell size driven by it.
   Fields from Anvil geometry: distance to a picked face or body.
