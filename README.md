@@ -1,3 +1,5 @@
+<img src="docs/logo.svg" width="96" height="96" alt="Anvil logo">
+
 # Anvil CAD
 
 Anvil is an open-source parametric CAD/CAM application written in Rust.

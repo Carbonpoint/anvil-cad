@@ -1,4 +1,5 @@
 use crate::camera::{Camera, Projector};
+use crate::icons;
 use crate::panels::{self, PanelState};
 use crate::raster::{Framebuffer, Style};
 use crate::ribbon::{build_ribbon, ButtonKind, RibbonAction, RibbonTab};
@@ -694,6 +695,9 @@ impl AnvilApp {
         let in_sketch = matches!(self.mode, Mode::Sketch(_));
         if in_sketch {
             ui.horizontal(|ui| {
+                let (logo_rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+                icons::paint_logo(ui.painter(), logo_rect);
+                ui.separator();
                 if ui.selectable_label(self.sketch_tab, "Sketch").clicked() {
                     self.sketch_tab = true;
                 }
@@ -719,12 +723,19 @@ impl AnvilApp {
             if in_sketch {
                 return;
             }
-            if ui.add_enabled(self.doc.can_undo(), egui::Button::new("Undo")).clicked() {
-                clicked_action = Some(RibbonAction::Undo);
-            }
-            if ui.add_enabled(self.doc.can_redo(), egui::Button::new("Redo")).clicked() {
-                clicked_action = Some(RibbonAction::Redo);
-            }
+            let (logo_rect, _) = ui.allocate_exact_size(egui::vec2(24.0, 24.0), egui::Sense::hover());
+            icons::paint_logo(ui.painter(), logo_rect);
+            ui.separator();
+            ui.add_enabled_ui(self.doc.can_undo(), |ui| {
+                if icons::icon_button(ui, "undo", "Undo").clicked() {
+                    clicked_action = Some(RibbonAction::Undo);
+                }
+            });
+            ui.add_enabled_ui(self.doc.can_redo(), |ui| {
+                if icons::icon_button(ui, "redo", "Redo").clicked() {
+                    clicked_action = Some(RibbonAction::Redo);
+                }
+            });
             ui.separator();
             for (i, t) in self.ribbon.iter().enumerate() {
                 if ui.selectable_label(self.active_tab == i, t.name).clicked() {
@@ -739,7 +750,7 @@ impl AnvilApp {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
                             for b in &g.buttons {
-                                let btn = ui.add(egui::Button::new(b.label).min_size(egui::vec2(60.0, 36.0)));
+                                let btn = icons::icon_button(ui, b.kind.icon_id(), b.label);
                                 if btn.on_hover_text(b.tooltip).clicked() {
                                     match b.kind {
                                         ButtonKind::Feature(id) => clicked_feature = Some(id),
@@ -799,6 +810,8 @@ impl AnvilApp {
             ui.separator();
             ui.label(egui::RichText::new("SKETCH").strong());
             ui.separator();
+            let (finish_icon, _) = ui.allocate_exact_size(egui::vec2(16.0, 16.0), egui::Sense::hover());
+            icons::paint("finish_sketch", ui.painter(), finish_icon, Color32::WHITE);
             if ui.add(egui::Button::new("Finish Sketch").fill(Color32::from_rgb(70, 140, 90))).clicked() {
                 finish = true;
             }
@@ -811,7 +824,7 @@ impl AnvilApp {
         });
         ui.separator();
         let tool_button = |ui: &mut egui::Ui, t: Tool, current: Tool, out: &mut Option<Tool>| {
-            if ui.add(egui::Button::new(t.label()).selected(current == t)).on_hover_text(t.hint()).clicked() {
+            if icons::icon_toggle(ui, t.icon_id(), t.label(), current == t).on_hover_text(t.hint()).clicked() {
                 *out = Some(t);
                 ui.close();
             }
@@ -819,14 +832,7 @@ impl AnvilApp {
         ui.horizontal_wrapped(|ui| {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    if ui
-                        .add(
-                            egui::Button::new("Select")
-                                .selected(ed.tool == Tool::Select)
-                                .min_size(egui::vec2(52.0, 34.0)),
-                        )
-                        .clicked()
-                    {
+                    if icons::icon_toggle(ui, "tool_select", "Select", ed.tool == Tool::Select).clicked() {
                         new_tool = Some(Tool::Select);
                     }
                     for (menu, tools) in Tool::MENUS {
@@ -855,14 +861,19 @@ impl AnvilApp {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     for t in Tool::MODIFY {
-                        if ui.add(egui::Button::new(t.label()).selected(ed.tool == t)).on_hover_text(t.hint()).clicked()
+                        if icons::icon_toggle(ui, t.icon_id(), t.label(), ed.tool == t)
+                            .on_hover_text(t.hint())
+                            .clicked()
                         {
                             new_tool = Some(t);
                         }
                     }
                     ui.label("chamfer");
                     ui.add(egui::DragValue::new(&mut ed.chamfer).range(0.01..=1000.0).speed(0.1));
-                    if ui.button("Offset").on_hover_text("Offset the selection by the value field").clicked() {
+                    if icons::icon_only(ui, "offset", "Offset")
+                        .on_hover_text("Offset the selection by the value field")
+                        .clicked()
+                    {
                         offset = true;
                     }
                     if ui
@@ -892,7 +903,7 @@ impl AnvilApp {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     for c in ConstraintTool::ALL {
-                        if ui.add(egui::Button::new(c.label())).clicked() {
+                        if icons::icon_only(ui, c.icon_id(), c.label()).on_hover_text(c.label()).clicked() {
                             constraint = Some(c);
                         }
                     }
@@ -906,20 +917,21 @@ impl AnvilApp {
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
                     ui.add(egui::TextEdit::singleline(&mut ed.dim_value).desired_width(60.0).hint_text("value"));
-                    if ui
-                        .button("Dimension")
-                        .on_hover_text("Length, distance, radius, or angle from the selection (D)")
+                    if icons::icon_only(ui, DimensionTool::Smart.icon_id(), "Dimension")
+                        .on_hover_text("Dimension: length, distance, radius, or angle from the selection (D)")
                         .clicked()
                     {
                         dimension = Some(DimensionTool::Smart);
                     }
-                    if ui.button("Length").clicked() {
+                    if icons::icon_only(ui, DimensionTool::Length.icon_id(), "Length").on_hover_text("Length").clicked()
+                    {
                         dimension = Some(DimensionTool::Length);
                     }
-                    if ui.button("Radius").clicked() {
+                    if icons::icon_only(ui, DimensionTool::Radius.icon_id(), "Radius").on_hover_text("Radius").clicked()
+                    {
                         dimension = Some(DimensionTool::Radius);
                     }
-                    if ui.button("Angle").clicked() {
+                    if icons::icon_only(ui, DimensionTool::Angle.icon_id(), "Angle").on_hover_text("Angle").clicked() {
                         dimension = Some(DimensionTool::Angle);
                     }
                 });

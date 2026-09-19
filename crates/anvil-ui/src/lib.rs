@@ -13,6 +13,7 @@
 mod app;
 mod camera;
 mod dxf;
+pub mod icons;
 mod panels;
 mod perf;
 mod raster;
@@ -24,8 +25,14 @@ mod sketch_view;
 pub use app::AnvilApp;
 
 pub fn run() -> eframe::Result<()> {
+    let icon_size = 64u32;
+    let rgba = icons::logo_rgba(icon_size);
+    let icon = std::sync::Arc::new(egui::IconData { rgba, width: icon_size, height: icon_size });
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default().with_inner_size([1500.0, 950.0]).with_title("Anvil CAD"),
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1500.0, 950.0])
+            .with_title("Anvil CAD")
+            .with_icon(icon),
         ..Default::default()
     };
     eframe::run_native("Anvil CAD", options, Box::new(|cc| Ok(Box::new(AnvilApp::new(cc)))))

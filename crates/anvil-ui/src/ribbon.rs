@@ -61,6 +61,54 @@ pub enum ButtonKind {
     Action(RibbonAction),
 }
 
+impl ButtonKind {
+    /// The icon id to look up in `crate::icons::paint`.
+    pub fn icon_id(&self) -> &'static str {
+        match self {
+            ButtonKind::Feature(id) => id,
+            ButtonKind::Action(a) => a.icon_id(),
+        }
+    }
+}
+
+impl RibbonAction {
+    /// The icon id to look up in `crate::icons::paint`.
+    pub fn icon_id(self) -> &'static str {
+        match self {
+            RibbonAction::Undo => "undo",
+            RibbonAction::Redo => "redo",
+            RibbonAction::NewDocument => "new_document",
+            RibbonAction::Save => "save",
+            RibbonAction::SaveAs => "save_as",
+            RibbonAction::Load => "load",
+            RibbonAction::Export => "export",
+            RibbonAction::FitView => "fit_view",
+            RibbonAction::DemoPart => "demo_part",
+            RibbonAction::ExportGcode => "export_gcode",
+            RibbonAction::EditSketch => "edit_sketch",
+            RibbonAction::Measure => "measure",
+            RibbonAction::ToggleEdges => "toggle_edges",
+            RibbonAction::TogglePerf => "toggle_perf",
+            RibbonAction::ViewIso => "view_iso",
+            RibbonAction::ViewTop => "view_top",
+            RibbonAction::ViewFront => "view_front",
+            RibbonAction::ViewRight => "view_right",
+            RibbonAction::DeleteFeature => "delete_feature",
+            RibbonAction::ComputeAll => "compute_all",
+            RibbonAction::CenterOfMass => "center_of_mass",
+            RibbonAction::BillOfMaterials => "bill_of_materials",
+            RibbonAction::ToggleUnits => "toggle_units",
+            RibbonAction::SampleCard => "sample_card",
+            RibbonAction::PressPull => "press_pull",
+            RibbonAction::Workbook(_) => "workbook",
+            RibbonAction::Kettle => "kettle",
+            RibbonAction::KettleGated => "kettle_gated",
+            RibbonAction::KettleMold => "kettle_mold",
+            RibbonAction::Interference => "interference",
+        }
+    }
+}
+
 pub struct RibbonGroup {
     pub name: &'static str,
     pub buttons: Vec<RibbonButton>,

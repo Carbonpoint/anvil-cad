@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="256" height="256">
+  <!--
+    Same anvil silhouette as crates/anvil-ui/src/icons.rs (LOGO_POLY and
+    LOGO_HIGHLIGHT), scaled from the 0..1 icon-space square with an 8%
+    margin. Keep the two in sync if the shape changes.
+  -->
+  <polygon
+    points="12.2,41.6 33.2,33.2 80.24,33.2 83.6,38.24 68.48,46.64 61.76,56.72 76.88,76.88 76.88,83.6 23.12,83.6 23.12,76.88 38.24,56.72 33.2,46.64 24.8,44.96"
+    fill="#3a3e44" stroke="#1e2024" stroke-width="1" stroke-linejoin="round" />
+  <polygon
+    points="34.88,33.62 78.56,33.62 78.56,35.3 34.88,35.3"
+    fill="#969ba0" />
+</svg>
