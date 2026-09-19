@@ -24,6 +24,15 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --release --bin anvil
+      # A ready-built app per OS, so a low-memory laptop need not compile.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anvil-${{ runner.os }}
+          path: |
+            target/release/anvil
+            target/release/anvil.exe
+          if-no-files-found: error
+          retention-days: 30
 
   docker:
     name: docker image
