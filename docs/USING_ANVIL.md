@@ -178,7 +178,7 @@ The container writes the STL, 3MF, and Anvil files but no preview image.
 
 ### Or edit it in the app
 
-1. File > Samples > **Business card**.
+1. Examples > **Business card**.
 2. Select the Text feature and type your name in Properties. Pick a font
    from the Font dropdown; Properties shows whether the strokes are thick
    enough for a 0.4 mm nozzle.
@@ -282,7 +282,7 @@ the tip: the section scales linearly by arc length.
 
 ## Kettle sample
 
-File > Samples > Kettle loads a cast iron kettle: body, bail, and lid as
+Examples > Kettle loads a cast iron kettle: body, bail, and lid as
 three bodies. It uses the pattern, the tapered pipe, the wedge cut, the
 lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
 ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
@@ -473,7 +473,7 @@ Split body (Solid tab) cuts a body on a datum plane and keeps one or
 both halves; the halves are closed with a flat cap. Draft check
 (Casting tab, Mold group) reports how much of a body faces away from a
 pull direction, so you can tell whether a pattern half will leave the
-sand. Scale by 1.01 for grey cast iron shrink. File > Samples > Kettle
+sand. Scale by 1.01 for grey cast iron shrink. Examples > Kettle
 mold shows the whole flow: pattern halves, core, and core box.
 
 ## What is not there yet

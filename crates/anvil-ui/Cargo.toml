@@ -16,4 +16,5 @@ anvil-sketch.workspace = true
 eframe.workspace = true
 egui.workspace = true
 rfd.workspace = true
+sysinfo.workspace = true
 log.workspace = true

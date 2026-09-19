@@ -1028,6 +1028,9 @@ impl SketchEditor {
             (ConstraintTool::Equal, ["circle", "circle"]) => Some(Constraint::EqualRadius(sel[0], sel[1])),
             (ConstraintTool::Tangent, ["line", "circle"]) => Some(Constraint::Tangent(sel[0], sel[1])),
             (ConstraintTool::Tangent, ["circle", "line"]) => Some(Constraint::Tangent(sel[1], sel[0])),
+            (ConstraintTool::Tangent, ["circle", "circle"]) => {
+                Some(Constraint::TangentCircles(sel[0], sel[1], self.sketch.circles_nested(sel[0], sel[1])))
+            }
             (ConstraintTool::Midpoint, ["point", "line"]) => Some(Constraint::Midpoint(sel[0], sel[1])),
             (ConstraintTool::Midpoint, ["line", "point"]) => Some(Constraint::Midpoint(sel[1], sel[0])),
             (ConstraintTool::Concentric, ["circle", "circle"]) => Some(Constraint::Concentric(sel[0], sel[1])),
@@ -1216,7 +1219,7 @@ impl SketchEditor {
                     Constraint::Parallel(..) => "//".to_string(),
                     Constraint::Perpendicular(..) => "T".to_string(),
                     Constraint::EqualLength(..) | Constraint::EqualRadius(..) => "=".to_string(),
-                    Constraint::Tangent(..) => "tan".to_string(),
+                    Constraint::Tangent(..) | Constraint::TangentCircles(..) => "tan".to_string(),
                     Constraint::Coincident(..) => "o".to_string(),
                     Constraint::Fix(_) => String::new(),
                     other => match self.dim_exprs.iter().find(|(c, _)| *c == cid) {

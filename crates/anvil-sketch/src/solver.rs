@@ -187,6 +187,12 @@ impl Eval<'_> {
                     let dir = (b - a).normalize_or_zero();
                     out.push(dir.perp_dot(c - a).abs() - r);
                 }
+                Constraint::TangentCircles(c1, c2, inside) => {
+                    let (p, r1) = self.circle(*c1);
+                    let (q, r2) = self.circle(*c2);
+                    let d = (p - q).length();
+                    out.push(if *inside { d - (r1 - r2).abs() } else { d - (r1 + r2) });
+                }
                 Constraint::Angle(l1, l2, deg) => {
                     let (a, b) = self.line(*l1);
                     let (c, d) = self.line(*l2);

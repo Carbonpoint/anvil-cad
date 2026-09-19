@@ -14,6 +14,7 @@ mod app;
 mod camera;
 mod dxf;
 mod panels;
+mod perf;
 mod raster;
 mod ribbon;
 mod scene;

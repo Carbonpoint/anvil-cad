@@ -57,6 +57,11 @@ pub struct AnvilApp {
     section_on: bool,
     /// Also draw sketches that a later feature already uses.
     show_used_sketches: bool,
+    /// CPU, memory, and fps overlay (View > Settings > Performance).
+    show_perf: bool,
+    perf: crate::perf::PerfMonitor,
+    /// In sketch mode: the Sketch tab is showing (not another ribbon tab).
+    sketch_tab: bool,
     /// Where the 3D view was drawn last frame, in points.
     view_rect: egui::Rect,
     section_axis: usize,
@@ -123,6 +128,9 @@ impl AnvilApp {
             section_on: false,
             show_used_sketches: false,
             view_rect: egui::Rect::NOTHING,
+            sketch_tab: true,
+            show_perf: false,
+            perf: Default::default(),
             section_axis: 0,
             section_offset: 0.0,
             section_flip: false,
@@ -210,6 +218,7 @@ impl AnvilApp {
                 ed.set_tool(Tool::Line);
                 let plane = ed.sketch.plane;
                 self.saved_camera = Some(self.camera.clone());
+                self.sketch_tab = true;
                 self.camera.look_at_plane(&plane, self.scene_size().max(60.0) * 1.3);
                 self.panels.selected = Some(idx);
                 self.mode = Mode::Sketch(Box::new(ed));
@@ -363,6 +372,7 @@ impl AnvilApp {
                 }
             }
             RibbonAction::ToggleEdges => self.style.draw_edges = !self.style.draw_edges,
+            RibbonAction::TogglePerf => self.show_perf = !self.show_perf,
             RibbonAction::DeleteFeature => {
                 let mut all: Vec<usize> = self.multi.clone();
                 if let Some(i) = self.panels.selected {
@@ -679,13 +689,36 @@ impl AnvilApp {
     // ---------------- ribbon ----------------
 
     fn ribbon_ui(&mut self, ui: &mut egui::Ui) {
-        if let Mode::Sketch(_) = self.mode {
-            self.sketch_ribbon(ui);
-            return;
+        // While a sketch is open the other tabs stay reachable: a solid
+        // command such as Extrude finishes the sketch and uses it.
+        let in_sketch = matches!(self.mode, Mode::Sketch(_));
+        if in_sketch {
+            ui.horizontal(|ui| {
+                if ui.selectable_label(self.sketch_tab, "Sketch").clicked() {
+                    self.sketch_tab = true;
+                }
+                for (i, t) in self.ribbon.iter().enumerate() {
+                    if ui.selectable_label(!self.sketch_tab && self.active_tab == i, t.name).clicked() {
+                        self.active_tab = i;
+                        self.sketch_tab = false;
+                    }
+                }
+                if !self.sketch_tab {
+                    ui.separator();
+                    ui.label(egui::RichText::new("The sketch stays open. A solid command finishes it.").weak());
+                }
+            });
+            if self.sketch_tab {
+                self.sketch_ribbon(ui);
+                return;
+            }
         }
         let mut clicked_feature: Option<&'static str> = None;
         let mut clicked_action: Option<RibbonAction> = None;
         ui.horizontal(|ui| {
+            if in_sketch {
+                return;
+            }
             if ui.add_enabled(self.doc.can_undo(), egui::Button::new("Undo")).clicked() {
                 clicked_action = Some(RibbonAction::Undo);
             }
@@ -722,9 +755,25 @@ impl AnvilApp {
             }
         });
         if let Some(id) = clicked_feature {
+            if in_sketch {
+                self.finish_sketch();
+            }
             self.add_feature_by_id(id);
         }
         if let Some(a) = clicked_action {
+            let view_only = matches!(
+                a,
+                RibbonAction::FitView
+                    | RibbonAction::ViewIso
+                    | RibbonAction::ViewTop
+                    | RibbonAction::ViewFront
+                    | RibbonAction::ViewRight
+                    | RibbonAction::ToggleEdges
+                    | RibbonAction::TogglePerf
+            );
+            if in_sketch && !view_only {
+                self.finish_sketch();
+            }
             self.run_action(a);
         }
     }
@@ -1574,6 +1623,15 @@ impl AnvilApp {
             }
         }
         self.draw_triad(&painter, rect);
+        if self.show_perf {
+            let lines = self.perf.lines();
+            let font = egui::FontId::monospace(11.0);
+            let pos = Pos2::new(rect.right() - 70.0, rect.top() + 8.0);
+            let galley = painter.layout_no_wrap(lines.join("\n"), font, Color32::from_rgb(230, 235, 240));
+            let r = egui::Rect::from_min_size(pos - egui::vec2(galley.size().x, 0.0), galley.size()).expand(5.0);
+            painter.rect_filled(r, 4.0, Color32::from_rgba_unmultiplied(30, 35, 45, 190));
+            painter.galley(r.min + egui::vec2(5.0, 5.0), galley, Color32::WHITE);
+        }
         // View buttons in the top right corner, like a simplified ViewCube.
         if !matches!(self.mode, Mode::Sketch(_)) {
             let views = [
@@ -1727,6 +1785,16 @@ impl eframe::App for AnvilApp {
 impl AnvilApp {
     /// One frame of the whole window.
     fn frame_ui(&mut self, ctx: &egui::Context) {
+        let started = std::time::Instant::now();
+        self.frame_ui_inner(ctx);
+        if self.show_perf {
+            self.perf.tick(started.elapsed());
+            // Keep the numbers moving while nothing else redraws.
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+        }
+    }
+
+    fn frame_ui_inner(&mut self, ctx: &egui::Context) {
         self.export_windows(ctx);
         let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {

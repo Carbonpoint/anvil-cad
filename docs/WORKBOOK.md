@@ -4,7 +4,7 @@ Six practice parts in the style of the CSWA exam. Each one lists the GUI
 steps, the expected mass properties, and what it exercises. The same parts
 are built through the feature API in `crates/anvil-io/src/workbook.rs`,
 so every exercise is also a regression test, and each is a button under
-File > Samples (WB 1 to WB 6). Saved documents are in `examples/workbook/`
+Examples > Workbook (WB 1 to WB 6). Saved documents are in `examples/workbook/`
 and renders in `docs/workbook/`.
 
 Units are millimetres. Material is steel at 7.85 g/cm3 unless stated.

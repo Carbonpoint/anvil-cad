@@ -65,7 +65,7 @@ against the full mesh, so the result is still exact.
 
 ## The sample (stage 1 and 2 done)
 
-File > Samples > Kettle, or `anvil_io::kettle::kettle()`. The document
+Examples > Casting samples > Kettle, or `anvil_io::kettle::kettle()`. The document
 builds in about 4 seconds on a workstation and renders in under a
 second. Three bodies: body 208 cm3 (1.50 kg in cast iron), bail 15 cm3,
 lid 27 cm3. The spout tip reaches x = 101 mm, so the kettle is 181 mm
@@ -103,7 +103,7 @@ Expressions panel and the kettle rebuilds.
 
 ## Gating (stage 3, first layout)
 
-File > Samples > Kettle + gating, or `anvil_io::kettle::kettle_gated()`.
+Examples > Casting samples > Kettle + gating, or `anvil_io::kettle::kettle_gated()`.
 The parting plane is at the ridge (z = 30), the widest section: the drag
 holds the base and the cope holds the dome and the spout. A sprue on
 the side away from the spout has its pouring cup at z = 150 and its well
@@ -120,7 +120,7 @@ gate sizes and riser positions.
 
 ## Mold (stage 4, first cut)
 
-File > Samples > Kettle mold, or `anvil_io::kettle::kettle_mold()`. The
+Examples > Casting samples > Kettle mold, or `anvil_io::kettle::kettle_mold()`. The
 parting plane is vertical, the XZ plane through the spout and the lugs,
 so the two pattern halves pull along Y. A body of revolution split
 through its axis has no undercut along that pull, the spout lies in the
@@ -149,7 +149,7 @@ a plane pick for the parting plane so any body can be split the same way.
 
 ## Simulation (stage 5, first cut)
 
-Casting check on the gated kettle (File > Samples > Kettle + gating)
+Casting check on the gated kettle (Examples > Casting samples > Kettle + gating)
 reports, for grey cast iron poured at 1400 C: 209 cm3 and 1.49 kg,
 surface 1262 cm2, modulus 1.65 mm, and a Chvorinov freeze time of about
 4 s with the starting mold constant of 1.5 s/mm2. The 135 mm sprue head

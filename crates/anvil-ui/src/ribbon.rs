@@ -27,6 +27,8 @@ pub enum RibbonAction {
     Measure,
     ToggleEdges,
     ViewIso,
+    /// Show or hide the CPU, memory, and fps overlay.
+    TogglePerf,
     ViewTop,
     ViewFront,
     ViewRight,
@@ -69,11 +71,13 @@ pub struct RibbonTab {
     pub groups: Vec<RibbonGroup>,
 }
 
-const TAB_ORDER: &[&str] = &["File", "Solid", "CAM", "View"];
+const TAB_ORDER: &[&str] = &["File", "Examples", "Solid", "CAM", "View"];
 const GROUP_ORDER: &[&str] = &[
     "Document",
     "Export",
-    "Samples",
+    "Parts",
+    "Workbook",
+    "Casting samples",
     "Create",
     "Modify",
     "Construct",
@@ -83,6 +87,7 @@ const GROUP_ORDER: &[&str] = &[
     "Output",
     "Camera",
     "Display",
+    "Settings",
 ];
 
 fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
@@ -135,8 +140,8 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             },
         ),
         (
-            "File",
-            "Samples",
+            "Examples",
+            "Parts",
             RibbonButton { label: "Demo part", tooltip: "Load a sample part", order: 0, kind: A(DemoPart) },
         ),
         (
@@ -205,8 +210,8 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             RibbonButton { label: "Units mm/in", tooltip: "Toggle the display unit", order: 2, kind: A(ToggleUnits) },
         ),
         (
-            "File",
-            "Samples",
+            "Examples",
+            "Parts",
             RibbonButton {
                 label: "Business card",
                 tooltip: "Credit-card blank with two fillet radii, embossed name, and QR code",
@@ -266,6 +271,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "Display",
             RibbonButton { label: "Edges", tooltip: "Toggle model edges", order: 0, kind: A(ToggleEdges) },
         ),
+        (
+            "View",
+            "Settings",
+            RibbonButton {
+                label: "Performance",
+                tooltip: "Show or hide CPU, memory, and fps in the corner of the view",
+                order: 0,
+                kind: A(TogglePerf),
+            },
+        ),
     ]
 }
 
@@ -294,8 +309,8 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
     const WB: [&str; 6] = ["WB 1 Plate", "WB 2 Bracket", "WB 3 Shaft", "WB 4 Nut", "WB 5 Elbow", "WB 6 Adapter"];
     for (i, label) in WB.iter().enumerate() {
         place(
-            "File",
-            "Samples",
+            "Examples",
+            "Workbook",
             RibbonButton {
                 label,
                 tooltip: "Workbook exercise, see docs/WORKBOOK.md",
@@ -305,8 +320,8 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
         );
     }
     place(
-        "File",
-        "Samples",
+        "Examples",
+        "Casting samples",
         RibbonButton {
             label: "Kettle",
             tooltip: "Cast iron kettle with hobnail dots, see docs/KETTLE.md",
@@ -315,8 +330,8 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
         },
     );
     place(
-        "File",
-        "Samples",
+        "Examples",
+        "Casting samples",
         RibbonButton {
             label: "Kettle + gating",
             tooltip: "The kettle with a sprue, runner, ingate, and riser",
@@ -325,8 +340,8 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
         },
     );
     place(
-        "File",
-        "Samples",
+        "Examples",
+        "Casting samples",
         RibbonButton {
             label: "Kettle mold",
             tooltip: "Pattern halves, core, and core box for the kettle body",

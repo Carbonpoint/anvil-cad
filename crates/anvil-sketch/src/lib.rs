@@ -101,6 +101,29 @@ impl Sketch {
         self.entities.insert(Entity::Circle { center, radius })
     }
 
+    /// Centre and radius of a circle or arc.
+    pub fn circle_geometry(&self, id: EntityId) -> Option<(DVec2, f64)> {
+        match self.entities.get(id)? {
+            Entity::Circle { center, radius } => Some((self.point(*center), *radius)),
+            Entity::Arc { center, start, .. } => {
+                let c = self.point(*center);
+                Some((c, (self.point(*start) - c).length()))
+            }
+            _ => None,
+        }
+    }
+
+    /// True when two circles are nearer to touching from inside than from
+    /// outside, so a tangent constraint between them should keep one inside
+    /// the other.
+    pub fn circles_nested(&self, a: EntityId, b: EntityId) -> bool {
+        let (Some((p, r1)), Some((q, r2))) = (self.circle_geometry(a), self.circle_geometry(b)) else {
+            return false;
+        };
+        let d = (p - q).length();
+        (d - (r1 - r2).abs()).abs() < (d - (r1 + r2)).abs()
+    }
+
     pub fn add_arc(&mut self, center: EntityId, start: EntityId, end: EntityId) -> EntityId {
         self.entities.insert(Entity::Arc { center, start, end })
     }
@@ -602,6 +625,25 @@ mod tests {
         let rep = s.solve();
         assert_eq!(rep.status, SolveStatus::Converged, "{rep:?}");
         assert!((s.point(a).y.abs() - 5.0).abs() < 1e-7);
+
+        // Two circles: outside tangent, then one inside the other.
+        for (cx, r2, inside) in [(12.0, 4.0, false), (1.0, 2.0, true)] {
+            let mut s = Sketch::new(Plane::XY);
+            let c1 = s.add_point(0.0, 0.0);
+            let k1 = s.add_circle(c1, 5.0);
+            let c2 = s.add_point(cx, 0.5);
+            let k2 = s.add_circle(c2, r2);
+            s.constrain(Constraint::Fix(c1));
+            s.constrain(Constraint::Radius(k1, 5.0));
+            s.constrain(Constraint::Radius(k2, r2));
+            assert_eq!(s.circles_nested(k1, k2), inside);
+            s.constrain(Constraint::TangentCircles(k1, k2, inside));
+            let rep = s.solve();
+            assert_eq!(rep.status, SolveStatus::Converged, "{rep:?}");
+            let d = s.point(c2).length();
+            let want = if inside { 3.0 } else { 9.0 };
+            assert!((d - want).abs() < 1e-7, "{d}");
+        }
 
         let mut s = Sketch::new(Plane::XY);
         let o = s.add_point(0.0, 0.0);

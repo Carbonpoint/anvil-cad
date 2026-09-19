@@ -37,7 +37,10 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
         for (i, node) in doc.features.iter().enumerate() {
             // Buttons on the right, the name truncated to what is left, so a
             // long feature name never widens the panel.
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            // A fixed row height: a bare right_to_left layout would take all
+            // the height left in the scroll area and space the rows apart.
+            let row = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
+            ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("x").on_hover_text("Delete").clicked() {
                     to_remove = Some(i);
                 }

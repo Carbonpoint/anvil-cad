@@ -37,6 +37,10 @@ pub enum Constraint {
     Midpoint(EntityId, EntityId),
     /// A line is tangent to a circle or arc (1 equation).
     Tangent(EntityId, EntityId),
+    /// Two circles or arcs touch (1 equation). `inside` is true when one
+    /// lies inside the other; it is chosen from the geometry when the
+    /// constraint is made.
+    TangentCircles(EntityId, EntityId, bool),
     /// Angle between two lines equals `deg` degrees (1 equation).
     Angle(EntityId, EntityId, f64),
     /// Two points are mirror images across a line (2 equations).
@@ -66,6 +70,7 @@ impl Constraint {
             | PointOnCircle(a, b)
             | Midpoint(a, b)
             | Tangent(a, b)
+            | TangentCircles(a, b, _)
             | Angle(a, b, _) => vec![*a, *b],
             Symmetric(a, b, c) => vec![*a, *b, *c],
             Horizontal(a) | Vertical(a) | Length(a, _) | Radius(a, _) | Fix(a) | FixX(a, _) | FixY(a, _) => vec![*a],
@@ -91,7 +96,7 @@ impl Constraint {
             PointOnLine(..) => "Point on line".into(),
             PointOnCircle(..) => "Point on circle".into(),
             Midpoint(..) => "Midpoint".into(),
-            Tangent(..) => "Tangent".into(),
+            Tangent(..) | TangentCircles(..) => "Tangent".into(),
             Angle(_, _, a) => format!("Angle {a:.2}"),
             Symmetric(..) => "Symmetric".into(),
             Fix(_) => "Fixed".into(),
