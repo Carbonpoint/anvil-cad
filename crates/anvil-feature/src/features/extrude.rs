@@ -14,6 +14,9 @@ pub struct ExtrudeFeature {
     /// Target body feature for join, cut, intersect.
     #[serde(default)]
     pub target: usize,
+    /// Regions of the sketch to extrude; empty means all (see `region_select`).
+    #[serde(default)]
+    pub regions: String,
 }
 
 pub(crate) fn default_op() -> String {
@@ -22,7 +25,14 @@ pub(crate) fn default_op() -> String {
 
 impl Default for ExtrudeFeature {
     fn default() -> Self {
-        ExtrudeFeature { sketch: 0, distance: "10".into(), symmetric: false, operation: "new".into(), target: 0 }
+        ExtrudeFeature {
+            sketch: 0,
+            distance: "10".into(),
+            symmetric: false,
+            operation: "new".into(),
+            target: 0,
+            regions: String::new(),
+        }
     }
 }
 
@@ -75,6 +85,7 @@ impl Feature for ExtrudeFeature {
     fn params(&self) -> Vec<ParamSpec> {
         let mut v = vec![
             ParamSpec::feature_ref("sketch", "Sketch", vec!["sketch"], self.sketch),
+            ParamSpec::regions("regions", "sketch", &self.regions),
             ParamSpec::length("distance", "Distance", &self.distance),
             ParamSpec::boolean("symmetric", "Symmetric", self.symmetric),
             ParamSpec::choice("operation", "Operation", vec!["new", "join", "cut", "intersect"], &self.operation),
@@ -88,6 +99,7 @@ impl Feature for ExtrudeFeature {
         match (name, value) {
             ("sketch", ParamValue::FeatureRef(i)) => self.sketch = i,
             ("distance", ParamValue::Expr(s)) => self.distance = s,
+            ("regions", ParamValue::Expr(s)) => self.regions = s,
             ("symmetric", ParamValue::Bool(b)) => self.symmetric = b,
             ("operation", ParamValue::Choice(o)) => self.operation = o,
             ("target", ParamValue::FeatureRef(i)) => self.target = i,
@@ -104,9 +116,8 @@ impl Feature for ExtrudeFeature {
             plane.origin -= plane.normal() * (d.abs() / 2.0);
             dist = d.abs();
         }
-        let loops: Vec<Vec<anvil_math::DVec2>> = profiles.iter().map(|p| p.points.clone()).collect();
         let mut bodies = Vec::new();
-        for (outer, holes) in crate::features::emboss::nest_loops(&loops) {
+        for (outer, holes) in crate::region_select::select(profiles, &self.regions)? {
             bodies.push(ctx.kernel.extrude_with_holes(&plane, &outer, &holes, dist)?);
         }
         apply_operation(ctx, &self.operation, self.target, bodies)

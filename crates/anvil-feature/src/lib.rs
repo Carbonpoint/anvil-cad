@@ -16,6 +16,7 @@ pub mod features;
 pub mod fonts;
 pub mod mesh_loader;
 pub mod param;
+pub mod region_select;
 pub mod registry;
 
 pub use document::{Document, FeatureId, FeatureNode, Material, RegenContext, RegenError, MATERIALS};

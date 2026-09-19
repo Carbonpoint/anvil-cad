@@ -31,6 +31,12 @@ pub enum ParamKind {
     Text,
     /// A font: stored as `builtin:<name>`, a file path, or empty for the default.
     Font,
+    /// Which regions of a sketch to use, stored as text (see
+    /// `region_select`). `sketch` names the FeatureRef param that holds the
+    /// sketch, so the viewport can show its regions for picking.
+    Regions {
+        sketch: &'static str,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -53,6 +59,14 @@ impl ParamSpec {
     }
     pub fn feature_ref(name: &'static str, label: &'static str, accepts: Vec<&'static str>, idx: usize) -> Self {
         ParamSpec { name, label, kind: ParamKind::FeatureRef { accepts }, value: ParamValue::FeatureRef(idx) }
+    }
+    pub fn regions(name: &'static str, sketch: &'static str, spec: &str) -> Self {
+        ParamSpec {
+            name,
+            label: "Regions",
+            kind: ParamKind::Regions { sketch },
+            value: ParamValue::Expr(spec.to_string()),
+        }
     }
     pub fn choice(name: &'static str, label: &'static str, options: Vec<&'static str>, v: &str) -> Self {
         ParamSpec { name, label, kind: ParamKind::Choice { options }, value: ParamValue::Choice(v.to_string()) }

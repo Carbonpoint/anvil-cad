@@ -104,6 +104,8 @@ One word, one meaning, everywhere in code and docs:
 * **Regenerate**: run every feature in order and rebuild all bodies.
 * **Body**: one solid produced by the history.
 * **Profile**: a closed loop taken from a solved sketch.
+* **Region**: an outer profile with the profiles directly inside it as holes.
+  Extrude and Revolve use the regions you click in the view.
 * **Descriptor**: static metadata that puts a feature on the ribbon.
 * **Post**: a post-processor that turns a toolpath into controller text.
 

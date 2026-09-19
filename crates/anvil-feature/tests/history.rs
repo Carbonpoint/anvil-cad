@@ -146,6 +146,7 @@ fn cut_extrude_and_hole_remove_volume() {
     sk.source = anvil_feature::features::sketch::PlaneSource::Custom;
     doc.edit_feature(1, |f| *f.downcast_mut::<SketchFeature>().unwrap() = sk);
     doc.add_feature(Box::new(ExtrudeFeature {
+        regions: String::new(),
         sketch: 1,
         distance: "-4".into(),
         symmetric: false,
@@ -380,4 +381,28 @@ fn glyph_cap_triangles_all_face_the_same_way() {
             assert!((area_up - area_down).abs() / area_up < 1e-9, "{ch}: caps differ {area_up} vs {area_down}");
         }
     }
+}
+
+#[test]
+fn extrude_uses_only_the_picked_regions() {
+    let mut doc = Document::new("test");
+    let mut sk = SketchFeature::on_datum("XY");
+    sk.sketch.add_rectangle(0.0, 0.0, 10.0, 10.0);
+    sk.sketch.add_rectangle(20.0, 0.0, 25.0, 10.0);
+    doc.add_feature(Box::new(sk));
+    let e = doc.add_feature(Box::new(ExtrudeFeature { distance: "2".into(), ..Default::default() }));
+    let total: f64 = doc.bodies().iter().map(|b| b.volume()).sum();
+    assert!((total - 300.0).abs() < 1e-6, "{total}");
+
+    // Keep one region only: the other square is left out.
+    let regions = anvil_feature::region_select::regions(&doc.features[0].output.as_ref().unwrap().profiles);
+    let small = regions.iter().position(|r| r.outer.iter().any(|p| p.x > 15.0)).unwrap();
+    doc.edit_feature(e, |f| f.set_param("regions", ParamValue::Expr(small.to_string())).unwrap());
+    assert!(doc.features[e].error.is_none(), "{:?}", doc.features[e].error);
+    let total: f64 = doc.bodies().iter().map(|b| b.volume()).sum();
+    assert!((total - 100.0).abs() < 1e-6, "{total}");
+
+    // A region index the sketch no longer has is an error, not a silent skip.
+    doc.edit_feature(e, |f| f.set_param("regions", ParamValue::Expr("5".into())).unwrap());
+    assert!(doc.features[e].error.as_deref().unwrap_or("").contains("no longer exists"));
 }

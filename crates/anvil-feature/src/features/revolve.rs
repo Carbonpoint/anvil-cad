@@ -18,6 +18,9 @@ pub struct RevolveFeature {
     /// pattern refines the facets further on its own.
     #[serde(default = "default_segments")]
     pub segments: String,
+    /// Regions of the sketch to revolve; empty means all (see `region_select`).
+    #[serde(default)]
+    pub regions: String,
 }
 
 fn default_segments() -> String {
@@ -33,6 +36,7 @@ impl Default for RevolveFeature {
             operation: "new".into(),
             target: 0,
             segments: default_segments(),
+            regions: String::new(),
         }
     }
 }
@@ -48,6 +52,7 @@ impl Feature for RevolveFeature {
     fn params(&self) -> Vec<ParamSpec> {
         let mut v = vec![
             ParamSpec::feature_ref("sketch", "Sketch", vec!["sketch"], self.sketch),
+            ParamSpec::regions("regions", "sketch", &self.regions),
             ParamSpec::choice("axis", "Axis", vec!["X", "Y"], &self.axis),
             ParamSpec::angle("angle", "Angle", &self.angle_deg),
             ParamSpec::choice("operation", "Operation", vec!["new", "join", "cut", "intersect"], &self.operation),
@@ -66,6 +71,7 @@ impl Feature for RevolveFeature {
             ("operation", ParamValue::Choice(o)) => self.operation = o,
             ("target", ParamValue::FeatureRef(i)) => self.target = i,
             ("segments", ParamValue::Expr(s)) => self.segments = s,
+            ("regions", ParamValue::Expr(s)) => self.regions = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -77,8 +83,14 @@ impl Feature for RevolveFeature {
         let axis = Axis::new(plane.origin, plane.to_world(dir2) - plane.origin);
         let segments = ctx.eval(&self.segments)?.round().clamp(6.0, 4096.0) as usize;
         let mut bodies = Vec::new();
-        for p in profiles {
-            bodies.push(ctx.kernel.revolve_n(plane, &p.points, &axis, angle, segments)?);
+        for (outer, holes) in crate::region_select::select(profiles, &self.regions)? {
+            let mut body = ctx.kernel.revolve_n(plane, &outer, &axis, angle, segments)?;
+            // A hole in the region leaves a hollow in the revolved body.
+            for h in &holes {
+                let tool = ctx.kernel.revolve_n(plane, h, &axis, angle, segments)?;
+                body = ctx.kernel.boolean(&body, &tool, anvil_kernel::BooleanOp::Subtract)?;
+            }
+            bodies.push(body);
         }
         crate::features::extrude::apply_operation(ctx, &self.operation, self.target, bodies)
     }

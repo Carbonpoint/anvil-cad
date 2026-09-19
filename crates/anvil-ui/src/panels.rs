@@ -182,6 +182,22 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                             });
                         });
                 }
+                (ParamKind::Regions { .. }, ParamValue::Expr(cur)) => {
+                    let counts =
+                        crate::sketch_view::region_pick(doc, Some(idx)).map(|pk| (pk.used_count(), pk.regions.len()));
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(match counts {
+                                Some((u, n)) => format!("{u} of {n} regions used"),
+                                None => "No closed regions".to_string(),
+                            });
+                            if !cur.trim().is_empty() && ui.small_button("Default").clicked() {
+                                pending = Some((p.name, ParamValue::Expr(String::new())));
+                            }
+                        });
+                        ui.label(egui::RichText::new("Click regions in the view to add or remove them").small().weak());
+                    });
+                }
                 (ParamKind::Bool, ParamValue::Bool(b)) => {
                     let mut v = *b;
                     if ui.checkbox(&mut v, "").changed() {

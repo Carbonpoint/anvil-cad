@@ -35,7 +35,7 @@ fn resolve_plane(plane: &str, feature: Option<usize>, ctx: &RegenContext) -> Res
     }
 }
 
-fn point_in_poly(p: DVec2, poly: &[DVec2]) -> bool {
+pub(crate) fn point_in_poly(p: DVec2, poly: &[DVec2]) -> bool {
     let n = poly.len();
     let mut inside = false;
     let mut j = n - 1;
@@ -124,7 +124,7 @@ pub fn offset_loop(poly: &[DVec2], d: f64) -> Vec<DVec2> {
         .collect()
 }
 
-fn polygon_area(p: &[DVec2]) -> f64 {
+pub(crate) fn polygon_area(p: &[DVec2]) -> f64 {
     let n = p.len();
     0.5 * (0..n).map(|i| p[i].perp_dot(p[(i + 1) % n])).sum::<f64>()
 }

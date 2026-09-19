@@ -18,6 +18,7 @@ mod raster;
 mod ribbon;
 mod scene;
 mod sketch_editor;
+mod sketch_view;
 
 pub use app::AnvilApp;
 

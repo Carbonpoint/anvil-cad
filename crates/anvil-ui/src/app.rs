@@ -4,6 +4,7 @@ use crate::raster::{Framebuffer, Style};
 use crate::ribbon::{build_ribbon, ButtonKind, RibbonAction, RibbonTab};
 use crate::scene::Scene;
 use crate::sketch_editor::{ConstraintTool, DimensionTool, SketchEditor, Tool};
+use crate::sketch_view;
 use anvil_feature::features::sketch::SketchFeature;
 use anvil_feature::features::{extrude::ExtrudeFeature, revolve::RevolveFeature};
 use anvil_feature::{descriptor, Document};
@@ -54,6 +55,8 @@ pub struct AnvilApp {
     selected_edges: Vec<(u32, [DVec3; 2])>,
     filter: SelectFilter,
     section_on: bool,
+    /// Also draw sketches that a later feature already uses.
+    show_used_sketches: bool,
     section_axis: usize,
     section_offset: f64,
     section_flip: bool,
@@ -111,6 +114,7 @@ impl AnvilApp {
             selected_edges: Vec::new(),
             filter: SelectFilter::All,
             section_on: false,
+            show_used_sketches: false,
             section_axis: 0,
             section_offset: 0.0,
             section_flip: false,
@@ -553,6 +557,16 @@ impl AnvilApp {
         }
         if let Some(d) = descriptor(id) {
             let mut f = (d.create)();
+            // Sketch refs start at the latest sketch in the history.
+            if let Some(last) = self.doc.features.iter().rposition(|n| n.feature.kind() == "sketch") {
+                for p in f.params() {
+                    if let anvil_feature::param::ParamKind::FeatureRef { accepts } = &p.kind {
+                        if accepts.contains(&"sketch") {
+                            let _ = f.set_param(p.name, anvil_feature::ParamValue::FeatureRef(last));
+                        }
+                    }
+                }
+            }
             // Sensible defaults: point body refs at the selected feature and
             // sketch refs at the latest sketch.
             if let Some(sel) = self.panels.selected {
@@ -600,7 +614,15 @@ impl AnvilApp {
             self.invalidate();
             self.status = match &self.doc.features[idx].error {
                 Some(e) => format!("Added {}: {e}", d.label),
-                None => format!("Added {}. Edit its parameters in the Properties panel.", d.label),
+                None => match sketch_view::region_pick(&self.doc, Some(idx)) {
+                    Some(p) if p.regions.len() > 1 => format!(
+                        "Added {} on {} of {} sketch regions. Click a region in the view to add or remove it.",
+                        d.label,
+                        p.used_count(),
+                        p.regions.len()
+                    ),
+                    _ => format!("Added {}. Edit its parameters in the Properties panel.", d.label),
+                },
             };
         }
     }
@@ -1005,6 +1027,17 @@ impl AnvilApp {
             .and_then(|sel| self.scene.bodies.iter().position(|(fi, _)| *fi == sel))
             .map(|i| i as u32);
 
+        // Regions of the selected feature's sketch, for Extrude, Revolve and
+        // other features that pick regions.
+        let pick = match self.mode {
+            Mode::Model => sketch_view::region_pick(&self.doc, self.panels.selected),
+            _ => None,
+        };
+        let hovered_region = pick.as_ref().zip(pointer).and_then(|(pk, (x, y))| pk.region_at(&proj, x, y));
+        if hovered_region.is_some() {
+            self.hovered_edge = None;
+        }
+
         match &mut self.mode {
             Mode::Model => {
                 if del && resp.hovered() && (self.panels.selected.is_some() || !self.multi.is_empty()) {
@@ -1073,7 +1106,25 @@ impl AnvilApp {
                         }
                     }
                 }
-                if let (true, Some((b, e))) = (resp.clicked(), self.hovered_edge) {
+                if let (true, Some(pk), Some(r)) = (resp.clicked() && !shift, &pick, hovered_region) {
+                    let spec = pk.toggled(r);
+                    let (fi, name) = (pk.feature, pk.param);
+                    self.doc.edit_feature(fi, |f| {
+                        let _ = f.set_param(name, anvil_feature::ParamValue::Expr(spec));
+                    });
+                    self.panels.drafts.retain(|(i, _), _| *i != fi);
+                    self.invalidate();
+                    let now = sketch_view::region_pick(&self.doc, Some(fi));
+                    self.status = match (now, &self.doc.features[fi].error) {
+                        (_, Some(e)) => format!("{}: {e}", self.doc.features[fi].feature.name()),
+                        (Some(p), None) => format!(
+                            "{} of {} sketch regions used. Click a region to add or remove it.",
+                            p.used_count(),
+                            p.regions.len()
+                        ),
+                        (None, None) => String::new(),
+                    };
+                } else if let (true, Some((b, e))) = (resp.clicked(), self.hovered_edge) {
                     let same = |x: &(u32, [DVec3; 2])| {
                         x.0 == b && (x.1[0] - e[0]).length() < 1e-9 && (x.1[1] - e[1]).length() < 1e-9
                     };
@@ -1335,6 +1386,15 @@ impl AnvilApp {
         // Overlays.
         let origin = rect.min;
         let to_screen = |p: DVec3| proj.project(p).map(|(x, y, _)| Pos2::new(origin.x + x as f32, origin.y + y as f32));
+        if matches!(self.mode, Mode::Model | Mode::PickPlane) {
+            let sel = self.panels.selected;
+            for i in sketch_view::visible_sketches(&self.doc, sel, self.show_used_sketches) {
+                sketch_view::draw_sketch(&painter, origin, &proj, &self.fb, &self.doc, i, sel == Some(i));
+            }
+            if let Some(pk) = &pick {
+                sketch_view::draw_regions(&painter, origin, &proj, pk, hovered_region);
+            }
+        }
         if let Mode::PickPlane = self.mode {
             let size = self.scene_size() * 0.6;
             for (name, plane) in DATUMS {
@@ -1441,7 +1501,15 @@ impl AnvilApp {
         }
         // What is under the cursor.
         if matches!(self.mode, Mode::Model | Mode::PickPlane) {
-            let label = if let Some((b, [p, q])) = self.hovered_edge {
+            let label = if let (Some(pk), Some(r)) = (&pick, hovered_region) {
+                let used = anvil_feature::region_select::is_selected(&pk.regions, &pk.spec, r);
+                Some(format!(
+                    "Region {} of {}: click to {}",
+                    r + 1,
+                    pk.regions.len(),
+                    if used { "leave it out" } else { "use it" }
+                ))
+            } else if let Some((b, [p, q])) = self.hovered_edge {
                 let fi = self.scene.bodies[b as usize].0;
                 Some(format!(
                     "Edge {} long, {}",
@@ -1649,6 +1717,8 @@ impl eframe::App for AnvilApp {
                     ui.selectable_value(&mut self.filter, f, label);
                 }
                 ui.separator();
+                ui.checkbox(&mut self.show_used_sketches, "Used sketches")
+                    .on_hover_text("Also show sketches that a feature already uses");
                 ui.checkbox(&mut self.section_on, "Section");
                 if self.section_on {
                     egui::ComboBox::from_id_salt("section_axis")

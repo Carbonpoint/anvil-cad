@@ -213,6 +213,7 @@ pub fn kettle() -> Document {
     }
     doc.add_feature(Box::new(lugs));
     doc.add_feature(Box::new(ExtrudeFeature {
+        regions: String::new(),
         sketch: 11,
         distance: "10".into(),
         symmetric: false,
@@ -429,6 +430,7 @@ pub fn kettle_mold() -> Document {
     print.sketch.add_circle(c, 43.5);
     doc.add_feature(Box::new(print));
     doc.add_feature(Box::new(ExtrudeFeature {
+        regions: String::new(),
         sketch: 26,
         distance: "print_h".into(),
         symmetric: false,
@@ -472,6 +474,7 @@ pub fn kettle_mold() -> Document {
     // then has the seats for the core prints.
     doc.add_feature(Box::new(CombineFeature { body: 33, tool: 3, op: "join".into() }));
     doc.add_feature(Box::new(ExtrudeFeature {
+        regions: String::new(),
         sketch: 11,
         distance: "10".into(),
         symmetric: false,
