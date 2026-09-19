@@ -138,6 +138,76 @@ impl Tool {
         Tool::PatternRect,
         Tool::PatternCirc,
     ];
+    /// Used by the icon-coverage test in `icons.rs`.
+    #[allow(dead_code)]
+    pub const ALL: [Tool; 30] = [
+        Tool::Select,
+        Tool::Point,
+        Tool::Line,
+        Tool::MidpointLine,
+        Tool::Rect2,
+        Tool::RectCenter,
+        Tool::Rect3,
+        Tool::CircleCenter,
+        Tool::Circle2,
+        Tool::Circle3,
+        Tool::Arc3,
+        Tool::ArcCenter,
+        Tool::Polygon,
+        Tool::PolygonInscribed,
+        Tool::PolygonEdge,
+        Tool::Ellipse,
+        Tool::Slot,
+        Tool::SlotCenter,
+        Tool::Spline,
+        Tool::Fillet,
+        Tool::Trim,
+        Tool::Extend,
+        Tool::Mirror,
+        Tool::MoveCopy,
+        Tool::ScaleSel,
+        Tool::PatternRect,
+        Tool::PatternCirc,
+        Tool::Dimension,
+        Tool::Chamfer,
+        Tool::TangentArc,
+    ];
+
+    /// The icon id to look up in `crate::icons::paint`.
+    pub fn icon_id(self) -> &'static str {
+        match self {
+            Tool::Select => "tool_select",
+            Tool::Point => "tool_point",
+            Tool::Line => "tool_line",
+            Tool::MidpointLine => "tool_midpoint_line",
+            Tool::Rect2 => "tool_rect2",
+            Tool::RectCenter => "tool_rect_center",
+            Tool::Rect3 => "tool_rect3",
+            Tool::CircleCenter => "tool_circle_center",
+            Tool::Circle2 => "tool_circle2",
+            Tool::Circle3 => "tool_circle3",
+            Tool::Arc3 => "tool_arc3",
+            Tool::ArcCenter => "tool_arc_center",
+            Tool::Polygon => "tool_polygon",
+            Tool::PolygonInscribed => "tool_polygon_inscribed",
+            Tool::PolygonEdge => "tool_polygon_edge",
+            Tool::Ellipse => "tool_ellipse",
+            Tool::Slot => "tool_slot",
+            Tool::SlotCenter => "tool_slot_center",
+            Tool::Spline => "tool_spline",
+            Tool::Fillet => "tool_fillet",
+            Tool::Trim => "tool_trim",
+            Tool::Extend => "tool_extend",
+            Tool::Mirror => "tool_mirror",
+            Tool::MoveCopy => "tool_move_copy",
+            Tool::ScaleSel => "tool_scale",
+            Tool::PatternRect => "tool_pattern_rect",
+            Tool::PatternCirc => "tool_pattern_circ",
+            Tool::Dimension => "tool_dimension",
+            Tool::Chamfer => "tool_chamfer",
+            Tool::TangentArc => "tool_tangent_arc",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -190,6 +260,25 @@ impl ConstraintTool {
         ConstraintTool::PointOnCurve,
         ConstraintTool::Fix,
     ];
+
+    /// The icon id to look up in `crate::icons::paint`.
+    pub fn icon_id(self) -> &'static str {
+        match self {
+            ConstraintTool::Coincident => "constraint_coincident",
+            ConstraintTool::Collinear => "constraint_collinear",
+            ConstraintTool::Horizontal => "constraint_horizontal",
+            ConstraintTool::Vertical => "constraint_vertical",
+            ConstraintTool::Parallel => "constraint_parallel",
+            ConstraintTool::Perpendicular => "constraint_perpendicular",
+            ConstraintTool::Equal => "constraint_equal",
+            ConstraintTool::Tangent => "constraint_tangent",
+            ConstraintTool::Midpoint => "constraint_midpoint",
+            ConstraintTool::Concentric => "constraint_concentric",
+            ConstraintTool::Symmetric => "constraint_symmetric",
+            ConstraintTool::PointOnCurve => "constraint_point_on_curve",
+            ConstraintTool::Fix => "constraint_fix",
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -200,6 +289,23 @@ pub enum DimensionTool {
     Angle,
     /// Picks Length, Radius, or Angle from the selection.
     Smart,
+}
+
+impl DimensionTool {
+    /// Used by the icon-coverage test in `icons.rs`.
+    #[allow(dead_code)]
+    pub const ALL: [DimensionTool; 4] =
+        [DimensionTool::Length, DimensionTool::Radius, DimensionTool::Angle, DimensionTool::Smart];
+
+    /// The icon id to look up in `crate::icons::paint`.
+    pub fn icon_id(self) -> &'static str {
+        match self {
+            DimensionTool::Length => "dim_length",
+            DimensionTool::Radius => "dim_radius",
+            DimensionTool::Angle => "dim_angle",
+            DimensionTool::Smart => "dim_smart",
+        }
+    }
 }
 
 pub struct SketchEditor {
