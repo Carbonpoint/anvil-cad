@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-19: Laptop screens: with a kettle sample loaded, the expressions panel and the navigator grew to fit their content and left the 3D view 0 px high at 1366x768. Panels are now capped (expressions 25% of the height and scrolls, side panels 22% of the width, properties scroll), long feature names and status text are truncated, fit accounts for the view aspect, and zoom works by touchpad pinch, Ctrl+scroll, + and - keys, Home fits. Headless layout test `samples_leave_room_for_the_view_on_a_laptop` runs the whole window at 1024x640, 1280x720 and 1366x768.
+
 - 2026-09-19: Sketches stay visible after Finish Sketch (model view overlay, faint where a body hides them; sketches a feature uses are hidden unless selected or "Used sketches" is on). Region picking: Extrude and Revolve have a Regions parameter; with the feature selected, its sketch regions are filled in the view (orange = used) and a click adds or removes one. Every profile bounds a region, so a circle inside a face outline can be extruded alone. Revolve now subtracts the holes of a region. New feature refs start at the latest sketch. Open: true arrangement regions for overlapping curves (profiles are still closed loops), Regions on Sweep and Loft.
 
 - 2026-09-14: Docker: anvil-cli headless tool (card, fonts), multi-stage Dockerfile (build, test, runtime), CI job that builds the image and makes a card in it. Docker is not installed on the WSL box or lab hosts, so the image is verified in GitHub Actions.

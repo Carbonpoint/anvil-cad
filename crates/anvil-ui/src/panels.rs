@@ -35,7 +35,22 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
     let mut to_move: Option<(usize, usize)> = None;
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (i, node) in doc.features.iter().enumerate() {
-            ui.horizontal(|ui| {
+            // Buttons on the right, the name truncated to what is left, so a
+            // long feature name never widens the panel.
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.small_button("x").on_hover_text("Delete").clicked() {
+                    to_remove = Some(i);
+                }
+                if ui.small_button("v").on_hover_text("Move later in the history").clicked() {
+                    to_move = Some((i, i + 1));
+                }
+                if ui.small_button("^").on_hover_text("Move earlier in the history").clicked() && i > 0 {
+                    to_move = Some((i, i - 1));
+                }
+                let (txt, tip) = if node.suppressed { ("on", "Unsuppress") } else { ("off", "Suppress") };
+                if ui.small_button(txt).on_hover_text(tip).clicked() {
+                    to_toggle = Some(i);
+                }
                 let mark = if node.error.is_some() {
                     "!"
                 } else if node.suppressed {
@@ -45,7 +60,10 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                 };
                 let label = format!("{mark} {i}: {}", node.feature.name());
                 let sel = st.selected == Some(i);
-                let resp = ui.selectable_label(sel, label);
+                let resp = ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Button::selectable(sel, label.clone()).truncate())
+                });
+                let resp = resp.inner;
                 if resp.clicked() {
                     st.selected = Some(i);
                 }
@@ -53,21 +71,10 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                     st.selected = Some(i);
                     st.open_requested = Some(i);
                 }
-                if let Some(e) = &node.error {
-                    resp.on_hover_text(e);
-                }
-                if ui.small_button(if node.suppressed { "unsuppress" } else { "suppress" }).clicked() {
-                    to_toggle = Some(i);
-                }
-                if ui.small_button("^").on_hover_text("Move earlier in the history").clicked() && i > 0 {
-                    to_move = Some((i, i - 1));
-                }
-                if ui.small_button("v").on_hover_text("Move later in the history").clicked() {
-                    to_move = Some((i, i + 1));
-                }
-                if ui.small_button("x").on_hover_text("Delete").clicked() {
-                    to_remove = Some(i);
-                }
+                match &node.error {
+                    Some(e) => resp.on_hover_text(format!("{label}\n{e}")),
+                    None => resp.on_hover_text(label),
+                };
             });
         }
     });
@@ -262,7 +269,7 @@ pub fn expression_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelSta
         ui.label("name = expression, for example  h = w / 2 + 5");
     });
     let mut edits: Vec<(String, String)> = Vec::new();
-    egui::ScrollArea::horizontal().show(ui, |ui| {
+    egui::ScrollArea::vertical().auto_shrink([false, true]).show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             for p in doc.exprs.iter() {
                 ui.group(|ui| {

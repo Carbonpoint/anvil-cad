@@ -57,13 +57,20 @@ impl Camera {
     }
 
     pub fn fit(&mut self, b: &Aabb) {
+        self.fit_in(b, 1.0);
+    }
+
+    /// Frame the box in a view `aspect` wide per unit of height. A view
+    /// narrower than it is tall moves the camera back so the sides fit too.
+    pub fn fit_in(&mut self, b: &Aabb, aspect: f64) {
         if b.is_empty() {
             return;
         }
+        let narrow = aspect.clamp(0.2, 1.0);
         self.target = b.center();
-        self.distance = (b.diagonal() * 0.6 / (self.fov_y / 2.0).tan()).max(1.0);
+        self.distance = (b.diagonal() * 0.6 / (self.fov_y / 2.0).tan() / narrow).max(1.0);
         if self.ortho_height.is_some() {
-            self.ortho_height = Some(b.diagonal().max(1.0) * 1.2);
+            self.ortho_height = Some(b.diagonal().max(1.0) * 1.2 / narrow);
         }
     }
 

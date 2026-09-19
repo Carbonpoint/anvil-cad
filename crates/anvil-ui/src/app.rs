@@ -57,6 +57,8 @@ pub struct AnvilApp {
     section_on: bool,
     /// Also draw sketches that a later feature already uses.
     show_used_sketches: bool,
+    /// Where the 3D view was drawn last frame, in points.
+    view_rect: egui::Rect,
     section_axis: usize,
     section_offset: f64,
     section_flip: bool,
@@ -81,6 +83,11 @@ const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ",
 
 impl AnvilApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+        Self::new_headless()
+    }
+
+    /// The app without a window, for layout tests.
+    pub fn new_headless() -> Self {
         let ribbon = build_ribbon();
         let active_tab = ribbon.iter().position(|t| t.name == "Solid").unwrap_or(0);
         let mut app = AnvilApp {
@@ -115,6 +122,7 @@ impl AnvilApp {
             filter: SelectFilter::All,
             section_on: false,
             show_used_sketches: false,
+            view_rect: egui::Rect::NOTHING,
             section_axis: 0,
             section_offset: 0.0,
             section_flip: false,
@@ -150,7 +158,7 @@ impl AnvilApp {
         self.camera = Camera::default();
         self.invalidate();
         self.refresh_scene();
-        self.camera.fit(&self.scene.bounds);
+        self.fit_view();
         self.status = "Demo part loaded. Click Sketch, then a plane or a face, to draw.".into();
     }
 
@@ -163,6 +171,14 @@ impl AnvilApp {
             self.scene = Scene::build(&self.doc);
             self.scene_dirty = false;
         }
+    }
+
+    /// Frame every body in the 3D view.
+    fn fit_view(&mut self) {
+        self.refresh_scene();
+        let r = self.view_rect;
+        let aspect = if r.height() > 1.0 && r.width() > 1.0 { (r.width() / r.height()) as f64 } else { 1.0 };
+        self.camera.fit_in(&self.scene.bounds, aspect);
     }
 
     fn scene_size(&self) -> f64 {
@@ -268,7 +284,7 @@ impl AnvilApp {
                         self.camera.unlock();
                         self.invalidate();
                         self.refresh_scene();
-                        self.camera.fit(&self.scene.bounds);
+                        self.fit_view();
                         self.status = format!("Loaded {}", p.display());
                     }
                     Err(e) => self.status = format!("Load failed: {e}"),
@@ -316,7 +332,7 @@ impl AnvilApp {
             }
             RibbonAction::FitView => {
                 self.refresh_scene();
-                self.camera.fit(&self.scene.bounds);
+                self.fit_view();
             }
             RibbonAction::DemoPart => self.load_demo(),
             RibbonAction::EditSketch => match self.panels.selected {
@@ -439,7 +455,7 @@ impl AnvilApp {
                 self.camera.unlock();
                 self.invalidate();
                 self.refresh_scene();
-                self.camera.fit(&self.scene.bounds);
+                self.fit_view();
                 self.file_path = "business_card.anvil".into();
                 self.status = "Business card loaded. Edit the Text and QR features, then File > 3MF (parts).".into();
             }
@@ -481,7 +497,7 @@ impl AnvilApp {
                 self.camera.unlock();
                 self.invalidate();
                 self.refresh_scene();
-                self.camera.fit(&self.scene.bounds);
+                self.fit_view();
                 self.file_path = "kettle_mold.anvil".into();
                 self.status = "Kettle mold loaded: pattern halves, core, and core box halves.".into();
             }
@@ -492,7 +508,7 @@ impl AnvilApp {
                 self.camera.unlock();
                 self.invalidate();
                 self.refresh_scene();
-                self.camera.fit(&self.scene.bounds);
+                self.fit_view();
                 self.file_path = "kettle_gated.anvil".into();
                 self.status = "Kettle with gating loaded. Gating features are on the Casting tab.".into();
             }
@@ -503,7 +519,7 @@ impl AnvilApp {
                 self.camera.unlock();
                 self.invalidate();
                 self.refresh_scene();
-                self.camera.fit(&self.scene.bounds);
+                self.fit_view();
                 self.file_path = "kettle.anvil".into();
                 self.status = "Kettle loaded. Pick the dome and add Pattern on face to change the dots.".into();
             }
@@ -515,7 +531,7 @@ impl AnvilApp {
                 self.camera.unlock();
                 self.invalidate();
                 self.refresh_scene();
-                self.camera.fit(&self.scene.bounds);
+                self.fit_view();
                 self.file_path = format!("workbook_{}.anvil", &name[..2]);
                 self.status = format!("Workbook {name} loaded. Steps in docs/WORKBOOK.md.");
             }
@@ -946,6 +962,7 @@ impl AnvilApp {
         self.refresh_scene();
         let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let rect = resp.rect;
+        self.view_rect = rect;
         let w = (rect.width().max(8.0)) as usize;
         let h = (rect.height().max(8.0)) as usize;
         if self.fb.width != w || self.fb.height != h {
@@ -978,6 +995,30 @@ impl AnvilApp {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.0 {
                 self.camera.zoom((-scroll as f64 * 0.002).exp());
+            }
+            // Touchpad pinch and Ctrl+scroll arrive as a zoom factor.
+            let pinch = ui.input(|i| i.zoom_delta()) as f64;
+            if (pinch - 1.0).abs() > 1e-4 {
+                self.camera.zoom(1.0 / pinch);
+            }
+        }
+        // Keyboard zoom for laptops without a wheel: Home fits, + and - zoom.
+        if !ui.ctx().wants_keyboard_input() {
+            let (home, plus, minus) = ui.input(|i| {
+                (
+                    i.key_pressed(egui::Key::Home),
+                    i.key_pressed(egui::Key::Plus) || i.key_pressed(egui::Key::Equals),
+                    i.key_pressed(egui::Key::Minus),
+                )
+            });
+            if home && !matches!(self.mode, Mode::Sketch(_)) {
+                self.fit_view();
+            }
+            if plus {
+                self.camera.zoom(0.8);
+            }
+            if minus {
+                self.camera.zoom(1.25);
             }
         }
 
@@ -1679,6 +1720,13 @@ impl AnvilApp {
 
 impl eframe::App for AnvilApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.frame_ui(ctx);
+    }
+}
+
+impl AnvilApp {
+    /// One frame of the whole window.
+    fn frame_ui(&mut self, ctx: &egui::Context) {
         self.export_windows(ctx);
         let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {
@@ -1700,8 +1748,6 @@ impl eframe::App for AnvilApp {
 
         egui::TopBottomPanel::bottom("status").show(ctx, |ui| {
             ui.horizontal(|ui| {
-                ui.label(&self.status);
-                ui.separator();
                 ui.label("File:");
                 ui.add(egui::TextEdit::singleline(&mut self.file_path).desired_width(200.0));
                 ui.separator();
@@ -1732,110 +1778,195 @@ impl eframe::App for AnvilApp {
                     ui.add(egui::DragValue::new(&mut self.section_offset).speed(0.5).suffix(" mm"));
                     ui.checkbox(&mut self.section_flip, "flip");
                 }
+                ui.separator();
+                // Last, and cut to the space left, so a long message never
+                // widens the window.
+                ui.add(egui::Label::new(&self.status).truncate());
             });
         });
 
-        egui::TopBottomPanel::bottom("expressions").resizable(true).show(ctx, |ui| {
-            if panels::expression_panel(ui, &mut self.doc, &mut self.panels) {
-                self.invalidate();
-            }
-        });
-
-        egui::SidePanel::left("navigator").default_width(240.0).show(ctx, |ui| {
-            if panels::part_navigator(ui, &mut self.doc, &mut self.panels) {
-                self.invalidate();
-            }
-        });
-
-        egui::SidePanel::right("properties").default_width(270.0).show(ctx, |ui| {
-            if panels::property_panel(ui, &mut self.doc, &mut self.panels) {
-                self.invalidate();
-            }
-            if let Some(sel) = self.panels.selected {
-                let takes_edges =
-                    self.doc.features.get(sel).map(|f| f.feature.clone_box().set_edges(Vec::new(), 0)).unwrap_or(false);
-                if takes_edges {
-                    ui.separator();
-                    let n = self.selected_edges.len();
-                    let btn = ui
-                        .add_enabled(n > 0, egui::Button::new(format!("Use selected edges ({n})")))
-                        .on_hover_text("Click edges in the viewport (Ctrl+click for more), then press this");
-                    if btn.clicked() {
-                        let edges: Vec<[DVec3; 2]> = self.selected_edges.iter().map(|(_, e)| *e).collect();
-                        let picked = self.scene.bodies[self.selected_edges[0].0 as usize].0;
-                        // Edges picked on this feature's own result belong to its input body.
-                        let body = if picked == sel {
-                            self.doc.features[sel]
-                                .feature
-                                .params()
-                                .iter()
-                                .find_map(|p| match p.value {
-                                    anvil_feature::ParamValue::FeatureRef(i) => Some(i),
-                                    _ => None,
-                                })
-                                .unwrap_or(picked)
-                        } else {
-                            picked
-                        };
-                        self.doc.edit_feature(sel, |f| {
-                            f.set_edges(edges, body);
-                        });
-                        self.selected_edges.clear();
-                        self.scene_dirty = true;
-                    }
+        // Panels are capped to a share of the window so the 3D view always
+        // keeps most of the screen, even on a laptop.
+        let screen = ctx.content_rect();
+        egui::TopBottomPanel::bottom("expressions")
+            .resizable(true)
+            .default_height(70.0)
+            .max_height((screen.height() * 0.25).max(60.0))
+            .show(ctx, |ui| {
+                if panels::expression_panel(ui, &mut self.doc, &mut self.panels) {
+                    self.invalidate();
                 }
-                if self
-                    .doc
-                    .features
-                    .get(sel)
-                    .and_then(|f| f.output.as_ref())
-                    .map(|o| !o.bodies.is_empty())
-                    .unwrap_or(false)
-                {
-                    ui.separator();
-                    ui.heading("Appearance");
-                    ui.horizontal(|ui| {
-                        if let Some(c) = self.doc.appearance.get(&sel) {
-                            self.color_edit = *c;
-                        }
-                        if ui.color_edit_button_srgb(&mut self.color_edit).changed() {
-                            self.doc.appearance.insert(sel, self.color_edit);
-                            self.scene_dirty = true;
-                        }
-                        if ui.button("Reset").clicked() {
-                            self.doc.appearance.remove(&sel);
-                            self.scene_dirty = true;
-                        }
-                    });
-                    ui.heading("Physical Material");
-                    let current =
-                        self.doc.material.get(&sel).map(|m| m.name.clone()).unwrap_or_else(|| "(none)".into());
-                    egui::ComboBox::from_id_salt(("material", sel)).selected_text(&current).show_ui(ui, |ui| {
-                        if ui.selectable_label(current == "(none)", "(none)").clicked() {
-                            self.doc.material.remove(&sel);
-                        }
-                        for (name, density) in anvil_feature::MATERIALS {
-                            if ui.selectable_label(current == *name, format!("{name} ({density} g/cm3)")).clicked() {
-                                self.doc
-                                    .material
-                                    .insert(sel, anvil_feature::Material { name: name.to_string(), density: *density });
+            });
+
+        let side_max = (screen.width() * 0.22).max(160.0);
+        egui::SidePanel::left("navigator").default_width(230.0f32.min(side_max)).width_range(140.0..=side_max).show(
+            ctx,
+            |ui| {
+                if panels::part_navigator(ui, &mut self.doc, &mut self.panels) {
+                    self.invalidate();
+                }
+            },
+        );
+
+        egui::SidePanel::right("properties").default_width(260.0f32.min(side_max)).width_range(160.0..=side_max).show(
+            ctx,
+            |ui| {
+                egui::ScrollArea::vertical().id_salt("properties_scroll").show(ui, |ui| {
+                    if panels::property_panel(ui, &mut self.doc, &mut self.panels) {
+                        self.invalidate();
+                    }
+                    if let Some(sel) = self.panels.selected {
+                        let takes_edges = self
+                            .doc
+                            .features
+                            .get(sel)
+                            .map(|f| f.feature.clone_box().set_edges(Vec::new(), 0))
+                            .unwrap_or(false);
+                        if takes_edges {
+                            ui.separator();
+                            let n = self.selected_edges.len();
+                            let btn = ui
+                                .add_enabled(n > 0, egui::Button::new(format!("Use selected edges ({n})")))
+                                .on_hover_text("Click edges in the viewport (Ctrl+click for more), then press this");
+                            if btn.clicked() {
+                                let edges: Vec<[DVec3; 2]> = self.selected_edges.iter().map(|(_, e)| *e).collect();
+                                let picked = self.scene.bodies[self.selected_edges[0].0 as usize].0;
+                                // Edges picked on this feature's own result belong to its input body.
+                                let body = if picked == sel {
+                                    self.doc.features[sel]
+                                        .feature
+                                        .params()
+                                        .iter()
+                                        .find_map(|p| match p.value {
+                                            anvil_feature::ParamValue::FeatureRef(i) => Some(i),
+                                            _ => None,
+                                        })
+                                        .unwrap_or(picked)
+                                } else {
+                                    picked
+                                };
+                                self.doc.edit_feature(sel, |f| {
+                                    f.set_edges(edges, body);
+                                });
+                                self.selected_edges.clear();
+                                self.scene_dirty = true;
                             }
                         }
-                    });
-                    if let Some(m) = self.doc.mass_of(sel) {
-                        ui.label(format!("Mass {m:.2} g"));
+                        if self
+                            .doc
+                            .features
+                            .get(sel)
+                            .and_then(|f| f.output.as_ref())
+                            .map(|o| !o.bodies.is_empty())
+                            .unwrap_or(false)
+                        {
+                            ui.separator();
+                            ui.heading("Appearance");
+                            ui.horizontal(|ui| {
+                                if let Some(c) = self.doc.appearance.get(&sel) {
+                                    self.color_edit = *c;
+                                }
+                                if ui.color_edit_button_srgb(&mut self.color_edit).changed() {
+                                    self.doc.appearance.insert(sel, self.color_edit);
+                                    self.scene_dirty = true;
+                                }
+                                if ui.button("Reset").clicked() {
+                                    self.doc.appearance.remove(&sel);
+                                    self.scene_dirty = true;
+                                }
+                            });
+                            ui.heading("Physical Material");
+                            let current =
+                                self.doc.material.get(&sel).map(|m| m.name.clone()).unwrap_or_else(|| "(none)".into());
+                            egui::ComboBox::from_id_salt(("material", sel)).selected_text(&current).show_ui(ui, |ui| {
+                                if ui.selectable_label(current == "(none)", "(none)").clicked() {
+                                    self.doc.material.remove(&sel);
+                                }
+                                for (name, density) in anvil_feature::MATERIALS {
+                                    if ui
+                                        .selectable_label(current == *name, format!("{name} ({density} g/cm3)"))
+                                        .clicked()
+                                    {
+                                        self.doc.material.insert(
+                                            sel,
+                                            anvil_feature::Material { name: name.to_string(), density: *density },
+                                        );
+                                    }
+                                }
+                            });
+                            if let Some(m) = self.doc.mass_of(sel) {
+                                ui.label(format!("Mass {m:.2} g"));
+                            }
+                        }
+                    }
+                    if let Mode::Sketch(ed) = &self.mode {
+                        ui.separator();
+                        ui.heading("Sketch");
+                        ui.label(format!(
+                            "{} entities, {} constraints",
+                            ed.sketch.entities.len(),
+                            ed.sketch.constraints.len()
+                        ));
+                        ui.label(format!("Selected: {}", ed.selection.len()));
+                        ui.label("Left drag on a point moves it. Right drag pans. Scroll zooms.");
+                    }
+                });
+            },
+        );
+
+        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| self.viewport(ui));
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    /// Lay out the whole window at a size and return the 3D view.
+    fn view_after(app: &mut AnvilApp, w: f32, h: f32, select: Option<usize>) -> egui::Rect {
+        let ctx = egui::Context::default();
+        app.panels.selected = select;
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(w, h))),
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            let _ = ctx.run(input(), |ctx| app.frame_ui(ctx));
+        }
+        app.view_rect
+    }
+
+    #[test]
+    fn samples_leave_room_for_the_view_on_a_laptop() {
+        let cases = [
+            ("start", None),
+            // The mold has the longest history and the most expressions.
+            ("kettle mold", Some(RibbonAction::KettleMold)),
+        ];
+        let mut report = String::new();
+        let mut bad = false;
+        for (name, a) in cases {
+            let mut app = AnvilApp::new_headless();
+            if let Some(a) = a {
+                app.run_action(a);
+            }
+            let last = app.doc.features.len().saturating_sub(1);
+            for (w, h) in [(1280.0, 720.0), (1366.0, 768.0), (1024.0, 640.0)] {
+                for sel in [None, Some(0), Some(last)] {
+                    let r = view_after(&mut app, w, h, sel);
+                    report += &format!(
+                        "{name} {w}x{h} sel {sel:?}: view {:.0} x {:.0} at {:?}\n",
+                        r.width(),
+                        r.height(),
+                        r.min
+                    );
+                    if r.width() < w * 0.45 || r.height() < h * 0.45 {
+                        bad = true;
                     }
                 }
             }
-            if let Mode::Sketch(ed) = &self.mode {
-                ui.separator();
-                ui.heading("Sketch");
-                ui.label(format!("{} entities, {} constraints", ed.sketch.entities.len(), ed.sketch.constraints.len()));
-                ui.label(format!("Selected: {}", ed.selection.len()));
-                ui.label("Left drag on a point moves it. Right drag pans. Scroll zooms.");
-            }
-        });
-
-        egui::CentralPanel::default().frame(egui::Frame::NONE).show(ctx, |ui| self.viewport(ui));
+        }
+        println!("{report}");
+        assert!(!bad, "{report}");
     }
 }
