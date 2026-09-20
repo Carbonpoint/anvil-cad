@@ -256,6 +256,8 @@ dependencies = [
  "egui",
  "log",
  "rfd",
+ "serde",
+ "serde_json",
  "sysinfo",
 ]
 

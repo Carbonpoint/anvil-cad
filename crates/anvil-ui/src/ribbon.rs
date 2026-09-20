@@ -33,6 +33,8 @@ pub enum RibbonAction {
     ToggleScrollDir,
     /// One view or four views (Front, Right, Top, angled).
     ToggleQuadView,
+    /// Show or hide the UI scale and text size settings window.
+    ToggleSettings,
     ViewTop,
     ViewFront,
     ViewRight,
@@ -95,6 +97,7 @@ impl RibbonAction {
             RibbonAction::TogglePerf => "toggle_perf",
             RibbonAction::ToggleScrollDir => "toggle_scroll",
             RibbonAction::ToggleQuadView => "view_quad",
+            RibbonAction::ToggleSettings => "settings",
             RibbonAction::ViewIso => "view_iso",
             RibbonAction::ViewTop => "view_top",
             RibbonAction::ViewFront => "view_front",
@@ -353,6 +356,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 tooltip: "Reverse the mouse wheel zoom direction",
                 order: 1,
                 kind: A(ToggleScrollDir),
+            },
+        ),
+        (
+            "View",
+            "Settings",
+            RibbonButton {
+                label: "Settings",
+                tooltip: "Set the UI scale and text size",
+                order: 2,
+                kind: A(ToggleSettings),
             },
         ),
     ]

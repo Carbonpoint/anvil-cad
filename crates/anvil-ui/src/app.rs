@@ -80,6 +80,9 @@ pub struct AnvilApp {
     /// CPU, memory, and fps overlay (View > Settings > Performance).
     show_perf: bool,
     perf: crate::perf::PerfMonitor,
+    /// UI scale and text size (View > Settings > Settings), persisted.
+    settings: crate::settings::UiSettings,
+    settings_window_open: bool,
     /// In sketch mode: the Sketch tab is showing (not another ribbon tab).
     sketch_tab: bool,
     /// Where the 3D view was drawn last frame, in points.
@@ -107,8 +110,17 @@ enum SelectFilter {
 const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ", Plane::YZ)];
 
 impl AnvilApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self::new_headless()
+    pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        let mut app = Self::new_headless();
+        if let Some(storage) = cc.storage {
+            if let Some(s) =
+                eframe::get_value::<crate::settings::UiSettings>(storage, crate::settings::UiSettings::STORAGE_KEY)
+            {
+                app.settings = s;
+            }
+        }
+        app.settings.apply(&cc.egui_ctx);
+        app
     }
 
     /// The app without a window, for layout tests.
@@ -155,6 +167,8 @@ impl AnvilApp {
             panes: Vec::new(),
             show_perf: false,
             perf: Default::default(),
+            settings: crate::settings::UiSettings::default(),
+            settings_window_open: false,
             section_axis: 0,
             section_offset: 0.0,
             section_flip: false,
@@ -443,6 +457,7 @@ impl AnvilApp {
                     "Scroll direction normal".into()
                 };
             }
+            RibbonAction::ToggleSettings => self.settings_window_open = !self.settings_window_open,
             RibbonAction::DeleteFeature => {
                 let mut all: Vec<usize> = self.multi.clone();
                 if let Some(i) = self.panels.selected {
@@ -852,6 +867,7 @@ impl AnvilApp {
                     | RibbonAction::TogglePerf
                     | RibbonAction::ToggleScrollDir
                     | RibbonAction::ToggleQuadView
+                    | RibbonAction::ToggleSettings
             );
             if in_sketch && !view_only {
                 self.finish_sketch();
@@ -1993,11 +2009,25 @@ impl AnvilApp {
             }
         }
     }
+
+    /// The UI scale and text size window (View > Settings > Settings).
+    fn settings_window(&mut self, ctx: &egui::Context) {
+        if !self.settings_window_open {
+            return;
+        }
+        if crate::settings::window(ctx, &mut self.settings_window_open, &mut self.settings) {
+            self.settings.apply(ctx);
+        }
+    }
 }
 
 impl eframe::App for AnvilApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.frame_ui(ctx);
+    }
+
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        eframe::set_value(storage, crate::settings::UiSettings::STORAGE_KEY, &self.settings);
     }
 }
 
@@ -2015,6 +2045,7 @@ impl AnvilApp {
 
     fn frame_ui_inner(&mut self, ctx: &egui::Context) {
         self.export_windows(ctx);
+        self.settings_window(ctx);
         let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {
             (i.modifiers.command && i.key_pressed(egui::Key::Z), i.modifiers.command && i.key_pressed(egui::Key::Y))
@@ -2211,7 +2242,12 @@ mod layout_tests {
 
     /// Lay out the whole window at a size and return the 3D view.
     fn view_after(app: &mut AnvilApp, w: f32, h: f32, select: Option<usize>) -> egui::Rect {
-        let ctx = egui::Context::default();
+        view_after_ctx(&egui::Context::default(), app, w, h, select)
+    }
+
+    /// Like `view_after`, but on a caller-supplied context (so a test can
+    /// apply settings, such as UI scale, to it first).
+    fn view_after_ctx(ctx: &egui::Context, app: &mut AnvilApp, w: f32, h: f32, select: Option<usize>) -> egui::Rect {
         app.panels.selected = select;
         let input = || egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(w, h))),
@@ -2277,5 +2313,26 @@ mod layout_tests {
         }
         println!("{report}");
         assert!(!bad, "{report}");
+    }
+
+    /// A 2.0 UI scale and a bigger base text size must not make the ribbon
+    /// crowd out the 3D view on a 1366x768 window.
+    #[test]
+    fn ui_scale_still_leaves_room_for_the_view() {
+        let settings = crate::settings::UiSettings { scale: 2.0, base_text: 18.0 };
+        let ctx = egui::Context::default();
+        let mut app = AnvilApp::new_headless();
+        let (w, h) = (1366.0, 768.0);
+        // Warm up at the default zoom first, so egui has a known previous
+        // frame's screen size before we change the zoom factor (a fresh
+        // context has none, and egui's zoom-change logic needs one), then
+        // one more pass to let the change settle before measuring.
+        let _ = view_after_ctx(&ctx, &mut app, w, h, None);
+        app.settings = settings;
+        settings.apply(&ctx);
+        let _ = view_after_ctx(&ctx, &mut app, w, h, None);
+        let r = view_after_ctx(&ctx, &mut app, w, h, None);
+        println!("2x scale {w:.0}x{h:.0}: view {:.0} x {:.0}", r.width(), r.height());
+        assert!(r.width() >= w * 0.45 && r.height() >= h * 0.45, "view too small at 2x scale: {r:?} in {w}x{h}");
     }
 }

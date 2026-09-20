@@ -18,3 +18,7 @@ egui.workspace = true
 rfd.workspace = true
 sysinfo.workspace = true
 log.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true

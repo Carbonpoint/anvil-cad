@@ -526,6 +526,15 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.arrow((0.16, 0.6), (0.16, 0.3));
             c.arrow((0.84, 0.4), (0.84, 0.7));
         }
+        "settings" => {
+            c.circle((0.5, 0.5), 0.16);
+            for i in 0..8 {
+                let a = i as f32 * TAU / 8.0;
+                let (x0, y0) = (0.5 + 0.24 * a.cos(), 0.5 + 0.24 * a.sin());
+                let (x1, y1) = (0.5 + 0.4 * a.cos(), 0.5 + 0.4 * a.sin());
+                c.line((x0, y0), (x1, y1));
+            }
+        }
         "view_iso" => draw_cube(&c),
         "view_top" => {
             c.rect((0.2, 0.2), (0.8, 0.8));
@@ -862,6 +871,10 @@ pub fn icon_only(ui: &mut egui::Ui, id: &str, label: &str) -> egui::Response {
     button_core(ui, id, label, false, false, egui::vec2(30.0, 30.0))
 }
 
+/// Font size for the command name shown at the top of every icon button's
+/// tooltip, clearly larger than the surrounding UI text.
+const TOOLTIP_NAME_SIZE: f32 = 17.0;
+
 fn button_core(
     ui: &mut egui::Ui,
     id: &str,
@@ -870,7 +883,7 @@ fn button_core(
     selected: bool,
     min_size: egui::Vec2,
 ) -> egui::Response {
-    let icon_size = 18.0;
+    let icon_size = 22.0;
     let padding = ui.spacing().button_padding;
     let font_id = egui::TextStyle::Small.resolve(ui.style());
     let text_color = ui.visuals().text_color();
@@ -904,7 +917,10 @@ fn button_core(
             ui.painter().galley(pos, g, visuals.text_color());
         }
     }
-    response
+    let name = label.to_string();
+    response.on_hover_ui(move |ui| {
+        ui.label(egui::RichText::new(&name).size(TOOLTIP_NAME_SIZE).strong());
+    })
 }
 
 // ---------------------------------------------------------------------
