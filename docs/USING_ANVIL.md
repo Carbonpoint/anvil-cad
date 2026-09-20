@@ -320,6 +320,15 @@ boolean now closes any open loop smaller than one percent of the body
 after the seam repair, so a long chain of joins stays watertight. A bigger hole still shows in the open edge count, because
 it means a real defect.
 
+## Implicit modelling tutorials
+
+The sections from here to Aircraft are reference: what each parameter
+means. For worked tasks with the commands, the output, and the numbers
+to check, see `docs/tutorials/README.md`. Eight tutorials cover what
+implicit modelling is here, TPMS and beam lattices, grading by axis,
+radius, distance and data, meshing and slices, a full bracket and wing,
+and the Fidget back end.
+
 ## Lattice fill
 
 Lattice fill (Solid tab, Field group) replaces the inside of a body with

@@ -1,0 +1,49 @@
+{
+  "name": "graded_cell",
+  "features": [
+    {
+      "feature": {
+        "type": "box",
+        "x": "0",
+        "y": "0",
+        "z": "0",
+        "width": "plate_x",
+        "depth": "plate_y",
+        "height": "plate_z"
+      },
+      "suppressed": false
+    },
+    {
+      "feature": {
+        "type": "lattice_fill",
+        "body": 0,
+        "lattice": "gyroid",
+        "cell": "cell_near",
+        "wall": "wall",
+        "wall_end": "0",
+        "cell_end": "cell_far",
+        "grade": "x",
+        "conform": "none",
+        "ref_body": 0,
+        "map_file": "",
+        "map_lo": "0",
+        "map_hi": "0",
+        "skin": "0",
+        "resolution": "res"
+      },
+      "suppressed": false
+    }
+  ],
+  "exprs": {
+    "params": {
+      "plate_x": { "name": "plate_x", "source": "60", "value": 0.0 },
+      "plate_y": { "name": "plate_y", "source": "20", "value": 0.0 },
+      "plate_z": { "name": "plate_z", "source": "20", "value": 0.0 },
+      "res": { "name": "res", "source": "0.5", "value": 0.0 },
+      "wall": { "name": "wall", "source": "1", "value": 0.0 },
+      "cell_near": { "name": "cell_near", "source": "5", "value": 0.0 },
+      "cell_far": { "name": "cell_far", "source": "15", "value": 0.0 }
+    }
+  },
+  "unit": "mm"
+}

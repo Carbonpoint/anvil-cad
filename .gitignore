@@ -5,3 +5,6 @@
 *.nc
 .DS_Store
 .claude/
+
+# The tutorial example documents are part of the repository.
+!docs/tutorials/files/*.anvil

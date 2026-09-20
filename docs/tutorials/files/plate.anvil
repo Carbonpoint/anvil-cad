@@ -1,0 +1,25 @@
+{
+  "name": "plate",
+  "features": [
+    {
+      "feature": {
+        "type": "box",
+        "x": "0",
+        "y": "0",
+        "z": "0",
+        "width": "plate_x",
+        "depth": "plate_y",
+        "height": "plate_z"
+      },
+      "suppressed": false
+    }
+  ],
+  "exprs": {
+    "params": {
+      "plate_x": { "name": "plate_x", "source": "60", "value": 0.0 },
+      "plate_y": { "name": "plate_y", "source": "40", "value": 0.0 },
+      "plate_z": { "name": "plate_z", "source": "20", "value": 0.0 }
+    }
+  },
+  "unit": "mm"
+}
