@@ -100,7 +100,8 @@ pub fn draw_sketch(
 ) {
     let Some(out) = doc.features.get(idx).and_then(|n| n.output.as_ref()) else { return };
     let Some(plane) = out.plane else { return };
-    let base = if highlight { Color32::from_rgb(230, 130, 20) } else { Color32::from_rgb(20, 60, 170) };
+    let style = painter.ctx().style();
+    let base = if highlight { style.visuals.warn_fg_color } else { style.visuals.hyperlink_color };
     let vis = Stroke::new(if highlight { 2.4f32 } else { 1.8f32 }, base);
     let hid = Stroke::new(1.0f32, base.gamma_multiply(0.35));
     let polyline = |pts: &[DVec2], closed: bool| {
@@ -161,14 +162,17 @@ pub fn draw_regions(
     let to_screen = |p: DVec2| {
         proj.project(pick.plane.to_world(p)).map(|(x, y, _)| Pos2::new(origin.x + x as f32, origin.y + y as f32))
     };
+    let style = painter.ctx().style();
+    let (used_color, unused_color) = (style.visuals.warn_fg_color, style.visuals.hyperlink_color);
+    let with_alpha = |c: Color32, a: u8| Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a);
     for (i, Region { outer, holes, .. }) in pick.regions.iter().enumerate() {
         let used = region_select::is_selected(&pick.regions, &pick.spec, i);
         let hot = hovered == Some(i);
         let fill = match (used, hot) {
-            (true, true) => Color32::from_rgba_unmultiplied(240, 150, 30, 150),
-            (true, false) => Color32::from_rgba_unmultiplied(240, 150, 30, 95),
-            (false, true) => Color32::from_rgba_unmultiplied(90, 150, 230, 110),
-            (false, false) => Color32::from_rgba_unmultiplied(90, 140, 220, 35),
+            (true, true) => with_alpha(used_color, 150),
+            (true, false) => with_alpha(used_color, 95),
+            (false, true) => with_alpha(unused_color, 110),
+            (false, false) => with_alpha(unused_color, 35),
         };
         let mut pts: Vec<DVec2> = outer.clone();
         let mut hole_idx = Vec::new();
@@ -190,10 +194,7 @@ pub fn draw_regions(
         }
         painter.add(egui::Shape::mesh(mesh));
         if used || hot {
-            let stroke = Stroke::new(
-                2.0f32,
-                if used { Color32::from_rgb(220, 120, 10) } else { Color32::from_rgb(40, 110, 210) },
-            );
+            let stroke = Stroke::new(2.0f32, if used { used_color } else { unused_color });
             for lp in std::iter::once(outer).chain(holes.iter()) {
                 let s: Vec<Pos2> = lp.iter().filter_map(|&p| to_screen(p)).collect();
                 painter.add(egui::Shape::closed_line(s, stroke));

@@ -2044,6 +2044,10 @@ impl AnvilApp {
     }
 
     fn frame_ui_inner(&mut self, ctx: &egui::Context) {
+        // Installs the Material 3 theme (colours, shape, type scale) for
+        // both light and dark, sets the active preference, and recolours
+        // the 3D viewport to match. See `theme.rs`.
+        self.style.apply_scheme(&crate::theme::install(ctx, &self.settings));
         self.export_windows(ctx);
         self.settings_window(ctx);
         let typing = ctx.wants_keyboard_input();
@@ -2319,7 +2323,7 @@ mod layout_tests {
     /// crowd out the 3D view on a 1366x768 window.
     #[test]
     fn ui_scale_still_leaves_room_for_the_view() {
-        let settings = crate::settings::UiSettings { scale: 2.0, base_text: 18.0 };
+        let settings = crate::settings::UiSettings { scale: 2.0, base_text: 18.0, ..Default::default() };
         let ctx = egui::Context::default();
         let mut app = AnvilApp::new_headless();
         let (w, h) = (1366.0, 768.0);

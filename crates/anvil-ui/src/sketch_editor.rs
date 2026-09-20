@@ -1224,6 +1224,8 @@ impl SketchEditor {
     // ---------------- drawing ----------------
 
     pub fn draw(&self, painter: &egui::Painter, origin: Pos2, proj: &Projector) {
+        let style = painter.ctx().style();
+        let vis = &style.visuals;
         let plane = self.sketch.plane;
         let to_screen = |p: DVec2| -> Option<Pos2> {
             proj.project(plane.to_world(p)).map(|(x, y, _)| Pos2::new(origin.x + x as f32, origin.y + y as f32))
@@ -1237,8 +1239,8 @@ impl SketchEditor {
             let n = ((half_w.max(half_h)) / self.grid).ceil() as i64 + 1;
             let gx = (c.x / self.grid).round() as i64;
             let gy = (c.y / self.grid).round() as i64;
-            let faint = Stroke::new(0.5f32, Color32::from_rgb(205, 210, 218));
-            let strong = Stroke::new(1.0f32, Color32::from_rgb(150, 155, 165));
+            let faint = Stroke::new(0.5f32, vis.weak_text_color().gamma_multiply(0.5));
+            let strong = Stroke::new(1.0f32, vis.weak_text_color());
             for i in -n..=n {
                 let x = (gx + i) as f64 * self.grid;
                 let y = (gy + i) as f64 * self.grid;
@@ -1254,10 +1256,10 @@ impl SketchEditor {
                 }
             }
         }
-        let normal = Stroke::new(1.6f32, Color32::from_rgb(20, 40, 90));
-        let constr = Stroke::new(1.0f32, Color32::from_rgb(120, 130, 150));
-        let sel_stroke = Stroke::new(2.4f32, Color32::from_rgb(240, 150, 30));
-        let hov_stroke = Stroke::new(2.2f32, Color32::from_rgb(60, 160, 240));
+        let normal = Stroke::new(1.6f32, vis.text_color());
+        let constr = Stroke::new(1.0f32, vis.weak_text_color());
+        let sel_stroke = Stroke::new(2.4f32, vis.warn_fg_color);
+        let hov_stroke = Stroke::new(2.2f32, vis.hyperlink_color);
         let stroke_for = |id: EntityId, construction: bool| {
             if self.selection.contains(&id) {
                 sel_stroke
@@ -1290,13 +1292,13 @@ impl SketchEditor {
                         let fixed =
                             self.sketch.constraints.values().any(|c| matches!(c, Constraint::Fix(f) if *f == id));
                         let col = if self.selection.contains(&id) {
-                            Color32::from_rgb(240, 150, 30)
+                            vis.warn_fg_color
                         } else if self.hover == Some(id) {
-                            Color32::from_rgb(60, 160, 240)
+                            vis.hyperlink_color
                         } else if fixed {
-                            Color32::from_rgb(30, 30, 30)
+                            vis.text_color()
                         } else {
-                            Color32::from_rgb(20, 60, 160)
+                            vis.weak_text_color()
                         };
                         painter.rect_filled(egui::Rect::from_center_size(p, egui::vec2(6.0, 6.0)), 1.0, col);
                     }
@@ -1334,7 +1336,7 @@ impl SketchEditor {
                     },
                 };
                 if !glyph.is_empty() {
-                    let col = if editing { Color32::from_rgb(230, 120, 20) } else { Color32::from_rgb(150, 60, 20) };
+                    let col = if editing { vis.warn_fg_color } else { vis.weak_text_color() };
                     let size = if c.value().is_some() { 12.5 } else { 11.0 };
                     painter.text(
                         p + egui::vec2(6.0, -10.0),
@@ -1348,7 +1350,7 @@ impl SketchEditor {
         }
         // Tool preview.
         if let Some(cur) = self.cursor {
-            let preview = Stroke::new(1.2f32, Color32::from_rgb(90, 90, 90));
+            let preview = Stroke::new(1.2f32, vis.weak_text_color());
             let c = &self.clicks;
             let mut segs: Vec<[DVec2; 2]> = Vec::new();
             let mut circles: Vec<(DVec2, f64)> = Vec::new();
@@ -1459,24 +1461,25 @@ impl SketchEditor {
                 painter.add(egui::Shape::line(pts, preview));
             }
             if let Some(p) = to_screen(cur) {
-                let col = Color32::from_rgb(60, 60, 60);
+                let col = vis.text_color();
+                let snap_col = vis.warn_fg_color;
                 match self.snap_kind {
                     "point" => {
                         painter.rect_stroke(
                             egui::Rect::from_center_size(p, egui::vec2(10.0, 10.0)),
                             0.0,
-                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                            Stroke::new(1.5f32, snap_col),
                             egui::StrokeKind::Middle,
                         );
                     }
                     "mid" => {
                         painter.add(egui::Shape::closed_line(
                             vec![p + egui::vec2(0.0, -6.0), p + egui::vec2(6.0, 5.0), p + egui::vec2(-6.0, 5.0)],
-                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                            Stroke::new(1.5f32, snap_col),
                         ));
                     }
                     "center" => {
-                        painter.circle_stroke(p, 6.0, Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)));
+                        painter.circle_stroke(p, 6.0, Stroke::new(1.5f32, snap_col));
                     }
                     "quad" => {
                         painter.add(egui::Shape::closed_line(
@@ -1486,13 +1489,13 @@ impl SketchEditor {
                                 p + egui::vec2(0.0, 6.0),
                                 p + egui::vec2(-6.0, 0.0),
                             ],
-                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                            Stroke::new(1.5f32, snap_col),
                         ));
                     }
                     "curve" => {
                         painter.line_segment(
                             [p + egui::vec2(-5.0, -5.0), p + egui::vec2(5.0, 5.0)],
-                            Stroke::new(1.5f32, Color32::from_rgb(230, 120, 20)),
+                            Stroke::new(1.5f32, snap_col),
                         );
                     }
                     _ => {

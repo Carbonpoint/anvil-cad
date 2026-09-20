@@ -44,6 +44,19 @@ impl Default for Style {
     }
 }
 
+impl Style {
+    /// Recolour the viewport to match a Material 3 [`crate::theme::Scheme`]
+    /// (background and edges), keeping runtime toggles (`draw_edges`,
+    /// `section`) as they were. `selected` and `hovered` stay fixed
+    /// accents: a recognisable colour that does not shift with the theme
+    /// helps the eye find the current pick in either scheme.
+    pub fn apply_scheme(&mut self, scheme: &crate::theme::Scheme) {
+        self.background = scheme.surface;
+        self.body = scheme.model_body();
+        self.edge = scheme.on_surface;
+    }
+}
+
 impl Framebuffer {
     pub fn new(width: usize, height: usize) -> Self {
         let n = width * height;

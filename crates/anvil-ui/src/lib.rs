@@ -23,6 +23,7 @@ mod scene;
 mod settings;
 mod sketch_editor;
 mod sketch_view;
+mod theme;
 
 pub use app::AnvilApp;
 

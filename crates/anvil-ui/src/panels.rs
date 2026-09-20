@@ -27,7 +27,7 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
     let mut changed = false;
     ui.heading("Part Navigator");
     if !st.message.is_empty() {
-        ui.colored_label(egui::Color32::from_rgb(200, 90, 40), &st.message);
+        ui.colored_label(ui.visuals().warn_fg_color, &st.message);
     }
     ui.separator();
     let mut to_remove = None;
@@ -121,11 +121,15 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
     ui.label(doc.features[idx].feature.name());
     if let Some(note) = doc.features[idx].output.as_ref().and_then(|o| o.note.as_ref()) {
         let warn = note.contains("needs about");
-        let color = if warn { egui::Color32::from_rgb(200, 110, 20) } else { egui::Color32::from_rgb(60, 120, 70) };
+        // "Good" notes (a feature that computed cleanly) get a calm green;
+        // M3 does not reserve a role for this, so it stays fixed rather
+        // than riding the seed hue.
+        const GOOD: egui::Color32 = egui::Color32::from_rgb(46, 130, 80);
+        let color = if warn { ui.visuals().warn_fg_color } else { GOOD };
         ui.colored_label(color, note);
     }
     if let Some(e) = &doc.features[idx].error {
-        ui.colored_label(egui::Color32::from_rgb(220, 80, 60), e);
+        ui.colored_label(ui.visuals().error_fg_color, e);
     }
     let mut pending: Option<(&'static str, ParamValue)> = None;
     egui::Grid::new("props").num_columns(2).show(ui, |ui| {
