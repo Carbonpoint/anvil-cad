@@ -138,6 +138,10 @@ pub struct Document {
     /// Display unit: "mm" or "in". Geometry is always stored in mm.
     #[serde(default = "default_unit")]
     pub unit: String,
+    /// Rollback bar: features from this index on are held back and not
+    /// computed. `None` runs the whole history.
+    #[serde(default)]
+    pub rollback: Option<usize>,
     #[serde(skip)]
     undo: Vec<Snapshot>,
     #[serde(skip)]
@@ -148,6 +152,7 @@ pub struct Document {
 struct Snapshot {
     features: Vec<FeatureNode>,
     exprs: ExprTable,
+    rollback: Option<usize>,
 }
 
 fn default_unit() -> String {
@@ -163,6 +168,7 @@ impl Default for Document {
             appearance: Default::default(),
             material: Default::default(),
             unit: default_unit(),
+            rollback: None,
             undo: Vec::new(),
             redo: Vec::new(),
         }
@@ -175,7 +181,11 @@ impl Document {
     }
 
     fn snapshot(&mut self) {
-        self.undo.push(Snapshot { features: self.features.clone(), exprs: self.exprs.clone() });
+        self.undo.push(Snapshot {
+            features: self.features.clone(),
+            exprs: self.exprs.clone(),
+            rollback: self.rollback,
+        });
         self.redo.clear();
         if self.undo.len() > 200 {
             self.undo.remove(0);
@@ -191,18 +201,28 @@ impl Document {
 
     pub fn undo(&mut self) {
         if let Some(s) = self.undo.pop() {
-            self.redo.push(Snapshot { features: std::mem::take(&mut self.features), exprs: self.exprs.clone() });
+            self.redo.push(Snapshot {
+                features: std::mem::take(&mut self.features),
+                exprs: self.exprs.clone(),
+                rollback: self.rollback,
+            });
             self.features = s.features;
             self.exprs = s.exprs;
+            self.rollback = s.rollback;
             self.regenerate();
         }
     }
 
     pub fn redo(&mut self) {
         if let Some(s) = self.redo.pop() {
-            self.undo.push(Snapshot { features: std::mem::take(&mut self.features), exprs: self.exprs.clone() });
+            self.undo.push(Snapshot {
+                features: std::mem::take(&mut self.features),
+                exprs: self.exprs.clone(),
+                rollback: self.rollback,
+            });
             self.features = s.features;
             self.exprs = s.exprs;
+            self.rollback = s.rollback;
             self.regenerate();
         }
     }
@@ -210,8 +230,29 @@ impl Document {
     /// Append a feature and regenerate. Returns its index.
     pub fn add_feature(&mut self, feature: Box<dyn Feature>) -> FeatureId {
         self.snapshot();
-        self.features.push(FeatureNode { feature, suppressed: false, output: None, error: None });
-        let idx = self.features.len() - 1;
+        let node = FeatureNode { feature, suppressed: false, output: None, error: None };
+        // While the history is rolled back, a new feature goes in at the
+        // bar, and the bar moves past it. Later features keep their order.
+        let idx = match self.rollback {
+            Some(r) if r < self.features.len() => {
+                self.features.insert(r, node);
+                let map = |old: usize| -> Option<usize> {
+                    if old == usize::MAX || old < r {
+                        Some(old)
+                    } else {
+                        Some(old + 1)
+                    }
+                };
+                self.remap_all(&map);
+                self.remap_maps(&map);
+                self.rollback = Some(r + 1).filter(|n| *n < self.features.len());
+                r
+            }
+            _ => {
+                self.features.push(node);
+                self.features.len() - 1
+            }
+        };
         self.regenerate_from(idx);
         idx
     }
@@ -226,6 +267,11 @@ impl Document {
         }
         self.snapshot();
         self.features.remove(idx);
+        self.rollback = self.rollback.and_then(|r| match r {
+            r if r > idx => Some(r - 1),
+            r if r == idx => Some(r).filter(|n| *n < self.features.len()),
+            r => Some(r),
+        });
         let map = |old: usize| -> Option<usize> {
             if old == usize::MAX || old < idx {
                 Some(old)
@@ -345,6 +391,30 @@ impl Document {
 
     /// Run the whole history in order. Errors are stored per feature; the
     /// rest of the history still runs.
+    /// True when feature `idx` sits after the rollback bar, so it is not
+    /// computed. Everything from the bar on is held back at once.
+    pub fn rolled_back(&self, idx: FeatureId) -> bool {
+        self.rollback.is_some_and(|r| idx >= r)
+    }
+
+    /// Move the rollback bar. `None` puts it after the last feature, so
+    /// the whole history runs.
+    pub fn set_rollback(&mut self, at: Option<FeatureId>) {
+        let at = at.filter(|r| *r < self.features.len());
+        if at == self.rollback {
+            return;
+        }
+        self.snapshot();
+        let first = match (self.rollback, at) {
+            (Some(a), Some(b)) => a.min(b),
+            (Some(a), None) => a,
+            (None, Some(b)) => b,
+            (None, None) => 0,
+        };
+        self.rollback = at;
+        self.regenerate_from(first);
+    }
+
     pub fn regenerate(&mut self) {
         self.regenerate_from(0);
     }
@@ -363,7 +433,7 @@ impl Document {
             outputs.push(node.output.clone());
         }
         for i in start..self.features.len() {
-            if self.features[i].suppressed {
+            if self.features[i].suppressed || self.rolled_back(i) {
                 self.features[i].output = None;
                 self.features[i].error = None;
                 outputs.push(None);

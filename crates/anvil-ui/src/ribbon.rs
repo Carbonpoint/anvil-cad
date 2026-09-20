@@ -33,6 +33,10 @@ pub enum RibbonAction {
     ToggleScrollDir,
     /// One view or four views (Front, Right, Top, angled).
     ToggleQuadView,
+    /// Orthographic or perspective for the active view.
+    ToggleProjection,
+    /// Which world axis stays vertical: 0 X, 1 Y, 2 Z, 3 free.
+    SetUpAxis(u8),
     /// Show or hide the UI scale and text size settings window.
     ToggleSettings,
     ViewTop,
@@ -97,6 +101,8 @@ impl RibbonAction {
             RibbonAction::TogglePerf => "toggle_perf",
             RibbonAction::ToggleScrollDir => "toggle_scroll",
             RibbonAction::ToggleQuadView => "view_quad",
+            RibbonAction::ToggleProjection => "projection",
+            RibbonAction::SetUpAxis(_) => "up_axis",
             RibbonAction::ToggleSettings => "settings",
             RibbonAction::ViewIso => "view_iso",
             RibbonAction::ViewTop => "view_top",
@@ -316,6 +322,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "View",
             "Camera",
             RibbonButton {
+                label: "Ortho/Persp",
+                tooltip: "Orthographic (like a drawing) or perspective for the view under the pointer",
+                order: 6,
+                kind: A(ToggleProjection),
+            },
+        ),
+        (
+            "View",
+            "Camera",
+            RibbonButton {
                 label: "Four views",
                 tooltip: "Front, Right, Top, and an angled view in four panes",
                 order: 5,
@@ -370,6 +386,14 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
         ),
     ]
 }
+
+/// Which axis stays vertical on screen. The buttons sit in View > Camera.
+const UP_AXES: [(&str, &str); 4] = [
+    ("X up", "Keep the X axis vertical on screen"),
+    ("Y up", "Keep the Y axis vertical on screen"),
+    ("Z up", "Keep the Z axis vertical on screen (the default)"),
+    ("Free orbit", "Hold no axis vertical: the view tumbles freely"),
+];
 
 pub fn build_ribbon() -> Vec<RibbonTab> {
     let mut tabs: Vec<RibbonTab> = Vec::new();
@@ -436,6 +460,18 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
             kind: ButtonKind::Action(RibbonAction::KettleMold),
         },
     );
+    for (i, (label, tooltip)) in UP_AXES.iter().enumerate() {
+        place(
+            "View",
+            "Camera",
+            RibbonButton {
+                label,
+                tooltip,
+                order: 10 + i as u32,
+                kind: ButtonKind::Action(RibbonAction::SetUpAxis(i as u8)),
+            },
+        );
+    }
     for d in descriptors() {
         place(
             d.tab,

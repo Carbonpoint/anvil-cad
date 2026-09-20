@@ -514,6 +514,15 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.rect_fill((0.43, 0.3), (0.57, 0.88));
             c.rect_fill((0.68, 0.45), (0.82, 0.88));
         }
+        "projection" => {
+            // A box drawn straight, and the same box in perspective.
+            c.rect((0.08, 0.3), (0.42, 0.72));
+            c.poly_closed(&[(0.58, 0.24), (0.94, 0.36), (0.94, 0.66), (0.58, 0.78)]);
+        }
+        "up_axis" => {
+            c.arrow((0.5, 0.9), (0.5, 0.12));
+            c.line((0.2, 0.9), (0.8, 0.9));
+        }
         "view_quad" => {
             c.rect((0.12, 0.12), (0.88, 0.88));
             c.line((0.5, 0.12), (0.5, 0.88));

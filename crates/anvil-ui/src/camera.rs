@@ -1,6 +1,37 @@
 //! Camera and projection shared by the renderer, the overlays, and picking.
 
-use anvil_math::{Aabb, DVec3, Plane};
+use anvil_math::{Aabb, DQuat, DVec3, Plane};
+
+/// Which world axis stays vertical on screen while orbiting. `Free` lets
+/// the view tumble in any direction, like a trackball.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum UpAxis {
+    X,
+    Y,
+    Z,
+    Free,
+}
+
+impl UpAxis {
+    pub fn label(self) -> &'static str {
+        match self {
+            UpAxis::X => "X up",
+            UpAxis::Y => "Y up",
+            UpAxis::Z => "Z up",
+            UpAxis::Free => "Free",
+        }
+    }
+
+    /// (first horizontal axis, second horizontal axis, up). Free has none.
+    fn frame(self) -> Option<(DVec3, DVec3, DVec3)> {
+        match self {
+            UpAxis::X => Some((DVec3::Y, DVec3::Z, DVec3::X)),
+            UpAxis::Y => Some((DVec3::Z, DVec3::X, DVec3::Y)),
+            UpAxis::Z => Some((DVec3::X, DVec3::Y, DVec3::Z)),
+            UpAxis::Free => None,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct Camera {
@@ -15,6 +46,11 @@ pub struct Camera {
     /// Fixed view frame (forward, up) used while sketching. Orbit is
     /// disabled while set.
     pub locked_frame: Option<(DVec3, DVec3)>,
+    /// World axis kept vertical while orbiting.
+    pub up_axis: UpAxis,
+    /// Orientation used when `up_axis` is `Free`: it maps the view frame
+    /// (x right, y up, minus z forward) into the world.
+    pub orient: DQuat,
 }
 
 impl Default for Camera {
@@ -27,6 +63,8 @@ impl Default for Camera {
             fov_y: 40f64.to_radians(),
             ortho_height: None,
             locked_frame: None,
+            up_axis: UpAxis::Z,
+            orient: DQuat::IDENTITY,
         }
     }
 }
@@ -36,24 +74,64 @@ impl Camera {
         if let Some((f, _)) = self.locked_frame {
             return f;
         }
-        -DVec3::new(self.yaw.cos() * self.pitch.cos(), self.yaw.sin() * self.pitch.cos(), self.pitch.sin())
+        match self.up_axis.frame() {
+            Some((e1, e2, up)) => {
+                -(e1 * (self.yaw.cos() * self.pitch.cos())
+                    + e2 * (self.yaw.sin() * self.pitch.cos())
+                    + up * self.pitch.sin())
+            }
+            None => self.orient * DVec3::NEG_Z,
+        }
     }
 
     pub fn eye(&self) -> DVec3 {
         self.target - self.forward() * self.distance
     }
 
-    /// Basis: (right, up, forward) unit vectors. Z is world up in free orbit.
+    /// Basis: (right, up, forward) unit vectors.
     pub fn basis(&self) -> (DVec3, DVec3, DVec3) {
         let fwd = self.forward();
         if let Some((_, up)) = self.locked_frame {
             let right = fwd.cross(up).normalize();
             return (right, up, fwd);
         }
-        let right = fwd.cross(DVec3::Z).normalize_or_zero();
-        let right = if right.length_squared() < 1e-12 { DVec3::X } else { right };
+        let Some((e1, _, world_up)) = self.up_axis.frame() else {
+            return (self.orient * DVec3::X, self.orient * DVec3::Y, fwd);
+        };
+        let right = fwd.cross(world_up).normalize_or_zero();
+        let right = if right.length_squared() < 1e-12 { e1 } else { right };
         let up = right.cross(fwd).normalize();
         (right, up, fwd)
+    }
+
+    /// Change which axis stays vertical, keeping the current view
+    /// direction as closely as the new mode allows.
+    pub fn set_up_axis(&mut self, axis: UpAxis) {
+        if axis == self.up_axis {
+            return;
+        }
+        let (right, up, fwd) = self.basis();
+        self.up_axis = axis;
+        match axis.frame() {
+            Some((e1, e2, world_up)) => {
+                // Read yaw and pitch back from the direction we look along.
+                let d = -fwd;
+                self.pitch = d.dot(world_up).clamp(-1.0, 1.0).asin();
+                self.yaw = d.dot(e2).atan2(d.dot(e1));
+            }
+            None => {
+                self.orient = DQuat::from_mat3(&anvil_math::DMat3::from_cols(right, up, -fwd));
+            }
+        }
+    }
+
+    /// Orthographic if `on`, framed on a box of this diagonal.
+    pub fn set_ortho(&mut self, on: bool, view_height: f64) {
+        self.ortho_height = on.then(|| view_height.max(1.0));
+    }
+
+    pub fn is_ortho(&self) -> bool {
+        self.ortho_height.is_some()
     }
 
     pub fn fit(&mut self, b: &Aabb) {
@@ -89,6 +167,13 @@ impl Camera {
 
     pub fn orbit(&mut self, dx: f64, dy: f64) {
         if self.locked_frame.is_some() {
+            return;
+        }
+        if self.up_axis == UpAxis::Free {
+            // Trackball: turn about the axes of the view itself.
+            let (right, up, _) = self.basis();
+            let q = DQuat::from_axis_angle(up, -dx * 0.01) * DQuat::from_axis_angle(right, dy * 0.01);
+            self.orient = (q * self.orient).normalize();
             return;
         }
         self.yaw -= dx * 0.01;
@@ -177,5 +262,48 @@ impl Projector {
             return None;
         }
         Some(plane.to_local(o + d * t))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn up_axis_keeps_the_view_direction() {
+        let mut c = Camera { yaw: 0.6, pitch: 0.4, ..Camera::default() };
+        let before = c.forward();
+        for axis in [UpAxis::X, UpAxis::Y, UpAxis::Free, UpAxis::Z] {
+            c.set_up_axis(axis);
+            assert!((c.forward() - before).length() < 1e-9, "{axis:?} moved the view");
+            let (_, up, _) = c.basis();
+            if let Some((_, _, world_up)) = axis.frame() {
+                assert!(up.dot(world_up) > -1e-9, "{axis:?} is upside down");
+            }
+        }
+    }
+
+    #[test]
+    fn free_orbit_tumbles_past_the_pole() {
+        let mut c = Camera::default();
+        c.set_up_axis(UpAxis::Free);
+        let start = c.forward();
+        for _ in 0..40 {
+            c.orbit(0.0, 50.0);
+        }
+        let (_, up, fwd) = c.basis();
+        assert!((fwd - start).length() > 0.5, "the view did not move");
+        assert!(up.dot(DVec3::Z).abs() < 0.999, "free orbit should leave world up");
+        assert!((fwd.length() - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn ortho_switches_on_and_off() {
+        let mut c = Camera::default();
+        assert!(!c.is_ortho());
+        c.set_ortho(true, 50.0);
+        assert_eq!(c.ortho_height, Some(50.0));
+        c.set_ortho(false, 50.0);
+        assert!(!c.is_ortho());
     }
 }

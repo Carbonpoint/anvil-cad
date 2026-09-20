@@ -406,3 +406,27 @@ fn extrude_uses_only_the_picked_regions() {
     doc.edit_feature(e, |f| f.set_param("regions", ParamValue::Expr("5".into())).unwrap());
     assert!(doc.features[e].error.as_deref().unwrap_or("").contains("no longer exists"));
 }
+
+#[test]
+fn the_rollback_bar_holds_back_later_features() {
+    let mut doc = Document::new("test");
+    doc.add_feature(Box::new(SketchFeature::rectangle("XY", 10.0, 10.0)));
+    doc.add_feature(Box::new(ExtrudeFeature { distance: "5".into(), ..Default::default() }));
+    doc.add_feature(Box::new(BoxFeature::default()));
+    assert_eq!(doc.bodies().len(), 2);
+
+    // One step holds back everything from the extrude on.
+    doc.set_rollback(Some(1));
+    assert!(doc.rolled_back(1) && doc.rolled_back(2) && !doc.rolled_back(0));
+    assert_eq!(doc.bodies().len(), 0);
+
+    // A new feature goes in front of the bar.
+    let idx = doc.add_feature(Box::new(BoxFeature::default()));
+    assert!(!doc.rolled_back(idx));
+    assert_eq!(doc.bodies().len(), 1);
+
+    doc.set_rollback(None);
+    assert_eq!(doc.bodies().len(), 3);
+    doc.undo();
+    assert_eq!(doc.bodies().len(), 1, "undo puts the bar back");
+}

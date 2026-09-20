@@ -20,6 +20,30 @@ pub struct PanelState {
     pub new_expr_name: String,
     pub new_expr_value: String,
     pub expr_drafts: HashMap<String, String>,
+    /// True while the rollback bar is being dragged.
+    pub dragging_rollback: bool,
+}
+
+/// One slot the rollback bar can sit in. Returns the strip it drew.
+fn rollback_bar(ui: &mut egui::Ui, active: bool) -> egui::Rect {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), 7.0), egui::Sense::click_and_drag());
+    if active {
+        let y = rect.center().y;
+        let col = egui::Color32::from_rgb(230, 130, 20);
+        ui.painter().line_segment(
+            [egui::Pos2::new(rect.left(), y), egui::Pos2::new(rect.right(), y)],
+            egui::Stroke::new(2.5f32, col),
+        );
+        ui.painter().circle_filled(egui::Pos2::new(rect.left() + 5.0, y), 4.0, col);
+    } else if resp.hovered() {
+        let y = rect.center().y;
+        ui.painter().line_segment(
+            [egui::Pos2::new(rect.left(), y), egui::Pos2::new(rect.right(), y)],
+            egui::Stroke::new(1.0f32, egui::Color32::from_gray(150)),
+        );
+    }
+    resp.on_hover_text("Drag the rollback bar, or click a row's | button");
+    rect
 }
 
 /// Returns true if the document changed.
@@ -33,8 +57,28 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
     let mut to_remove = None;
     let mut to_toggle = None;
     let mut to_move: Option<(usize, usize)> = None;
+    // The rollback bar: features from it on are held back in one step.
+    let mut set_rollback: Option<Option<usize>> = None;
+    // Where each bar position sits on screen, for the drag.
+    let mut bar_slots: Vec<(usize, egui::Rect)> = Vec::new();
+    ui.horizontal(|ui| {
+        let held = doc.rollback.map(|r| doc.features.len() - r).unwrap_or(0);
+        ui.label(if held == 0 { "All features computed".to_string() } else { format!("{held} feature(s) held back") });
+        if ui.small_button("Roll forward").on_hover_text("Compute the whole history again").clicked() {
+            set_rollback = Some(None);
+        }
+        let end = doc.rollback.unwrap_or(doc.features.len());
+        if ui.small_button("<").on_hover_text("Hold back one more feature").clicked() && end > 0 {
+            set_rollback = Some(Some(end - 1));
+        }
+        if ui.small_button(">").on_hover_text("Compute one more feature").clicked() && end < doc.features.len() {
+            set_rollback = Some(Some(end + 1).filter(|r| *r < doc.features.len()));
+        }
+    });
+    ui.separator();
     egui::ScrollArea::vertical().show(ui, |ui| {
         for (i, node) in doc.features.iter().enumerate() {
+            bar_slots.push((i, rollback_bar(ui, doc.rollback == Some(i))));
             // Buttons on the right, the name truncated to what is left, so a
             // long feature name never widens the panel.
             // A fixed row height: a bare right_to_left layout would take all
@@ -43,6 +87,9 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
             ui.allocate_ui_with_layout(row, egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.small_button("x").on_hover_text("Delete").clicked() {
                     to_remove = Some(i);
+                }
+                if ui.small_button("|").on_hover_text("Hold back this feature and every later one").clicked() {
+                    set_rollback = Some(Some(i));
                 }
                 if ui.small_button("v").on_hover_text("Move later in the history").clicked() {
                     to_move = Some((i, i + 1));
@@ -54,7 +101,9 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                 if ui.small_button(txt).on_hover_text(tip).clicked() {
                     to_toggle = Some(i);
                 }
-                let mark = if node.error.is_some() {
+                let mark = if doc.rolled_back(i) {
+                    "~"
+                } else if node.error.is_some() {
                     "!"
                 } else if node.suppressed {
                     "-"
@@ -80,7 +129,33 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                 };
             });
         }
+        bar_slots.push((doc.features.len(), rollback_bar(ui, doc.rollback.is_none())));
+        // Drag the bar: it jumps to the slot nearest the pointer.
+        let (down, pos) = ui.input(|i| (i.pointer.primary_down(), i.pointer.interact_pos()));
+        if bar_slots.iter().any(|(_, r)| r.contains(pos.unwrap_or(egui::Pos2::ZERO))) && down {
+            st.dragging_rollback = true;
+        }
+        if !down {
+            st.dragging_rollback = false;
+        }
+        if st.dragging_rollback {
+            if let Some(p) = pos {
+                let nearest = bar_slots
+                    .iter()
+                    .min_by(|a, b| (a.1.center().y - p.y).abs().total_cmp(&(b.1.center().y - p.y).abs()));
+                if let Some((i, _)) = nearest {
+                    let want = Some(*i).filter(|n| *n < doc.features.len());
+                    if want != doc.rollback {
+                        set_rollback = Some(want);
+                    }
+                }
+            }
+        }
     });
+    if let Some(r) = set_rollback {
+        doc.set_rollback(r);
+        changed = true;
+    }
     if let Some(i) = to_toggle {
         let s = doc.features[i].suppressed;
         doc.set_suppressed(i, !s);

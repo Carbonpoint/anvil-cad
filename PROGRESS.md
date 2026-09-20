@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-20: Rollback bar in the Part Navigator (Document::rollback, one regenerate for any number of held back features; drag the bar, the | button on a row, or the < > buttons; a new feature is inserted AT the bar and the bar moves past it). Camera: box views are orthographic, the four panes start Front, Right, Top, Perspective, each pane's name is a menu of the eight views, ribbon view commands act on the pane under the pointer, Ortho/Persp toggle, and View > Camera has X up, Y up, Z up and Free orbit (trackball by quaternion).
+
 - 2026-09-20: Viewport batch: drag arrow for Extrude and Press Pull (drag_handle.rs, Feature::drag_plane, Document::edit_feature_quiet so a drag is one undo step; a distance that uses a named expression is not dragged), four pane view (View > Camera > Four views: Front, Right, Top, angled; each pane keeps its own camera and framebuffer, shortcuts belong to the pane under the pointer), View > Settings > Invert scroll. Tests: four_panes_split_the_view, extrude_and_press_pull_get_an_arrow.
 
 - 2026-09-19: Sketch regions follow the planar arrangement (overlapping circles give three pickable regions; touching picks merge into one body). Ribbon icons drawn in code (icons.rs, every command has one; dense sketch rows are icon only with tooltips) and an anvil logo (window icon, ribbon corner, docs/logo.svg).

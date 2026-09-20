@@ -1,4 +1,4 @@
-use crate::camera::{Camera, Projector};
+use crate::camera::{Camera, Projector, UpAxis};
 use crate::drag_handle::{self, DragHandle};
 use crate::icons;
 use crate::panels::{self, PanelState};
@@ -14,15 +14,72 @@ use anvil_math::{DVec2, DVec3, Plane};
 use egui::{Color32, Pos2, Stroke};
 use std::path::PathBuf;
 
+/// A named direction to look from. The six box views are orthographic,
+/// like a drawing; Angled and Perspective look from a corner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum StandardView {
+    Top,
+    Bottom,
+    Front,
+    Back,
+    Left,
+    Right,
+    Angled,
+    Perspective,
+}
+
+impl StandardView {
+    pub const ALL: [StandardView; 8] = [
+        StandardView::Top,
+        StandardView::Bottom,
+        StandardView::Front,
+        StandardView::Back,
+        StandardView::Left,
+        StandardView::Right,
+        StandardView::Angled,
+        StandardView::Perspective,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            StandardView::Top => "Top",
+            StandardView::Bottom => "Bottom",
+            StandardView::Front => "Front",
+            StandardView::Back => "Back",
+            StandardView::Left => "Left",
+            StandardView::Right => "Right",
+            StandardView::Angled => "Angled",
+            StandardView::Perspective => "Perspective",
+        }
+    }
+
+    /// (yaw, pitch, orthographic).
+    fn angles(self) -> (f64, f64, bool) {
+        use std::f64::consts::{FRAC_PI_2, FRAC_PI_4, PI};
+        match self {
+            StandardView::Top => (-FRAC_PI_2, 1.5699, true),
+            StandardView::Bottom => (-FRAC_PI_2, -1.5699, true),
+            StandardView::Front => (-FRAC_PI_2, 0.0, true),
+            StandardView::Back => (FRAC_PI_2, 0.0, true),
+            StandardView::Left => (PI, 0.0, true),
+            StandardView::Right => (0.0, 0.0, true),
+            StandardView::Angled => (-FRAC_PI_4, FRAC_PI_4 * 0.8, true),
+            StandardView::Perspective => (-FRAC_PI_4, FRAC_PI_4 * 0.8, false),
+        }
+    }
+}
+
 /// One pane of the four pane layout: its camera and its own framebuffer.
 struct Pane {
     camera: Camera,
+    view: StandardView,
     fb: Framebuffer,
     texture: Option<egui::TextureHandle>,
 }
 
-/// Names shown in the corner of each pane, in pane order.
-const PANE_NAMES: [&str; 4] = ["Front", "Right", "Top", "Angled"];
+/// The view each pane starts in, in pane order.
+const PANE_VIEWS: [StandardView; 4] =
+    [StandardView::Front, StandardView::Right, StandardView::Top, StandardView::Perspective];
 
 /// What the viewport is doing.
 enum Mode {
@@ -72,6 +129,8 @@ pub struct AnvilApp {
     /// A distance drag in progress: (feature, parameter, distance at the
     /// start, the text the parameter had, pointer position at the start).
     handle_drag: Option<(usize, &'static str, f64, String, Pos2)>,
+    /// The pane the view commands act on (the last one under the pointer).
+    active_pane: usize,
     /// Four panes instead of one (Front, Right, Top, and an angled view).
     quad: bool,
     panes: Vec<Pane>,
@@ -165,6 +224,7 @@ impl AnvilApp {
             invert_scroll: false,
             quad: false,
             panes: Vec::new(),
+            active_pane: 0,
             show_perf: false,
             perf: Default::default(),
             settings: crate::settings::UiSettings::default(),
@@ -219,24 +279,52 @@ impl AnvilApp {
         }
     }
 
+    /// The camera the view commands act on: in the four pane layout it is
+    /// the pane under the pointer, otherwise the single camera.
+    fn active_camera(&mut self) -> &mut Camera {
+        match (self.quad, self.panes.get_mut(self.active_pane)) {
+            (true, Some(p)) => &mut p.camera,
+            _ => &mut self.camera,
+        }
+    }
+
+    /// Point the active camera at a named view.
+    fn set_view(&mut self, view: StandardView) {
+        self.refresh_scene();
+        let bounds = self.scene.bounds;
+        let height = self.scene_size().max(1.0) * 1.2;
+        let quad = self.quad;
+        let pane = self.active_pane;
+        let (yaw, pitch, ortho) = view.angles();
+        let cam = self.active_camera();
+        cam.unlock();
+        cam.yaw = yaw;
+        cam.pitch = pitch;
+        cam.set_ortho(ortho, height);
+        cam.fit_in(&bounds, 1.0);
+        if quad {
+            if let Some(p) = self.panes.get_mut(pane) {
+                p.view = view;
+            }
+        }
+        self.status = format!("{} view", view.label());
+    }
+
     /// Build the four panes: Front, Right, Top, and an angled view down
     /// the (1, 1, 1) direction, each framed on the model.
     fn make_panes(&mut self) {
         self.refresh_scene();
         let bounds = self.scene.bounds;
-        let angles = [
-            (-std::f64::consts::FRAC_PI_2, 0.0),
-            (0.0, 0.0),
-            (0.0, 1.49),
-            (-std::f64::consts::FRAC_PI_4, std::f64::consts::FRAC_PI_4 * 0.8),
-        ];
-        self.panes = angles
+        let height = self.scene_size().max(1.0) * 1.2;
+        self.panes = PANE_VIEWS
             .iter()
-            .map(|&(yaw, pitch)| {
+            .map(|&view| {
+                let (yaw, pitch, ortho) = view.angles();
                 let mut camera = Camera { yaw, pitch, ..self.camera.clone() };
                 camera.unlock();
+                camera.set_ortho(ortho, height);
                 camera.fit_in(&bounds, 1.0);
-                Pane { camera, fb: Framebuffer::new(8, 8), texture: None }
+                Pane { camera, view, fb: Framebuffer::new(8, 8), texture: None }
             })
             .collect();
     }
@@ -634,25 +722,28 @@ impl AnvilApp {
                 self.doc.unit = if self.doc.unit == "mm" { "in".into() } else { "mm".into() };
                 self.status = format!("Display unit: {}", self.doc.unit);
             }
-            RibbonAction::ViewIso => {
-                self.camera.unlock();
-                self.camera.yaw = 0.8;
-                self.camera.pitch = 0.5;
+            RibbonAction::ViewIso => self.set_view(StandardView::Angled),
+            RibbonAction::ViewTop => self.set_view(StandardView::Top),
+            RibbonAction::ViewFront => self.set_view(StandardView::Front),
+            RibbonAction::ViewRight => self.set_view(StandardView::Right),
+            RibbonAction::ToggleProjection => {
+                self.refresh_scene();
+                let h = self.scene_size().max(1.0) * 1.2;
+                let cam = self.active_camera();
+                let on = !cam.is_ortho();
+                cam.set_ortho(on, h);
+                self.status = if on { "Orthographic view".into() } else { "Perspective view".into() };
             }
-            RibbonAction::ViewTop => {
-                self.camera.unlock();
-                self.camera.yaw = -std::f64::consts::FRAC_PI_2;
-                self.camera.pitch = 1.49;
-            }
-            RibbonAction::ViewFront => {
-                self.camera.unlock();
-                self.camera.yaw = -std::f64::consts::FRAC_PI_2;
-                self.camera.pitch = 0.0;
-            }
-            RibbonAction::ViewRight => {
-                self.camera.unlock();
-                self.camera.yaw = 0.0;
-                self.camera.pitch = 0.0;
+            RibbonAction::SetUpAxis(a) => {
+                let axis = [UpAxis::X, UpAxis::Y, UpAxis::Z, UpAxis::Free][(a as usize).min(3)];
+                self.camera.set_up_axis(axis);
+                for p in &mut self.panes {
+                    p.camera.set_up_axis(axis);
+                }
+                self.status = match axis {
+                    UpAxis::Free => "Free orbit: no axis is held vertical".into(),
+                    a => format!("{} on screen", a.label()),
+                };
             }
         }
     }
@@ -1116,9 +1207,14 @@ impl AnvilApp {
         }
         let full = ui.available_rect_before_wrap();
         let (w, h) = (full.width() * 0.5, full.height() * 0.5);
-        for (pane, name) in PANE_NAMES.iter().enumerate() {
+        let pointer = ui.ctx().pointer_latest_pos();
+        let mut pick: Option<(usize, StandardView)> = None;
+        for pane in 0..4 {
             let min = full.min + egui::vec2(if pane % 2 == 0 { 0.0 } else { w }, if pane < 2 { 0.0 } else { h });
             let rect = egui::Rect::from_min_size(min, egui::vec2(w - 1.0, h - 1.0));
+            if pointer.is_some_and(|p| rect.contains(p)) {
+                self.active_pane = pane;
+            }
             let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
             std::mem::swap(&mut self.camera, &mut self.panes[pane].camera);
             std::mem::swap(&mut self.fb, &mut self.panes[pane].fb);
@@ -1127,13 +1223,28 @@ impl AnvilApp {
             std::mem::swap(&mut self.camera, &mut self.panes[pane].camera);
             std::mem::swap(&mut self.fb, &mut self.panes[pane].fb);
             std::mem::swap(&mut self.texture, &mut self.panes[pane].texture);
-            ui.painter().text(
-                rect.left_top() + egui::vec2(8.0, 6.0),
-                egui::Align2::LEFT_TOP,
-                *name,
-                egui::FontId::proportional(12.0),
-                Color32::from_rgb(90, 95, 105),
+            // The name of the view is a menu: click it to look from
+            // another direction.
+            let label_rect = egui::Rect::from_min_size(rect.left_top() + egui::vec2(6.0, 4.0), egui::vec2(110.0, 20.0));
+            let mut label_ui = ui.new_child(
+                egui::UiBuilder::new().max_rect(label_rect).layout(egui::Layout::left_to_right(egui::Align::Center)),
             );
+            let name = self.panes[pane].view.label();
+            label_ui
+                .menu_button(name, |ui| {
+                    for v in StandardView::ALL {
+                        if ui.button(v.label()).clicked() {
+                            pick = Some((pane, v));
+                            ui.close();
+                        }
+                    }
+                })
+                .response
+                .on_hover_text("Look from another direction");
+        }
+        if let Some((pane, v)) = pick {
+            self.active_pane = pane;
+            self.set_view(v);
         }
         // Lines between the panes.
         let mid = full.center();
@@ -2257,6 +2368,25 @@ mod layout_tests {
             let _ = ctx.run(input(), |ctx| app.frame_ui(ctx));
         }
         app.view_rect
+    }
+
+    #[test]
+    fn box_views_are_orthographic_and_the_panes_start_apart() {
+        for v in StandardView::ALL {
+            let (_, _, ortho) = v.angles();
+            assert_eq!(ortho, v != StandardView::Perspective, "{v:?}");
+        }
+        let mut app = AnvilApp::new_headless();
+        app.run_action(RibbonAction::ToggleQuadView);
+        let views: Vec<StandardView> = app.panes.iter().map(|p| p.view).collect();
+        assert_eq!(views, PANE_VIEWS.to_vec());
+        assert!(app.panes[..3].iter().all(|p| p.camera.is_ortho()));
+        assert!(!app.panes[3].camera.is_ortho());
+        // A view command acts on the pane under the pointer.
+        app.active_pane = 1;
+        app.run_action(RibbonAction::ViewTop);
+        assert_eq!(app.panes[1].view, StandardView::Top);
+        assert!(app.panes[1].camera.is_ortho());
     }
 
     #[test]
