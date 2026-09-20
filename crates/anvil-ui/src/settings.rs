@@ -18,22 +18,29 @@ const DEFAULT_SCALE: f32 = 1.0;
 /// Matches egui's own default `Body` size, so "Reset" looks like day one.
 const DEFAULT_TEXT: f32 = 14.0;
 
-/// UI zoom and base text size, round-tripped through serde for persistence.
+/// UI zoom, base text size, and Material 3 theme choice, round-tripped
+/// through serde for persistence.
+/// Follow the operating system unless the user picks a side.
+fn default_theme() -> egui::ThemePreference {
+    egui::ThemePreference::System
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct UiSettings {
     pub scale: f32,
     pub base_text: f32,
-    /// GPU viewport: `None` means "follow the machine", which is on when
-    /// an OpenGL context is there and off when it is not.
+    /// Draw the model with the GPU. `None` means off: the GPU path is
+    /// opt in until it has been seen running on the machine.
     #[serde(default)]
-    /// Draw the model with the GPU. `None` means off: the GPU path has
-    /// not been seen running on a real driver yet, so it is opt in.
     pub gpu_viewport: Option<bool>,
+    /// Light, Dark, or System (the default: follows the OS theme).
+    #[serde(default = "default_theme")]
+    pub theme: egui::ThemePreference,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
-        UiSettings { scale: DEFAULT_SCALE, base_text: DEFAULT_TEXT, gpu_viewport: None }
+        UiSettings { scale: DEFAULT_SCALE, base_text: DEFAULT_TEXT, gpu_viewport: None, theme: default_theme() }
     }
 }
 
@@ -41,22 +48,17 @@ impl UiSettings {
     /// Key under which `AnvilApp` stores these in eframe's persistence file.
     pub const STORAGE_KEY: &'static str = "anvil_ui_settings";
 
-    /// Applies the zoom factor and rebuilds the text styles from
-    /// `base_text`, so a change takes effect the same frame.
+    /// Applies the zoom factor and installs the Material 3 theme (colours,
+    /// shape, and the type scale built from `base_text`), so a change
+    /// takes effect the same frame. `AnvilApp` also calls
+    /// `crate::theme::install` directly once per frame, so the theme keeps
+    /// following a "System" preference even between settings changes;
+    /// this method exists so scale and text size changes take effect
+    /// immediately too, and for callers (including tests) that only have
+    /// a `UiSettings` and a context at hand.
     pub fn apply(&self, ctx: &egui::Context) {
         ctx.set_zoom_factor(self.scale.clamp(MIN_SCALE, MAX_SCALE));
-        let base = self.base_text.clamp(MIN_TEXT, MAX_TEXT);
-        let mut style = (*ctx.style()).clone();
-        style.text_styles = [
-            (egui::TextStyle::Small, egui::FontId::proportional(base * 0.78)),
-            (egui::TextStyle::Body, egui::FontId::proportional(base)),
-            (egui::TextStyle::Button, egui::FontId::proportional(base)),
-            (egui::TextStyle::Heading, egui::FontId::proportional(base * 1.45)),
-            (egui::TextStyle::Monospace, egui::FontId::monospace(base * 0.95)),
-        ]
-        .into_iter()
-        .collect();
-        ctx.set_style(style);
+        crate::theme::install(ctx, self);
     }
 }
 
@@ -65,6 +67,11 @@ impl UiSettings {
 pub fn window(ctx: &egui::Context, open: &mut bool, settings: &mut UiSettings) -> bool {
     let mut changed = false;
     egui::Window::new("Settings").collapsible(false).resizable(false).open(open).show(ctx, |ui| {
+        ui.label("Theme");
+        let before = settings.theme;
+        settings.theme.radio_buttons(ui);
+        changed |= settings.theme != before;
+        ui.add_space(6.0);
         ui.label("UI scale");
         changed |= ui.add(egui::Slider::new(&mut settings.scale, MIN_SCALE..=MAX_SCALE).step_by(0.1)).changed();
         ui.add_space(6.0);
@@ -85,7 +92,8 @@ mod tests {
 
     #[test]
     fn round_trips_through_serde() {
-        let s = UiSettings { scale: 1.6, base_text: 18.0, gpu_viewport: Some(false) };
+        let s =
+            UiSettings { scale: 1.6, base_text: 18.0, gpu_viewport: Some(false), theme: egui::ThemePreference::Dark };
         let json = serde_json::to_string(&s).unwrap();
         let back: UiSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
@@ -105,5 +113,16 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: UiSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    /// Every theme choice round trips, not just the default (System).
+    #[test]
+    fn every_theme_choice_round_trips() {
+        for theme in [egui::ThemePreference::Light, egui::ThemePreference::Dark, egui::ThemePreference::System] {
+            let s = UiSettings { theme, ..UiSettings::default() };
+            let json = serde_json::to_string(&s).unwrap();
+            let back: UiSettings = serde_json::from_str(&json).unwrap();
+            assert_eq!(s, back);
+        }
     }
 }

@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-20: Material Design 3 theme (crates/anvil-ui/src/theme.rs, docs/THEME.md): seed #3B6EA5, surface containers, M3 shape and state layers, a light and a dark scheme with Light/Dark/System in the settings window; the 3D view, the sketch overlay and the panels take their colours from the scheme. Contrast of every text pair is at least 4.5:1 by the WCAG formula. The rendered look is unverified: this box has no display.
+
 - 2026-09-20: GPU viewport verified by the user on Intel Iris Xe (Windows). It was no faster because the software id and depth pass still ran every frame in every pane: now it runs only in the pane under the pointer and only when the view or the model changed (Camera::fingerprint plus Scene::id). The performance overlay draws in one pane. New View > Settings > Benchmark: it spins the view for 60 frames with the GPU and 60 without, then reports the middle and worst frame time with the triangle count.
 
 - 2026-09-20: Optional GPU viewport (crates/anvil-ui/src/gpu.rs: egui_glow paint callback, own FBO, GL 3.3 core or GLES 300, same Projector maths, per body colour, highlights, section clip, edges; picking still uses the CPU id buffer at half resolution). It is OFF by default because no display or GPU exists on the build machine, so the GL path has never run: turn it on at View > Settings > GPU viewport. GPU numbers in the performance overlay (nvidia-smi, Linux amdgpu and i915 sysfs, GL_RENDERER; 'not available' elsewhere).

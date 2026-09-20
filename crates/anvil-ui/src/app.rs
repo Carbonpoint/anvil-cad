@@ -2284,6 +2284,10 @@ impl AnvilApp {
     }
 
     fn frame_ui_inner(&mut self, ctx: &egui::Context) {
+        // Installs the Material 3 theme (colours, shape, type scale) for
+        // both light and dark, sets the active preference, and recolours
+        // the 3D viewport to match. See `theme.rs`.
+        self.style.apply_scheme(&crate::theme::install(ctx, &self.settings));
         self.export_windows(ctx);
         self.settings_window(ctx);
         let typing = ctx.wants_keyboard_input();
