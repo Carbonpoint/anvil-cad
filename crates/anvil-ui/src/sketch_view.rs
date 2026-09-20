@@ -138,14 +138,7 @@ pub fn draw_sketch(
 /// True when the depth buffer holds a surface clearly in front of the
 /// projected point `(x, y, z)`. A sketch lying on a face is not hidden by it.
 fn hidden(fb: &Framebuffer, (x, y, z): (f64, f64, f64)) -> bool {
-    if x < 0.0 || y < 0.0 {
-        return false;
-    }
-    let (ix, iy) = (x as usize, y as usize);
-    if ix >= fb.width || iy >= fb.height {
-        return false;
-    }
-    let zb = fb.depth[iy * fb.width + ix];
+    let Some(zb) = fb.depth_at_px(x, y) else { return false };
     zb.is_finite() && (z as f32) > zb * 1.01 + 0.05
 }
 

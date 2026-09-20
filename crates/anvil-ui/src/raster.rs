@@ -3,7 +3,7 @@
 //! Colour goes to an egui texture. The id buffer holds the triangle index
 //! under every pixel, so picking is a single array read.
 
-use crate::camera::Projector;
+use crate::camera::{Camera, Projector};
 use crate::scene::Scene;
 use anvil_math::DVec3;
 use egui::{Color32, ColorImage};
@@ -11,6 +11,9 @@ use egui::{Color32, ColorImage};
 pub struct Framebuffer {
     pub width: usize,
     pub height: usize,
+    /// Samples per screen pixel. 1.0 is one sample per pixel. The GPU
+    /// viewport keeps a smaller buffer, used for picking only.
+    pub scale: f64,
     pub color: Vec<Color32>,
     pub depth: Vec<f32>,
     /// Triangle index + 1, 0 = nothing.
@@ -46,8 +49,56 @@ impl Default for Style {
 
 impl Framebuffer {
     pub fn new(width: usize, height: usize) -> Self {
+        Framebuffer::new_scaled(width, height, 1.0)
+    }
+
+    /// A buffer covering `width_px` by `height_px` screen pixels with
+    /// `scale` samples per pixel.
+    pub fn new_scaled(width_px: usize, height_px: usize, scale: f64) -> Self {
+        let (width, height) = Framebuffer::sample_size(width_px, height_px, scale);
         let n = width * height;
-        Framebuffer { width, height, color: vec![Color32::BLACK; n], depth: vec![f32::INFINITY; n], id: vec![0; n] }
+        Framebuffer {
+            width,
+            height,
+            scale,
+            color: vec![Color32::BLACK; n],
+            depth: vec![f32::INFINITY; n],
+            id: vec![0; n],
+        }
+    }
+
+    /// Sample counts for a screen size, matching `new_scaled`.
+    pub fn sample_size(width_px: usize, height_px: usize, scale: f64) -> (usize, usize) {
+        let f = |v: usize| ((v as f64 * scale).round() as usize).max(1);
+        (f(width_px), f(height_px))
+    }
+
+    /// A projector that writes into this buffer's samples.
+    pub fn projector(&self, cam: &Camera) -> Projector {
+        Projector::new(cam, self.width as f64, self.height as f64)
+    }
+
+    /// Triangle under a screen pixel.
+    pub fn tri_at_px(&self, x: f64, y: f64) -> Option<usize> {
+        let (x, y) = self.sample_of(x, y)?;
+        self.tri_at(x, y)
+    }
+
+    /// Depth under a screen pixel, if the pixel is inside the buffer.
+    pub fn depth_at_px(&self, x: f64, y: f64) -> Option<f32> {
+        let (x, y) = self.sample_of(x, y)?;
+        Some(self.depth[y * self.width + x])
+    }
+
+    fn sample_of(&self, x: f64, y: f64) -> Option<(usize, usize)> {
+        if x < 0.0 || y < 0.0 {
+            return None;
+        }
+        let (x, y) = ((x * self.scale) as usize, (y * self.scale) as usize);
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        Some((x, y))
     }
 
     pub fn clear(&mut self, bg: Color32) {
@@ -158,6 +209,53 @@ impl Framebuffer {
                 (base.b() as f64 * shade) as u8,
             );
             self.triangle_clipped(a, b, c, color, t as u32 + 1, dist);
+        }
+        if style.draw_edges {
+            for (_, [p, q]) in &scene.edges {
+                if let Some((sn, w)) = style.section {
+                    if sn.dot(*p) - w > 0.0 || sn.dot(*q) - w > 0.0 {
+                        continue;
+                    }
+                }
+                if let (Some(a), Some(b)) = (proj.project(*p), proj.project(*q)) {
+                    self.line(a, b, style.edge, 0.9985);
+                }
+            }
+        }
+    }
+
+    /// Depth and triangle ids only, with no colour. The GPU viewport draws
+    /// the picture, so this pass exists for picking, for the edge hover
+    /// test, and for the hidden-line test of the sketch overlay.
+    pub fn draw_scene_ids(&mut self, scene: &Scene, proj: &Projector, style: &Style) {
+        let mesh = &scene.mesh;
+        let projected: Vec<Option<(f64, f64, f64)>> = mesh.positions.iter().map(|&p| proj.project(p)).collect();
+        for (t, idx) in mesh.indices.as_chunks::<3>().0.iter().enumerate() {
+            let (Some(a), Some(b), Some(c)) =
+                (projected[idx[0] as usize], projected[idx[1] as usize], projected[idx[2] as usize])
+            else {
+                continue;
+            };
+            let pa = mesh.positions[idx[0] as usize];
+            let pb = mesh.positions[idx[1] as usize];
+            let pc = mesh.positions[idx[2] as usize];
+            let cross = (pb - pa).cross(pc - pa);
+            let n = if cross.length() > 1e-12 {
+                cross.normalize()
+            } else {
+                mesh.normals.get(idx[0] as usize).copied().unwrap_or(DVec3::Z)
+            };
+            let dist = style.section.map(|(sn, w)| (sn.dot(pa) - w, sn.dot(pb) - w, sn.dot(pc) - w));
+            if let Some((da, db, dc)) = dist {
+                if da > 0.0 && db > 0.0 && dc > 0.0 {
+                    continue;
+                }
+            }
+            let view_dir = if proj.ortho { proj.fwd } else { ((pa + pb + pc) / 3.0 - proj.eye).normalize() };
+            if n.dot(view_dir) >= 0.0 && dist.is_none() {
+                continue;
+            }
+            self.triangle_clipped(a, b, c, Color32::BLACK, t as u32 + 1, dist);
         }
         if style.draw_edges {
             for (_, [p, q]) in &scene.edges {

@@ -514,6 +514,18 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.rect_fill((0.43, 0.3), (0.57, 0.88));
             c.rect_fill((0.68, 0.45), (0.82, 0.88));
         }
+        "toggle_gpu" => {
+            // A graphics chip: a square die with pins.
+            c.rect((0.24, 0.24), (0.76, 0.76));
+            c.rect_fill((0.38, 0.38), (0.62, 0.62));
+            for i in 0..3 {
+                let t = 0.34 + i as f32 * 0.16;
+                c.line((t, 0.1), (t, 0.24));
+                c.line((t, 0.76), (t, 0.9));
+                c.line((0.1, t), (0.24, t));
+                c.line((0.76, t), (0.9, t));
+            }
+        }
         "view_quad" => {
             c.rect((0.12, 0.12), (0.88, 0.88));
             c.line((0.5, 0.12), (0.5, 0.88));
