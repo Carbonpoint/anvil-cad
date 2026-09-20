@@ -1,0 +1,23 @@
+{
+  "name": "density",
+  "features": [
+    {
+      "feature": {
+        "type": "density_body",
+        "file": "docs/tutorials/files/density.vtk",
+        "level": "level",
+        "smooth": "1",
+        "resolution": "res",
+        "scale": "1"
+      },
+      "suppressed": false
+    }
+  ],
+  "exprs": {
+    "params": {
+      "level": { "name": "level", "source": "0.5", "value": 0.0 },
+      "res": { "name": "res", "source": "0.8", "value": 0.0 }
+    }
+  },
+  "unit": "mm"
+}

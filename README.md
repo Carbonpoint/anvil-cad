@@ -10,7 +10,10 @@ honest core that builds and runs on Linux, Windows, and macOS with no GPU.
 
 Status: **early draft**, updated 2026-09-09. Read `docs/ROADMAP.md` before
 planning work. Read `docs/ADDING_A_FEATURE.md` before adding a feature.
-Read `docs/USING_ANVIL.md` for the sketch workflow.
+Read `docs/USING_ANVIL.md` for the sketch workflow, and
+`docs/tutorials/README.md` for eight worked tutorials on the implicit
+(field driven) side: lattices, graded walls, fields from data, meshing
+and export.
 
 ## What works today
 
@@ -92,6 +95,7 @@ crates/anvil-io        .anvil documents and mesh export
 crates/anvil-ui        ribbon, panels, viewport (eframe/egui)
 crates/anvil-app       the `anvil` binary
 crates/anvil-cli       headless command-line tools (used by the Docker image)
+docs/tutorials         worked tutorials for the implicit modelling workflows
 docs/KETTLE.md         cast iron kettle sample: Pattern on face, mold split, casting check
 docs/research          four literature reviews that shaped the design
 docs/adr               architecture decision records

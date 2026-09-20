@@ -1,0 +1,66 @@
+{
+  "name": "bracket",
+  "features": [
+    {
+      "feature": {
+        "type": "box",
+        "x": "0",
+        "y": "0",
+        "z": "0",
+        "width": "plate_x",
+        "depth": "plate_y",
+        "height": "plate_z"
+      },
+      "suppressed": false
+    },
+    {
+      "feature": {
+        "type": "cylinder",
+        "plane": "XY",
+        "cx": "plate_x - 12",
+        "cy": "plate_y / 2",
+        "radius": "6",
+        "height": "boss_z"
+      },
+      "suppressed": false
+    },
+    {
+      "feature": {
+        "type": "lattice_fill",
+        "body": 0,
+        "lattice": "honeycomb",
+        "cell": "cell",
+        "wall": "wall",
+        "wall_end": "wall_end",
+        "cell_end": "0",
+        "grade": "distance",
+        "conform": "none",
+        "ref_body": 1,
+        "map_file": "",
+        "map_lo": "0",
+        "map_hi": "reach",
+        "skin": "skin",
+        "resolution": "res"
+      },
+      "suppressed": false
+    }
+  ],
+  "exprs": {
+    "params": {
+      "plate_x": { "name": "plate_x", "source": "60", "value": 0.0 },
+      "plate_y": { "name": "plate_y", "source": "40", "value": 0.0 },
+      "plate_z": { "name": "plate_z", "source": "10", "value": 0.0 },
+      "boss_z": { "name": "boss_z", "source": "plate_z + 8", "value": 0.0 },
+      "cell": { "name": "cell", "source": "8", "value": 0.0 },
+      "wall": { "name": "wall", "source": "2.4", "value": 0.0 },
+      "wall_end": { "name": "wall_end", "source": "0.8", "value": 0.0 },
+      "reach": { "name": "reach", "source": "30", "value": 0.0 },
+      "skin": { "name": "skin", "source": "0.8", "value": 0.0 },
+      "res": { "name": "res", "source": "0.4", "value": 0.0 }
+    }
+  },
+  "material": {
+    "2": { "name": "Aluminum 6061", "density": 2.7 }
+  },
+  "unit": "mm"
+}
