@@ -29,6 +29,8 @@ pub enum RibbonAction {
     ViewIso,
     /// Show or hide the CPU, memory, and fps overlay.
     TogglePerf,
+    /// Show or hide the UI scale and text size settings window.
+    ToggleSettings,
     ViewTop,
     ViewFront,
     ViewRight,
@@ -89,6 +91,7 @@ impl RibbonAction {
             RibbonAction::Measure => "measure",
             RibbonAction::ToggleEdges => "toggle_edges",
             RibbonAction::TogglePerf => "toggle_perf",
+            RibbonAction::ToggleSettings => "settings",
             RibbonAction::ViewIso => "view_iso",
             RibbonAction::ViewTop => "view_top",
             RibbonAction::ViewFront => "view_front",
@@ -327,6 +330,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 tooltip: "Show or hide CPU, memory, and fps in the corner of the view",
                 order: 0,
                 kind: A(TogglePerf),
+            },
+        ),
+        (
+            "View",
+            "Settings",
+            RibbonButton {
+                label: "Settings",
+                tooltip: "Set the UI scale and text size",
+                order: 1,
+                kind: A(ToggleSettings),
             },
         ),
     ]
