@@ -15,6 +15,8 @@ ribbon click
          feature.regenerate(ctx)          (anvil-sketch solve, anvil-kernel ops)
   -> scene::Scene::build()                (parallel tessellation, feature edges)
   -> raster::Framebuffer::draw_scene()    (CPU z-buffer, id buffer for picking)
+     or gpu::GpuViewport::callback()      (OpenGL through an egui paint callback,
+                                           with raster::draw_scene_ids for picking)
   -> egui texture + overlays              (sketch entities, datum planes, triad)
 ```
 
@@ -45,9 +47,12 @@ demo loader.
   `Sketch`. A graph-decomposition front end or a SolveSpace port can replace
   it without touching entities or constraints.
 * **Viewport.** `raster::Framebuffer::draw_scene` takes a `Scene` and a
-  `Projector`. A glow or wgpu renderer is a second implementation of the
-  same call (ADR 0003). Picking reads the id buffer, so it stays on the CPU
-  on either path.
+  `Projector`. `gpu::GpuViewport` is the second implementation of the same
+  call, in glow (ADR 0003), chosen in View > Settings > GPU viewport and
+  used only when an OpenGL context is there. Picking reads the id buffer,
+  so it stays on the CPU on either path: with the GPU drawing,
+  `raster::Framebuffer::draw_scene_ids` fills a half resolution id and
+  depth buffer and nothing else.
 * **Posts.** `Post` is a trait. Each controller dialect is one struct.
 * **Native file format.** `Document` is plain serde. The JSON writer in
   `anvil-io` is the only place that knows the container (ADR 0002).

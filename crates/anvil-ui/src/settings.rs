@@ -23,11 +23,17 @@ const DEFAULT_TEXT: f32 = 14.0;
 pub struct UiSettings {
     pub scale: f32,
     pub base_text: f32,
+    /// GPU viewport: `None` means "follow the machine", which is on when
+    /// an OpenGL context is there and off when it is not.
+    #[serde(default)]
+    /// Draw the model with the GPU. `None` means off: the GPU path has
+    /// not been seen running on a real driver yet, so it is opt in.
+    pub gpu_viewport: Option<bool>,
 }
 
 impl Default for UiSettings {
     fn default() -> Self {
-        UiSettings { scale: DEFAULT_SCALE, base_text: DEFAULT_TEXT }
+        UiSettings { scale: DEFAULT_SCALE, base_text: DEFAULT_TEXT, gpu_viewport: None }
     }
 }
 
@@ -79,10 +85,18 @@ mod tests {
 
     #[test]
     fn round_trips_through_serde() {
-        let s = UiSettings { scale: 1.6, base_text: 18.0 };
+        let s = UiSettings { scale: 1.6, base_text: 18.0, gpu_viewport: Some(false) };
         let json = serde_json::to_string(&s).unwrap();
         let back: UiSettings = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    /// Settings written before the GPU viewport existed must still load.
+    #[test]
+    fn older_settings_without_the_gpu_field_load() {
+        let s: UiSettings = serde_json::from_str(r#"{"scale":1.2,"base_text":15.0}"#).unwrap();
+        assert_eq!(s.gpu_viewport, None);
+        assert_eq!(s.scale, 1.2);
     }
 
     #[test]

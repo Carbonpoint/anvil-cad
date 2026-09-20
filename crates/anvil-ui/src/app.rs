@@ -138,6 +138,8 @@ pub struct AnvilApp {
     invert_scroll: bool,
     /// CPU, memory, and fps overlay (View > Settings > Performance).
     show_perf: bool,
+    /// Optional OpenGL viewport (View > Settings > GPU viewport).
+    gpu: crate::gpu::GpuViewport,
     perf: crate::perf::PerfMonitor,
     /// UI scale and text size (View > Settings > Settings), persisted.
     settings: crate::settings::UiSettings,
@@ -177,6 +179,11 @@ impl AnvilApp {
             {
                 app.settings = s;
             }
+        }
+        app.gpu = crate::gpu::GpuViewport::new(cc.gl.as_ref());
+        app.gpu.set_enabled(app.settings.gpu_viewport.unwrap_or(false) && app.gpu.available());
+        if !app.gpu.available() {
+            app.status = format!("Software viewport: {}", app.gpu.renderer());
         }
         app.settings.apply(&cc.egui_ctx);
         app
@@ -226,6 +233,7 @@ impl AnvilApp {
             panes: Vec::new(),
             active_pane: 0,
             show_perf: false,
+            gpu: crate::gpu::GpuViewport::default(),
             perf: Default::default(),
             settings: crate::settings::UiSettings::default(),
             settings_window_open: false,
@@ -537,6 +545,18 @@ impl AnvilApp {
                 }
             }
             RibbonAction::TogglePerf => self.show_perf = !self.show_perf,
+            RibbonAction::ToggleGpu => {
+                let on = !self.gpu.active() && self.gpu.available();
+                self.gpu.set_enabled(on);
+                self.settings.gpu_viewport = Some(on);
+                self.status = if on {
+                    format!("GPU viewport on: {}", self.gpu.renderer())
+                } else if self.gpu.available() {
+                    "Software viewport".into()
+                } else {
+                    format!("Software viewport: {}", self.gpu.renderer())
+                };
+            }
             RibbonAction::ToggleScrollDir => {
                 self.invert_scroll = !self.invert_scroll;
                 self.status = if self.invert_scroll {
@@ -956,6 +976,7 @@ impl AnvilApp {
                     | RibbonAction::ViewRight
                     | RibbonAction::ToggleEdges
                     | RibbonAction::TogglePerf
+                    | RibbonAction::ToggleGpu
                     | RibbonAction::ToggleScrollDir
                     | RibbonAction::ToggleQuadView
                     | RibbonAction::ToggleSettings
@@ -1261,10 +1282,15 @@ impl AnvilApp {
         }
         let w = (rect.width().max(8.0)) as usize;
         let h = (rect.height().max(8.0)) as usize;
-        if self.fb.width != w || self.fb.height != h {
-            self.fb = Framebuffer::new(w, h);
+        // With the GPU drawing, the software rasterizer still fills a
+        // smaller id and depth buffer, which is all picking needs.
+        let pick_scale = if self.gpu.active() { crate::gpu::PICK_SCALE } else { 1.0 };
+        if self.fb.scale != pick_scale || (self.fb.width, self.fb.height) != Framebuffer::sample_size(w, h, pick_scale)
+        {
+            self.fb = Framebuffer::new_scaled(w, h, pick_scale);
         }
         let proj = Projector::new(&self.camera, w as f64, h as f64);
+        let pick_proj = self.fb.projector(&self.camera);
         let pointer = resp.hover_pos().map(|p| ((p.x - rect.left()) as f64, (p.y - rect.top()) as f64));
         let shift = ui.input(|i| i.modifiers.shift);
         // Shortcuts are ignored while a text field has keyboard focus.
@@ -1322,7 +1348,7 @@ impl AnvilApp {
         }
 
         // Hover picking from the previous frame's id buffer.
-        self.hovered_tri = pointer.and_then(|(x, y)| self.fb.tri_at(x as usize, y as usize));
+        self.hovered_tri = pointer.and_then(|(x, y)| self.fb.tri_at_px(x, y));
         self.hovered_body = self.hovered_tri.and_then(|t| self.scene.tri_body.get(t).copied());
         self.hovered_face =
             self.hovered_tri.and_then(|t| Some((self.scene.tri_body.get(t).copied()?, self.scene.face_of_tri(t)?)));
@@ -1345,9 +1371,7 @@ impl AnvilApp {
                         continue;
                     }
                     // Visible if nothing in the depth buffer is clearly in front.
-                    let (ix, iy) = (cx as usize, cy as usize);
-                    if ix < self.fb.width && iy < self.fb.height {
-                        let zb = self.fb.depth[iy * self.fb.width + ix];
+                    if let Some(zb) = self.fb.depth_at_px(cx, cy) {
                         let ze = (a.2 + (b.2 - a.2) * t) as f32;
                         if zb.is_finite() && ze > zb * 1.01 + 0.05 {
                             continue;
@@ -1777,21 +1801,30 @@ impl AnvilApp {
         let hovered = if in_model { self.hovered_body } else { None };
         let sel_face = self.selected_face.map(|(b, f, _)| (b, f));
         let hov_face = if in_model { self.hovered_face } else { None };
-        self.fb.draw_scene_faces(&self.scene, &proj, &self.style, selected_body, hovered, sel_face, hov_face);
-        let image = self.fb.to_image();
-        let tex = match &mut self.texture {
-            Some(t) => {
-                t.set(image, egui::TextureOptions::NEAREST);
-                t.id()
-            }
-            None => {
-                let t = ui.ctx().load_texture("viewport", image, egui::TextureOptions::NEAREST);
-                let id = t.id();
-                self.texture = Some(t);
-                id
-            }
-        };
-        painter.image(tex, rect, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        let gpu_shape =
+            self.gpu.callback(rect, &self.scene, &proj, &self.style, selected_body, hovered, sel_face, hov_face);
+        if let Some(shape) = gpu_shape {
+            // The GPU draws the picture; the id and depth buffers are
+            // still filled here, for picking and the overlays.
+            self.fb.draw_scene_ids(&self.scene, &pick_proj, &self.style);
+            painter.add(shape);
+        } else {
+            self.fb.draw_scene_faces(&self.scene, &pick_proj, &self.style, selected_body, hovered, sel_face, hov_face);
+            let image = self.fb.to_image();
+            let tex = match &mut self.texture {
+                Some(t) => {
+                    t.set(image, egui::TextureOptions::NEAREST);
+                    t.id()
+                }
+                None => {
+                    let t = ui.ctx().load_texture("viewport", image, egui::TextureOptions::NEAREST);
+                    let id = t.id();
+                    self.texture = Some(t);
+                    id
+                }
+            };
+            painter.image(tex, rect, egui::Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)), Color32::WHITE);
+        }
 
         // Overlays.
         let origin = rect.min;
@@ -1970,7 +2003,10 @@ impl AnvilApp {
         }
         self.draw_triad(&painter, rect);
         if self.show_perf {
-            let lines = self.perf.lines();
+            let mut lines = self.perf.lines();
+            if self.gpu.active() {
+                lines.push(format!("GL   {}", self.gpu.renderer()));
+            }
             let font = egui::FontId::monospace(11.0);
             let pos = Pos2::new(rect.right() - 70.0, rect.top() + 8.0);
             let galley = painter.layout_no_wrap(lines.join("\n"), font, Color32::from_rgb(230, 235, 240));
@@ -2449,7 +2485,7 @@ mod layout_tests {
     /// crowd out the 3D view on a 1366x768 window.
     #[test]
     fn ui_scale_still_leaves_room_for_the_view() {
-        let settings = crate::settings::UiSettings { scale: 2.0, base_text: 18.0 };
+        let settings = crate::settings::UiSettings { scale: 2.0, base_text: 18.0, ..Default::default() };
         let ctx = egui::Context::default();
         let mut app = AnvilApp::new_headless();
         let (w, h) = (1366.0, 768.0);

@@ -9,11 +9,15 @@
 //! * **Expressions** (bottom): the named parameter table.
 //!
 //! The viewport is a pure software renderer (`raster.rs`). It needs no GPU.
+//! An optional GPU path (`gpu.rs`) draws the same scene with OpenGL through
+//! an egui paint callback; it is an addition, and the software renderer
+//! stays in charge of picking and of any machine without a GL context.
 
 mod app;
 mod camera;
 mod drag_handle;
 mod dxf;
+mod gpu;
 pub mod icons;
 mod panels;
 mod perf;

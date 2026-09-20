@@ -29,6 +29,8 @@ pub enum RibbonAction {
     ViewIso,
     /// Show or hide the CPU, memory, and fps overlay.
     TogglePerf,
+    /// Draw the viewport with OpenGL, or with the software rasterizer.
+    ToggleGpu,
     /// Reverse the mouse wheel zoom direction.
     ToggleScrollDir,
     /// One view or four views (Front, Right, Top, angled).
@@ -99,6 +101,7 @@ impl RibbonAction {
             RibbonAction::Measure => "measure",
             RibbonAction::ToggleEdges => "toggle_edges",
             RibbonAction::TogglePerf => "toggle_perf",
+            RibbonAction::ToggleGpu => "toggle_gpu",
             RibbonAction::ToggleScrollDir => "toggle_scroll",
             RibbonAction::ToggleQuadView => "view_quad",
             RibbonAction::ToggleProjection => "projection",
@@ -368,9 +371,19 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             "View",
             "Settings",
             RibbonButton {
+                label: "GPU viewport",
+                tooltip: "Draw the model with OpenGL instead of the software rasterizer",
+                order: 1,
+                kind: A(ToggleGpu),
+            },
+        ),
+        (
+            "View",
+            "Settings",
+            RibbonButton {
                 label: "Invert scroll",
                 tooltip: "Reverse the mouse wheel zoom direction",
-                order: 1,
+                order: 2,
                 kind: A(ToggleScrollDir),
             },
         ),

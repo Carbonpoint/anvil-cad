@@ -8,8 +8,14 @@ use anvil_math::{Aabb, DVec3, Plane};
 /// Feature edges sharper than this many radians are drawn.
 const EDGE_ANGLE: f64 = 0.35;
 
+/// Source of `Scene::id`. Starts at 1, so 0 means "never built".
+static NEXT_SCENE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
 #[derive(Default)]
 pub struct Scene {
+    /// Rises with every `build`, so a cache can tell scenes apart.
+    /// The empty default scene keeps 0.
+    pub id: u64,
     pub mesh: TriMesh,
     /// For each triangle: index into `bodies`.
     pub tri_body: Vec<u32>,
@@ -24,7 +30,8 @@ pub struct Scene {
 
 impl Scene {
     pub fn build(doc: &Document) -> Scene {
-        let mut sc = Scene { bounds: Aabb::empty(), ..Default::default() };
+        let id = NEXT_SCENE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let mut sc = Scene { id, bounds: Aabb::empty(), ..Default::default() };
         let mut per_feature_count: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
         for (fi, body) in doc.visible_bodies() {
             let bi = per_feature_count.entry(fi).or_insert(0);

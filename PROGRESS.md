@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-20: Optional GPU viewport (crates/anvil-ui/src/gpu.rs: egui_glow paint callback, own FBO, GL 3.3 core or GLES 300, same Projector maths, per body colour, highlights, section clip, edges; picking still uses the CPU id buffer at half resolution). It is OFF by default because no display or GPU exists on the build machine, so the GL path has never run: turn it on at View > Settings > GPU viewport. GPU numbers in the performance overlay (nvidia-smi, Linux amdgpu and i915 sysfs, GL_RENDERER; 'not available' elsewhere).
+
 - 2026-09-20: Rollback bar in the Part Navigator (Document::rollback, one regenerate for any number of held back features; drag the bar, the | button on a row, or the < > buttons; a new feature is inserted AT the bar and the bar moves past it). Camera: box views are orthographic, the four panes start Front, Right, Top, Perspective, each pane's name is a menu of the eight views, ribbon view commands act on the pane under the pointer, Ortho/Persp toggle, and View > Camera has X up, Y up, Z up and Free orbit (trackball by quaternion).
 
 - 2026-09-20: Viewport batch: drag arrow for Extrude and Press Pull (drag_handle.rs, Feature::drag_plane, Document::edit_feature_quiet so a drag is one undo step; a distance that uses a named expression is not dragged), four pane view (View > Camera > Four views: Front, Right, Top, angled; each pane keeps its own camera and framebuffer, shortcuts belong to the pane under the pointer), View > Settings > Invert scroll. Tests: four_panes_split_the_view, extrude_and_press_pull_get_an_arrow.

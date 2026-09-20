@@ -37,8 +37,11 @@ Read `docs/USING_ANVIL.md` for the sketch workflow.
 * CAM: neutral toolpath, 2.5D contour operation, generic RS-274 G-code post.
 * IO: native `.anvil` JSON, binary STL export.
 * GUI: ribbon built from the feature registry, contextual Sketch tab, part
-  navigator, generic property panel, expression table, CPU-only viewport
+  navigator, generic property panel, expression table, software viewport
   with a depth buffer, model edges, hover and click selection of bodies.
+  An optional OpenGL viewport draws the same view on the GPU
+  (View > Settings > GPU viewport); the software one runs wherever there
+  is no GL context, and keeps picking on both paths.
 
 ## Build and run
 
