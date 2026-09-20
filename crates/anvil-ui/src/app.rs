@@ -1,4 +1,5 @@
 use crate::camera::{Camera, Projector};
+use crate::drag_handle::{self, DragHandle};
 use crate::icons;
 use crate::panels::{self, PanelState};
 use crate::raster::{Framebuffer, Style};
@@ -12,6 +13,16 @@ use anvil_feature::{descriptor, Document};
 use anvil_math::{DVec2, DVec3, Plane};
 use egui::{Color32, Pos2, Stroke};
 use std::path::PathBuf;
+
+/// One pane of the four pane layout: its camera and its own framebuffer.
+struct Pane {
+    camera: Camera,
+    fb: Framebuffer,
+    texture: Option<egui::TextureHandle>,
+}
+
+/// Names shown in the corner of each pane, in pane order.
+const PANE_NAMES: [&str; 4] = ["Front", "Right", "Top", "Angled"];
 
 /// What the viewport is doing.
 enum Mode {
@@ -58,6 +69,14 @@ pub struct AnvilApp {
     section_on: bool,
     /// Also draw sketches that a later feature already uses.
     show_used_sketches: bool,
+    /// A distance drag in progress: (feature, parameter, distance at the
+    /// start, the text the parameter had, pointer position at the start).
+    handle_drag: Option<(usize, &'static str, f64, String, Pos2)>,
+    /// Four panes instead of one (Front, Right, Top, and an angled view).
+    quad: bool,
+    panes: Vec<Pane>,
+    /// Reverse the mouse wheel zoom direction.
+    invert_scroll: bool,
     /// CPU, memory, and fps overlay (View > Settings > Performance).
     show_perf: bool,
     perf: crate::perf::PerfMonitor,
@@ -130,6 +149,10 @@ impl AnvilApp {
             show_used_sketches: false,
             view_rect: egui::Rect::NOTHING,
             sketch_tab: true,
+            handle_drag: None,
+            invert_scroll: false,
+            quad: false,
+            panes: Vec::new(),
             show_perf: false,
             perf: Default::default(),
             section_axis: 0,
@@ -182,9 +205,37 @@ impl AnvilApp {
         }
     }
 
+    /// Build the four panes: Front, Right, Top, and an angled view down
+    /// the (1, 1, 1) direction, each framed on the model.
+    fn make_panes(&mut self) {
+        self.refresh_scene();
+        let bounds = self.scene.bounds;
+        let angles = [
+            (-std::f64::consts::FRAC_PI_2, 0.0),
+            (0.0, 0.0),
+            (0.0, 1.49),
+            (-std::f64::consts::FRAC_PI_4, std::f64::consts::FRAC_PI_4 * 0.8),
+        ];
+        self.panes = angles
+            .iter()
+            .map(|&(yaw, pitch)| {
+                let mut camera = Camera { yaw, pitch, ..self.camera.clone() };
+                camera.unlock();
+                camera.fit_in(&bounds, 1.0);
+                Pane { camera, fb: Framebuffer::new(8, 8), texture: None }
+            })
+            .collect();
+    }
+
     /// Frame every body in the 3D view.
     fn fit_view(&mut self) {
         self.refresh_scene();
+        if self.quad {
+            let bounds = self.scene.bounds;
+            for p in &mut self.panes {
+                p.camera.fit_in(&bounds, 1.0);
+            }
+        }
         let r = self.view_rect;
         let aspect = if r.height() > 1.0 && r.width() > 1.0 { (r.width() / r.height()) as f64 } else { 1.0 };
         self.camera.fit_in(&self.scene.bounds, aspect);
@@ -373,7 +424,25 @@ impl AnvilApp {
                 }
             }
             RibbonAction::ToggleEdges => self.style.draw_edges = !self.style.draw_edges,
+            RibbonAction::ToggleQuadView => {
+                self.quad = !self.quad;
+                if self.quad {
+                    self.make_panes();
+                    self.status =
+                        "Four views: Front, Right, Top, and an angled view. Each pane orbits on its own.".into();
+                } else {
+                    self.status = "One view".into();
+                }
+            }
             RibbonAction::TogglePerf => self.show_perf = !self.show_perf,
+            RibbonAction::ToggleScrollDir => {
+                self.invert_scroll = !self.invert_scroll;
+                self.status = if self.invert_scroll {
+                    "Scroll direction reversed".into()
+                } else {
+                    "Scroll direction normal".into()
+                };
+            }
             RibbonAction::DeleteFeature => {
                 let mut all: Vec<usize> = self.multi.clone();
                 if let Some(i) = self.panels.selected {
@@ -781,6 +850,8 @@ impl AnvilApp {
                     | RibbonAction::ViewRight
                     | RibbonAction::ToggleEdges
                     | RibbonAction::TogglePerf
+                    | RibbonAction::ToggleScrollDir
+                    | RibbonAction::ToggleQuadView
             );
             if in_sketch && !view_only {
                 self.finish_sketch();
@@ -1019,11 +1090,48 @@ impl AnvilApp {
 
     // ---------------- viewport ----------------
 
+    /// The 3D view. In the four pane layout this runs once per pane, with
+    /// that pane's camera and framebuffer swapped in.
     fn viewport(&mut self, ui: &mut egui::Ui) {
         self.refresh_scene();
+        if !self.quad {
+            self.viewport_inner(ui, true);
+            return;
+        }
+        let full = ui.available_rect_before_wrap();
+        let (w, h) = (full.width() * 0.5, full.height() * 0.5);
+        for (pane, name) in PANE_NAMES.iter().enumerate() {
+            let min = full.min + egui::vec2(if pane % 2 == 0 { 0.0 } else { w }, if pane < 2 { 0.0 } else { h });
+            let rect = egui::Rect::from_min_size(min, egui::vec2(w - 1.0, h - 1.0));
+            let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
+            std::mem::swap(&mut self.camera, &mut self.panes[pane].camera);
+            std::mem::swap(&mut self.fb, &mut self.panes[pane].fb);
+            std::mem::swap(&mut self.texture, &mut self.panes[pane].texture);
+            self.viewport_inner(&mut child, false);
+            std::mem::swap(&mut self.camera, &mut self.panes[pane].camera);
+            std::mem::swap(&mut self.fb, &mut self.panes[pane].fb);
+            std::mem::swap(&mut self.texture, &mut self.panes[pane].texture);
+            ui.painter().text(
+                rect.left_top() + egui::vec2(8.0, 6.0),
+                egui::Align2::LEFT_TOP,
+                *name,
+                egui::FontId::proportional(12.0),
+                Color32::from_rgb(90, 95, 105),
+            );
+        }
+        // Lines between the panes.
+        let mid = full.center();
+        let line = Stroke::new(1.0f32, Color32::from_rgb(150, 155, 165));
+        ui.painter().line_segment([Pos2::new(mid.x, full.top()), Pos2::new(mid.x, full.bottom())], line);
+        ui.painter().line_segment([Pos2::new(full.left(), mid.y), Pos2::new(full.right(), mid.y)], line);
+    }
+
+    fn viewport_inner(&mut self, ui: &mut egui::Ui, single: bool) {
         let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let rect = resp.rect;
-        self.view_rect = rect;
+        if single || resp.contains_pointer() {
+            self.view_rect = rect;
+        }
         let w = (rect.width().max(8.0)) as usize;
         let h = (rect.height().max(8.0)) as usize;
         if self.fb.width != w || self.fb.height != h {
@@ -1033,7 +1141,9 @@ impl AnvilApp {
         let pointer = resp.hover_pos().map(|p| ((p.x - rect.left()) as f64, (p.y - rect.top()) as f64));
         let shift = ui.input(|i| i.modifiers.shift);
         // Shortcuts are ignored while a text field has keyboard focus.
-        let typing = ui.ctx().wants_keyboard_input();
+        // Shortcuts belong to the pane under the pointer, and are ignored
+        // while a text field has keyboard focus.
+        let typing = ui.ctx().wants_keyboard_input() || !(single || resp.contains_pointer());
         let esc = !typing && ui.input(|i| i.key_pressed(egui::Key::Escape));
         let del = !typing && ui.input(|i| i.key_pressed(egui::Key::Delete));
         let secondary_clicked = resp.secondary_clicked();
@@ -1055,7 +1165,8 @@ impl AnvilApp {
         if resp.hovered() {
             let scroll = ui.input(|i| i.smooth_scroll_delta.y);
             if scroll.abs() > 0.0 {
-                self.camera.zoom((-scroll as f64 * 0.002).exp());
+                let sign = if self.invert_scroll { 1.0 } else { -1.0 };
+                self.camera.zoom((sign * scroll as f64 * 0.002).exp());
             }
             // Touchpad pinch and Ctrl+scroll arrive as a zoom factor.
             let pinch = ui.input(|i| i.zoom_delta()) as f64;
@@ -1064,7 +1175,7 @@ impl AnvilApp {
             }
         }
         // Keyboard zoom for laptops without a wheel: Home fits, + and - zoom.
-        if !ui.ctx().wants_keyboard_input() {
+        if !typing {
             let (home, plus, minus) = ui.input(|i| {
                 (
                     i.key_pressed(egui::Key::Home),
@@ -1136,7 +1247,23 @@ impl AnvilApp {
             _ => None,
         };
         let hovered_region = pick.as_ref().zip(pointer).and_then(|(pk, (x, y))| pk.region_at(&proj, x, y));
-        if hovered_region.is_some() {
+        // The arrow that drags a distance, for the selected feature.
+        let handle = match self.mode {
+            Mode::Model => drag_handle::handle_for(&self.doc, self.panels.selected),
+            _ => None,
+        };
+        let handle_screen = handle.as_ref().and_then(|h| {
+            let o = proj.project(h.origin)?;
+            let t = proj.project(h.tip())?;
+            let u = proj.project(h.origin + h.dir)?;
+            // Pixels per document unit along the arrow.
+            let px = ((u.0 - o.0).powi(2) + (u.1 - o.1).powi(2)).sqrt();
+            Some((Pos2::new(o.0 as f32, o.1 as f32), Pos2::new(t.0 as f32, t.1 as f32), (u.0 - o.0, u.1 - o.1), px))
+        });
+        let on_handle = handle_screen
+            .zip(pointer)
+            .is_some_and(|((_, t, _, _), (x, y))| ((x as f32 - t.x).powi(2) + (y as f32 - t.y).powi(2)).sqrt() < 12.0);
+        if hovered_region.is_some() || on_handle || self.handle_drag.is_some() {
             self.hovered_edge = None;
         }
 
@@ -1154,12 +1281,66 @@ impl AnvilApp {
                 if !typing && ui.input(|i| i.key_pressed(egui::Key::Q)) && self.selected_face.is_some() {
                     self.press_pull();
                 }
-                if resp.drag_started_by(egui::PointerButton::Primary) && shift {
+                if resp.drag_started_by(egui::PointerButton::Primary) && on_handle {
+                    if let (Some(h), Some(p)) = (&handle, resp.interact_pointer_pos()) {
+                        let expr = self.doc.features[h.feature]
+                            .feature
+                            .params()
+                            .into_iter()
+                            .find(|q| q.name == h.param)
+                            .map(|q| match q.value {
+                                anvil_feature::ParamValue::Expr(e) => e,
+                                _ => String::new(),
+                            })
+                            .unwrap_or_default();
+                        self.handle_drag = Some((h.feature, h.param, h.distance, expr, p));
+                    }
+                }
+                if let Some((fi, name, start, _, from)) = self.handle_drag.clone() {
+                    if resp.dragged_by(egui::PointerButton::Primary) {
+                        if let (Some(p), Some((_, _, (ax, ay), px))) = (resp.interact_pointer_pos(), handle_screen) {
+                            if px > 1e-6 {
+                                let (dx, dy) = ((p.x - from.x) as f64, (p.y - from.y) as f64);
+                                let along = (dx * ax + dy * ay) / (ax * ax + ay * ay).sqrt();
+                                let d = DragHandle::snap(start + along / px, shift);
+                                let txt = format!("{d}");
+                                self.doc.edit_feature_quiet(fi, |f| {
+                                    let _ = f.set_param(name, anvil_feature::ParamValue::Expr(txt));
+                                });
+                                self.panels.drafts.retain(|(i, _), _| *i != fi);
+                                self.scene_dirty = true;
+                                self.status = format!("Distance {}", self.doc.fmt_length(d));
+                            }
+                        }
+                    }
+                    if resp.drag_stopped_by(egui::PointerButton::Primary) {
+                        // One undo step for the whole drag.
+                        let (_, _, _, orig, _) = self.handle_drag.take().unwrap();
+                        let now = self.doc.features[fi]
+                            .feature
+                            .params()
+                            .into_iter()
+                            .find(|q| q.name == name)
+                            .map(|q| match q.value {
+                                anvil_feature::ParamValue::Expr(e) => e,
+                                _ => String::new(),
+                            })
+                            .unwrap_or_default();
+                        self.doc.edit_feature_quiet(fi, |f| {
+                            let _ = f.set_param(name, anvil_feature::ParamValue::Expr(orig));
+                        });
+                        self.doc.edit_feature(fi, |f| {
+                            let _ = f.set_param(name, anvil_feature::ParamValue::Expr(now));
+                        });
+                        self.scene_dirty = true;
+                    }
+                }
+                if resp.drag_started_by(egui::PointerButton::Primary) && shift && self.handle_drag.is_none() {
                     if let Some(p) = resp.interact_pointer_pos() {
                         self.box_select = Some((p, p));
                     }
                 }
-                if resp.dragged_by(egui::PointerButton::Primary) {
+                if resp.dragged_by(egui::PointerButton::Primary) && self.handle_drag.is_none() {
                     if let Some((a, _)) = self.box_select {
                         if let Some(p) = resp.interact_pointer_pos() {
                             self.box_select = Some((a, p));
@@ -1634,6 +1815,32 @@ impl AnvilApp {
                 );
             }
         }
+        if let (Some(h), Some((o, t, _, _))) = (&handle, handle_screen) {
+            let col = if on_handle || self.handle_drag.is_some() {
+                Color32::from_rgb(255, 170, 40)
+            } else {
+                Color32::from_rgb(210, 120, 20)
+            };
+            let (o, t) = (o + rect.min.to_vec2(), t + rect.min.to_vec2());
+            painter.line_segment([o, t], Stroke::new(2.5f32, col));
+            let dir = (t - o).normalized();
+            if dir.length() > 0.5 {
+                let side = egui::vec2(-dir.y, dir.x) * 6.0;
+                painter.add(egui::Shape::convex_polygon(
+                    vec![t + dir * 12.0, t - dir * 4.0 + side, t - dir * 4.0 - side],
+                    col,
+                    Stroke::NONE,
+                ));
+            }
+            painter.circle_filled(t, 5.0, col);
+            painter.text(
+                t + egui::vec2(10.0, -14.0),
+                egui::Align2::LEFT_CENTER,
+                self.doc.fmt_length(h.distance),
+                egui::FontId::proportional(13.0),
+                Color32::from_rgb(70, 50, 10),
+            );
+        }
         self.draw_triad(&painter, rect);
         if self.show_perf {
             let lines = self.perf.lines();
@@ -1645,7 +1852,7 @@ impl AnvilApp {
             painter.galley(r.min + egui::vec2(5.0, 5.0), galley, Color32::WHITE);
         }
         // View buttons in the top right corner, like a simplified ViewCube.
-        if !matches!(self.mode, Mode::Sketch(_)) {
+        if !matches!(self.mode, Mode::Sketch(_)) && single {
             let views = [
                 ("Top", RibbonAction::ViewTop),
                 ("Front", RibbonAction::ViewFront),
@@ -2014,6 +2221,28 @@ mod layout_tests {
             let _ = ctx.run(input(), |ctx| app.frame_ui(ctx));
         }
         app.view_rect
+    }
+
+    #[test]
+    fn four_panes_split_the_view() {
+        let ctx = egui::Context::default();
+        let mut app = AnvilApp::new_headless();
+        app.run_action(RibbonAction::ToggleQuadView);
+        assert!(app.quad);
+        assert_eq!(app.panes.len(), 4);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1366.0, 768.0))),
+            ..Default::default()
+        };
+        for _ in 0..4 {
+            let _ = ctx.run(input(), |ctx| app.frame_ui(ctx));
+        }
+        // Each pane holds about a quarter of the view.
+        let single = view_after(&mut AnvilApp::new_headless(), 1366.0, 768.0, None);
+        assert!(app.view_rect.width() < single.width() * 0.6, "{:?}", app.view_rect);
+        // The four cameras look from different directions.
+        let yaws: Vec<f64> = app.panes.iter().map(|p| p.camera.yaw).collect();
+        assert!(yaws.windows(2).any(|w| (w[0] - w[1]).abs() > 0.1), "{yaws:?}");
     }
 
     #[test]

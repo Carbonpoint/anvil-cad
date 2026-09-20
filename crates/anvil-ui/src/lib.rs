@@ -12,6 +12,7 @@
 
 mod app;
 mod camera;
+mod drag_handle;
 mod dxf;
 pub mod icons;
 mod panels;

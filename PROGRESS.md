@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-20: Viewport batch: drag arrow for Extrude and Press Pull (drag_handle.rs, Feature::drag_plane, Document::edit_feature_quiet so a drag is one undo step; a distance that uses a named expression is not dragged), four pane view (View > Camera > Four views: Front, Right, Top, angled; each pane keeps its own camera and framebuffer, shortcuts belong to the pane under the pointer), View > Settings > Invert scroll. Tests: four_panes_split_the_view, extrude_and_press_pull_get_an_arrow.
+
 - 2026-09-19: Sketch regions follow the planar arrangement (overlapping circles give three pickable regions; touching picks merge into one body). Ribbon icons drawn in code (icons.rs, every command has one; dense sketch rows are icon only with tooltips) and an anvil logo (window icon, ribbon corner, docs/logo.svg).
 
 - 2026-09-19: Part Navigator rows no longer spread over the panel height (a right_to_left layout took all the height left). Tangent between two circles or arcs (TangentCircles, inside or outside picked from the geometry). Examples tab (Parts, Workbook, Casting samples) instead of File > Samples. Other ribbon tabs stay reachable in sketch mode; a solid command finishes the sketch first. View > Settings > Performance shows CPU and memory (computer and Anvil, via sysinfo), fps and frame time.

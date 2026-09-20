@@ -29,6 +29,10 @@ pub enum RibbonAction {
     ViewIso,
     /// Show or hide the CPU, memory, and fps overlay.
     TogglePerf,
+    /// Reverse the mouse wheel zoom direction.
+    ToggleScrollDir,
+    /// One view or four views (Front, Right, Top, angled).
+    ToggleQuadView,
     ViewTop,
     ViewFront,
     ViewRight,
@@ -89,6 +93,8 @@ impl RibbonAction {
             RibbonAction::Measure => "measure",
             RibbonAction::ToggleEdges => "toggle_edges",
             RibbonAction::TogglePerf => "toggle_perf",
+            RibbonAction::ToggleScrollDir => "toggle_scroll",
+            RibbonAction::ToggleQuadView => "view_quad",
             RibbonAction::ViewIso => "view_iso",
             RibbonAction::ViewTop => "view_top",
             RibbonAction::ViewFront => "view_front",
@@ -303,6 +309,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
             RibbonButton { label: "Fit", tooltip: "Fit all bodies in the viewport", order: 0, kind: A(FitView) },
         ),
         ("View", "Camera", RibbonButton { label: "Iso", tooltip: "Isometric view", order: 1, kind: A(ViewIso) }),
+        (
+            "View",
+            "Camera",
+            RibbonButton {
+                label: "Four views",
+                tooltip: "Front, Right, Top, and an angled view in four panes",
+                order: 5,
+                kind: A(ToggleQuadView),
+            },
+        ),
         ("View", "Camera", RibbonButton { label: "Top", tooltip: "Look down the Z axis", order: 2, kind: A(ViewTop) }),
         (
             "View",
@@ -327,6 +343,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 tooltip: "Show or hide CPU, memory, and fps in the corner of the view",
                 order: 0,
                 kind: A(TogglePerf),
+            },
+        ),
+        (
+            "View",
+            "Settings",
+            RibbonButton {
+                label: "Invert scroll",
+                tooltip: "Reverse the mouse wheel zoom direction",
+                order: 1,
+                kind: A(ToggleScrollDir),
             },
         ),
     ]

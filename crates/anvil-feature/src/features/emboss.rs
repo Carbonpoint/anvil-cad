@@ -725,6 +725,10 @@ impl Feature for FaceExtrudeFeature {
     fn params(&self) -> Vec<ParamSpec> {
         vec![ParamSpec::length("distance", "Distance (negative goes into the body)", &self.distance)]
     }
+    fn drag_plane(&self) -> Option<(Plane, DVec2)> {
+        let n = self.outer.len() as f64;
+        (n > 0.0).then(|| (self.plane, self.outer.iter().copied().sum::<DVec2>() / n))
+    }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
             ("distance", ParamValue::Expr(s)) => self.distance = s,

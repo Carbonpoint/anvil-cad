@@ -514,6 +514,18 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.rect_fill((0.43, 0.3), (0.57, 0.88));
             c.rect_fill((0.68, 0.45), (0.82, 0.88));
         }
+        "view_quad" => {
+            c.rect((0.12, 0.12), (0.88, 0.88));
+            c.line((0.5, 0.12), (0.5, 0.88));
+            c.line((0.12, 0.5), (0.88, 0.5));
+        }
+        "toggle_scroll" => {
+            // A mouse with arrows both ways.
+            c.rect((0.32, 0.16), (0.68, 0.84));
+            c.line((0.5, 0.26), (0.5, 0.42));
+            c.arrow((0.16, 0.6), (0.16, 0.3));
+            c.arrow((0.84, 0.4), (0.84, 0.7));
+        }
         "view_iso" => draw_cube(&c),
         "view_top" => {
             c.rect((0.2, 0.2), (0.8, 0.8));

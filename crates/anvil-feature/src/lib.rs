@@ -105,6 +105,13 @@ pub trait Feature: Send + Sync + std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Plane and point where a distance drag arrow starts, for features
+    /// that sit on a plane of their own (Press Pull). Features that take
+    /// their plane from a sketch are handled by the UI instead.
+    fn drag_plane(&self) -> Option<(anvil_math::Plane, anvil_math::DVec2)> {
+        None
+    }
+
     /// Take the edges picked in the viewport (world end points) and the
     /// feature that owns them. Returns false if the feature has no edges.
     fn set_edges(&mut self, _edges: Vec<[anvil_math::DVec3; 2]>, _body: usize) -> bool {

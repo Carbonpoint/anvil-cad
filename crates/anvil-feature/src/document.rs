@@ -319,6 +319,15 @@ impl Document {
         }
     }
 
+    /// Edit a feature without adding an undo step. Used while a drag is in
+    /// progress; the drag adds one undo step when it ends.
+    pub fn edit_feature_quiet(&mut self, idx: FeatureId, f: impl FnOnce(&mut dyn Feature)) {
+        if idx < self.features.len() {
+            f(self.features[idx].feature.as_mut());
+            self.regenerate_from(idx);
+        }
+    }
+
     pub fn set_suppressed(&mut self, idx: FeatureId, suppressed: bool) {
         if idx < self.features.len() {
             self.snapshot();
