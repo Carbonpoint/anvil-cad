@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-20: Benchmark stops when its button is pressed again. Section analysis (Solid > Inspect): with Section on, it reports the area, perimeter, loop count and centre of the cut face, for the selected feature or for every visible body. Kernel gains `section` (loops of the cut face, holes wound the other way) with `ops::section_properties`, plus `Plane::through` and `Document::fmt_area`.
+
 - 2026-09-20: Material Design 3 theme (crates/anvil-ui/src/theme.rs, docs/THEME.md): seed #3B6EA5, surface containers, M3 shape and state layers, a light and a dark scheme with Light/Dark/System in the settings window; the 3D view, the sketch overlay and the panels take their colours from the scheme. Contrast of every text pair is at least 4.5:1 by the WCAG formula. The rendered look is unverified: this box has no display.
 
 - 2026-09-20: GPU viewport verified by the user on Intel Iris Xe (Windows). It was no faster because the software id and depth pass still ran every frame in every pane: now it runs only in the pane under the pointer and only when the view or the model changed (Camera::fingerprint plus Scene::id). The performance overlay draws in one pane. New View > Settings > Benchmark: it spins the view for 60 frames with the GPU and 60 without, then reports the middle and worst frame time with the triangle count.

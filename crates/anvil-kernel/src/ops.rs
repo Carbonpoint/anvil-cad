@@ -2,7 +2,7 @@
 
 use crate::topology::{Solid, Surface, SurfaceGeom, VertexId};
 use crate::{BooleanOp, EdgeId, KernelError, KernelResult};
-use anvil_math::{Axis, DVec2, Plane};
+use anvil_math::{Axis, DVec2, DVec3, Plane};
 
 /// Segments per full revolution when revolving.
 pub const REVOLVE_SEGMENTS: usize = 64;
@@ -908,6 +908,112 @@ fn cap_open_boundary(s: &mut Solid, n: anvil_math::DVec3) {
     }
 }
 
+/// Cut a solid with a plane and return the closed loops of the cut face,
+/// in plane coordinates. Outer loops run counter-clockwise and holes run
+/// clockwise, so the signed areas add up to the area of solid material.
+pub fn section_loops(solid: &Solid, plane: &Plane) -> Vec<Vec<DVec2>> {
+    let m = crate::mesh::tessellate(solid);
+    let n = plane.normal();
+    let scale = m.positions.iter().fold(1.0f64, |a, p| a.max(p.length()));
+    let tol = scale * 1e-9;
+    let dist = |p: DVec3| (p - plane.origin).dot(n);
+    let mut segs: Vec<[DVec2; 2]> = Vec::new();
+    for t in 0..m.triangle_count() {
+        let v: Vec<DVec3> = (0..3).map(|k| m.positions[m.indices[t * 3 + k] as usize]).collect();
+        let d: Vec<f64> = v.iter().map(|p| dist(*p)).collect();
+        // Points where the triangle edges cross the plane.
+        let mut hits: Vec<DVec3> = Vec::new();
+        for k in 0..3 {
+            let (a, b) = (k, (k + 1) % 3);
+            if (d[a] > tol && d[b] < -tol) || (d[a] < -tol && d[b] > tol) {
+                let f = d[a] / (d[a] - d[b]);
+                hits.push(v[a] + (v[b] - v[a]) * f);
+            } else if d[a].abs() <= tol && d[b].abs() <= tol {
+                hits.push(v[a]);
+                hits.push(v[b]);
+            } else if d[a].abs() <= tol {
+                hits.push(v[a]);
+            }
+        }
+        hits.dedup_by(|a, b| (*a - *b).length() <= tol);
+        if hits.len() != 2 || (hits[0] - hits[1]).length() <= tol {
+            continue;
+        }
+        // Walk so that material stays on the left seen along the normal.
+        let g = (v[1] - v[0]).cross(v[2] - v[0]);
+        let want = n.cross(g);
+        let (a, b) = (plane.to_local(hits[0]), plane.to_local(hits[1]));
+        let dir = plane.to_local(hits[1]) - plane.to_local(hits[0]);
+        let want2 = plane.to_local(plane.origin + want) - plane.to_local(plane.origin);
+        if dir.dot(want2) < 0.0 {
+            segs.push([b, a]);
+        } else {
+            segs.push([a, b]);
+        }
+    }
+    chain_segments(&segs, (scale * 1e-7).max(1e-9))
+}
+
+/// Join segments end to end into closed loops. Segments that do not close
+/// are dropped.
+fn chain_segments(segs: &[[DVec2; 2]], tol: f64) -> Vec<Vec<DVec2>> {
+    let mut used = vec![false; segs.len()];
+    let mut loops = Vec::new();
+    for start in 0..segs.len() {
+        if used[start] {
+            continue;
+        }
+        used[start] = true;
+        let mut pts = vec![segs[start][0], segs[start][1]];
+        loop {
+            let tail = *pts.last().unwrap();
+            if (tail - pts[0]).length() <= tol && pts.len() > 2 {
+                pts.pop();
+                loops.push(pts);
+                break;
+            }
+            let next = (0..segs.len()).find(|&i| !used[i] && (segs[i][0] - tail).length() <= tol);
+            match next {
+                Some(i) => {
+                    used[i] = true;
+                    pts.push(segs[i][1]);
+                }
+                None => break,
+            }
+        }
+    }
+    loops
+}
+
+/// Area, perimeter, and centroid of a set of section loops.
+pub fn section_properties(loops: &[Vec<DVec2>]) -> (f64, f64, DVec2) {
+    let mut area = 0.0;
+    let mut perimeter = 0.0;
+    let mut cx = DVec2::ZERO;
+    for lp in loops {
+        let n = lp.len();
+        if n < 3 {
+            continue;
+        }
+        let mut a = 0.0;
+        let mut c = DVec2::ZERO;
+        for i in 0..n {
+            let (p, q) = (lp[i], lp[(i + 1) % n]);
+            let cross = p.perp_dot(q);
+            a += cross;
+            c += (p + q) * cross;
+            perimeter += (q - p).length();
+        }
+        a *= 0.5;
+        area += a;
+        if a.abs() > 1e-12 {
+            cx += c / 6.0;
+        }
+    }
+    let centroid = if area.abs() > 1e-12 { cx / area } else { DVec2::ZERO };
+    (area, perimeter, centroid)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,5 +1144,35 @@ mod tests {
         let s = extrude_with_holes(&Plane::XY, &outer, &[hole], 2.0).unwrap();
         assert!((s.volume() - 168.0).abs() < 1e-6, "{}", s.volume());
         assert_eq!(s.faces.len(), 10);
+    }
+}
+
+#[cfg(test)]
+mod section_tests {
+    use super::*;
+
+    #[test]
+    fn a_cut_through_a_box_measures_the_rectangle() {
+        let b = box_solid(DVec3::new(-5.0, -10.0, 0.0), DVec3::new(10.0, 20.0, 4.0)).unwrap();
+        let plane = Plane::through(DVec3::new(0.0, 0.0, 2.0), DVec3::Z);
+        let loops = section_loops(&b, &plane);
+        let (area, perimeter, c) = section_properties(&loops);
+        assert_eq!(loops.len(), 1);
+        assert!((area - 200.0).abs() < 1e-6, "{area}");
+        assert!((perimeter - 60.0).abs() < 1e-6, "{perimeter}");
+        assert!(c.length() < 1e-6, "{c:?}");
+    }
+
+    #[test]
+    fn a_hole_is_taken_off_the_area() {
+        let b = box_solid(DVec3::new(-10.0, -10.0, 0.0), DVec3::new(20.0, 20.0, 10.0)).unwrap();
+        let bore = cylinder(&Plane::XY, DVec2::ZERO, 3.0, 10.0).unwrap();
+        let part = crate::csg::boolean(&b, &bore, BooleanOp::Subtract);
+        let plane = Plane::through(DVec3::new(0.0, 0.0, 5.0), DVec3::Z);
+        let loops = section_loops(&part, &plane);
+        let (area, _, _) = section_properties(&loops);
+        let want = 400.0 - std::f64::consts::PI * 9.0;
+        assert_eq!(loops.len(), 2, "outer loop and the bore");
+        assert!((area - want).abs() / want < 0.02, "{area} against {want}");
     }
 }

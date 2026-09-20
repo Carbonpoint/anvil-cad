@@ -502,6 +502,15 @@ impl Document {
         }
     }
 
+    /// Format an area in the display unit.
+    pub fn fmt_area(&self, mm2: f64) -> String {
+        if self.unit == "in" {
+            format!("{:.4} in2", mm2 / 645.16)
+        } else {
+            format!("{mm2:.2} mm2")
+        }
+    }
+
     /// Insert a feature at a position (for editing history order).
     pub fn insert_feature(&mut self, at: FeatureId, feature: Box<dyn Feature>) -> FeatureId {
         self.snapshot();

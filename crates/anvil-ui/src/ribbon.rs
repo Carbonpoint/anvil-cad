@@ -31,6 +31,8 @@ pub enum RibbonAction {
     TogglePerf,
     /// Time the view with the GPU and with the software renderer.
     Benchmark,
+    /// Measure the face the section plane cuts.
+    SectionAnalysis,
     /// Draw the viewport with OpenGL, or with the software rasterizer.
     ToggleGpu,
     /// Reverse the mouse wheel zoom direction.
@@ -104,6 +106,7 @@ impl RibbonAction {
             RibbonAction::ToggleEdges => "toggle_edges",
             RibbonAction::TogglePerf => "toggle_perf",
             RibbonAction::Benchmark => "benchmark",
+            RibbonAction::SectionAnalysis => "section_analysis",
             RibbonAction::ToggleGpu => "toggle_gpu",
             RibbonAction::ToggleScrollDir => "toggle_scroll",
             RibbonAction::ToggleQuadView => "view_quad",
@@ -296,6 +299,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 tooltip: "Extrude the selected face into a new body (Q)",
                 order: 0,
                 kind: A(PressPull),
+            },
+        ),
+        (
+            "Solid",
+            "Inspect",
+            RibbonButton {
+                label: "Section analysis",
+                tooltip: "Area, perimeter, and centre of the face the section plane cuts (turn Section on first)",
+                order: 3,
+                kind: A(SectionAnalysis),
             },
         ),
         (

@@ -29,6 +29,15 @@ impl Plane {
     pub const XZ: Plane = Plane { origin: DVec3::ZERO, x_axis: DVec3::X, y_axis: DVec3::Z };
     pub const YZ: Plane = Plane { origin: DVec3::ZERO, x_axis: DVec3::Y, y_axis: DVec3::Z };
 
+    /// A plane through `origin` with this normal. The x axis is world X
+    /// where that is not parallel to the normal, else world Y.
+    pub fn through(origin: DVec3, normal: DVec3) -> Plane {
+        let n = normal.normalize();
+        let helper = if n.dot(DVec3::X).abs() < 0.9 { DVec3::X } else { DVec3::Y };
+        let x_axis = (helper - n * helper.dot(n)).normalize();
+        Plane { origin, x_axis, y_axis: n.cross(x_axis) }
+    }
+
     pub fn normal(&self) -> DVec3 {
         self.x_axis.cross(self.y_axis).normalize()
     }

@@ -523,6 +523,15 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.arrow((0.5, 0.9), (0.5, 0.12));
             c.line((0.2, 0.9), (0.8, 0.9));
         }
+        "section_analysis" => {
+            // A cut block with the cut face hatched.
+            c.rect((0.12, 0.2), (0.88, 0.8));
+            c.line((0.5, 0.2), (0.5, 0.8));
+            for i in 0..3 {
+                let t = 0.3 + i as f32 * 0.18;
+                c.line((0.52, t + 0.1), (0.86, t - 0.08));
+            }
+        }
         "benchmark" => {
             // A stopwatch.
             c.circle((0.5, 0.56), 0.32);

@@ -317,6 +317,67 @@ impl AnvilApp {
         }
     }
 
+    /// End a running benchmark and put the view back as it was.
+    fn stop_bench(&mut self, why: &str) {
+        if let Some(b) = self.bench.take() {
+            self.gpu.set_enabled(b.restore_gpu);
+            self.camera.yaw = b.restore_yaw;
+            self.status = why.to_string();
+        }
+    }
+
+    /// Section analysis: measure the face the section plane cuts.
+    fn section_analysis(&mut self) {
+        if !self.section_on {
+            self.status = "Turn Section on in the status bar first".into();
+            return;
+        }
+        self.refresh_scene();
+        let axis = [DVec3::X, DVec3::Y, DVec3::Z][self.section_axis.min(2)];
+        let n = if self.section_flip { -axis } else { axis };
+        let plane = Plane::through(axis * self.section_offset, n);
+        let kernel = anvil_kernel::NativeKernel;
+        let only = self.panels.selected;
+        let mut area = 0.0;
+        let mut perimeter = 0.0;
+        let mut centre = DVec3::ZERO;
+        let mut loops = 0;
+        let mut bodies = 0;
+        for (fi, body) in self.doc.visible_bodies() {
+            if only.is_some_and(|s| s != fi) {
+                continue;
+            }
+            let ls = anvil_kernel::Kernel::section(&kernel, body, &plane);
+            let (a, p, c) = anvil_kernel::ops::section_properties(&ls);
+            if a.abs() < 1e-9 {
+                continue;
+            }
+            bodies += 1;
+            loops += ls.len();
+            area += a;
+            perimeter += p;
+            centre += plane.to_world(c) * a;
+        }
+        if area.abs() < 1e-9 {
+            self.status = "The section plane does not cut any body".into();
+            return;
+        }
+        centre /= area;
+        let what = match only {
+            Some(i) => self.doc.features[i].feature.name(),
+            None => format!("{bodies} body(ies)"),
+        };
+        self.status = format!(
+            "Section of {what}: area {}, perimeter {}, {loops} loop(s), centre {:.2}, {:.2}, {:.2}",
+            self.doc.fmt_area(area),
+            self.doc.fmt_length(perimeter),
+            centre.x,
+            centre.y,
+            centre.z
+        );
+        log::info!("{}", self.status);
+    }
+
     /// One frame of a running benchmark: keep the time, spin the view,
     /// and move on when the phase is full.
     fn bench_step(&mut self, ctx: &egui::Context, frame: std::time::Duration) {
@@ -616,6 +677,7 @@ impl AnvilApp {
                     self.status = "One view".into();
                 }
             }
+            RibbonAction::Benchmark if self.bench.is_some() => self.stop_bench("Benchmark stopped"),
             RibbonAction::Benchmark => {
                 self.bench = Some(Bench {
                     phase: if self.gpu.available() { 0 } else { 1 },
@@ -747,6 +809,7 @@ impl AnvilApp {
                 self.status = "Business card loaded. Edit the Text and QR features, then File > 3MF (parts).".into();
             }
             RibbonAction::PressPull => self.press_pull(),
+            RibbonAction::SectionAnalysis => self.section_analysis(),
             RibbonAction::Interference => {
                 let pair = match (self.panels.selected, self.multi.first()) {
                     (Some(a), Some(&b)) if a != b => Some((a, b)),

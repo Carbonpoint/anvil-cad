@@ -93,6 +93,10 @@ pub trait Kernel {
     fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
     fn shell(&self, solid: &Solid, thickness: f64) -> KernelResult<Solid>;
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)>;
+    /// Closed loops of the face a plane cuts through a solid, in plane
+    /// coordinates. Holes run the other way round, so the signed areas
+    /// add up to the area of material.
+    fn section(&self, solid: &Solid, plane: &Plane) -> Vec<Vec<DVec2>>;
     /// Round (fillet) or bevel (chamfer) straight edges given by end points.
     fn blend_edges(
         &self,
@@ -192,6 +196,9 @@ impl Kernel for NativeKernel {
     }
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
         ops::split_by_plane(solid, plane)
+    }
+    fn section(&self, solid: &Solid, plane: &Plane) -> Vec<Vec<DVec2>> {
+        ops::section_loops(solid, plane)
     }
     fn blend_edges(
         &self,
