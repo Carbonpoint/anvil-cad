@@ -125,6 +125,36 @@ impl Camera {
         }
     }
 
+    /// A cheap value that changes whenever the view changes. Used to skip
+    /// work when nothing moved.
+    pub fn fingerprint(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for v in [
+            self.target.x,
+            self.target.y,
+            self.target.z,
+            self.yaw,
+            self.pitch,
+            self.distance,
+            self.fov_y,
+            self.ortho_height.unwrap_or(f64::NAN),
+            self.orient.x,
+            self.orient.y,
+            self.orient.z,
+            self.orient.w,
+        ] {
+            v.to_bits().hash(&mut h);
+        }
+        (self.up_axis as u8).hash(&mut h);
+        if let Some((f, u)) = self.locked_frame {
+            for v in f.to_array().iter().chain(u.to_array().iter()) {
+                v.to_bits().hash(&mut h);
+            }
+        }
+        h.finish()
+    }
+
     /// Orthographic if `on`, framed on a box of this diagonal.
     pub fn set_ortho(&mut self, on: bool, view_height: f64) {
         self.ortho_height = on.then(|| view_height.max(1.0));

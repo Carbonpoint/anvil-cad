@@ -523,6 +523,13 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.arrow((0.5, 0.9), (0.5, 0.12));
             c.line((0.2, 0.9), (0.8, 0.9));
         }
+        "benchmark" => {
+            // A stopwatch.
+            c.circle((0.5, 0.56), 0.32);
+            c.line((0.5, 0.56), (0.5, 0.3));
+            c.line((0.38, 0.12), (0.62, 0.12));
+            c.line((0.5, 0.12), (0.5, 0.24));
+        }
         "toggle_gpu" => {
             // A graphics chip: a square die with pins.
             c.rect((0.24, 0.24), (0.76, 0.76));

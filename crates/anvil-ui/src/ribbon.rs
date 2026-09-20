@@ -29,6 +29,8 @@ pub enum RibbonAction {
     ViewIso,
     /// Show or hide the CPU, memory, and fps overlay.
     TogglePerf,
+    /// Time the view with the GPU and with the software renderer.
+    Benchmark,
     /// Draw the viewport with OpenGL, or with the software rasterizer.
     ToggleGpu,
     /// Reverse the mouse wheel zoom direction.
@@ -101,6 +103,7 @@ impl RibbonAction {
             RibbonAction::Measure => "measure",
             RibbonAction::ToggleEdges => "toggle_edges",
             RibbonAction::TogglePerf => "toggle_perf",
+            RibbonAction::Benchmark => "benchmark",
             RibbonAction::ToggleGpu => "toggle_gpu",
             RibbonAction::ToggleScrollDir => "toggle_scroll",
             RibbonAction::ToggleQuadView => "view_quad",
@@ -365,6 +368,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
                 tooltip: "Show or hide CPU, memory, and fps in the corner of the view",
                 order: 0,
                 kind: A(TogglePerf),
+            },
+        ),
+        (
+            "View",
+            "Settings",
+            RibbonButton {
+                label: "Benchmark",
+                tooltip: "Spin the view and report the frame time with the GPU and with the software renderer",
+                order: 3,
+                kind: A(Benchmark),
             },
         ),
         (

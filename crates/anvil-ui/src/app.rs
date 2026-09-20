@@ -14,6 +14,29 @@ use anvil_math::{DVec2, DVec3, Plane};
 use egui::{Color32, Pos2, Stroke};
 use std::path::PathBuf;
 
+/// Frames measured in each phase of the benchmark, after the warm up.
+const BENCH_FRAMES: usize = 60;
+/// Frames thrown away at the start of a phase, while caches fill.
+const BENCH_WARMUP: usize = 10;
+
+/// A running benchmark: it spins the view and times the frames, first
+/// with the GPU viewport, then with the software one.
+struct Bench {
+    /// 0 = GPU, 1 = software.
+    phase: usize,
+    times: Vec<f32>,
+    gpu: Option<(f32, f32)>,
+    restore_gpu: bool,
+    restore_yaw: f64,
+}
+
+/// Middle and worst frame time of a phase, in milliseconds.
+fn bench_result(times: &mut [f32]) -> (f32, f32) {
+    times.sort_by(|a, b| a.total_cmp(b));
+    let mid = times[times.len() / 2];
+    (mid, *times.last().unwrap_or(&mid))
+}
+
 /// A named direction to look from. The six box views are orthographic,
 /// like a drawing; Angled and Perspective look from a corner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -129,6 +152,11 @@ pub struct AnvilApp {
     /// A distance drag in progress: (feature, parameter, distance at the
     /// start, the text the parameter had, pointer position at the start).
     handle_drag: Option<(usize, &'static str, f64, String, Pos2)>,
+    /// A benchmark in progress.
+    bench: Option<Bench>,
+    /// What the id and depth buffer was last drawn for, so it is not
+    /// drawn again while nothing moves.
+    pick_key: Option<(u64, u64, u64, u64)>,
     /// The pane the view commands act on (the last one under the pointer).
     active_pane: usize,
     /// Four panes instead of one (Front, Right, Top, and an angled view).
@@ -232,6 +260,8 @@ impl AnvilApp {
             quad: false,
             panes: Vec::new(),
             active_pane: 0,
+            pick_key: None,
+            bench: None,
             show_perf: false,
             gpu: crate::gpu::GpuViewport::default(),
             perf: Default::default(),
@@ -285,6 +315,48 @@ impl AnvilApp {
             self.scene = Scene::build(&self.doc);
             self.scene_dirty = false;
         }
+    }
+
+    /// One frame of a running benchmark: keep the time, spin the view,
+    /// and move on when the phase is full.
+    fn bench_step(&mut self, ctx: &egui::Context, frame: std::time::Duration) {
+        let Some(b) = &mut self.bench else { return };
+        b.times.push(frame.as_secs_f32() * 1000.0);
+        // Spin so every frame really redraws.
+        self.camera.yaw += 0.02;
+        for p in &mut self.panes {
+            p.camera.yaw += 0.02;
+        }
+        ctx.request_repaint();
+        if b.times.len() < BENCH_WARMUP + BENCH_FRAMES {
+            return;
+        }
+        let mut times: Vec<f32> = b.times.drain(..).skip(BENCH_WARMUP).collect();
+        let (mid, worst) = bench_result(&mut times);
+        let tris = self.scene.mesh.triangle_count();
+        let panes = if self.quad { 4 } else { 1 };
+        if b.phase == 0 {
+            b.gpu = Some((mid, worst));
+            b.phase = 1;
+            self.gpu.set_enabled(false);
+            self.status = "Benchmark: software half running".into();
+            return;
+        }
+        let gpu = b.gpu;
+        let (restore_gpu, yaw) = (b.restore_gpu, b.restore_yaw);
+        self.bench = None;
+        self.gpu.set_enabled(restore_gpu);
+        self.camera.yaw = yaw;
+        let sw = format!("software {mid:.1} ms ({:.0} fps), worst {worst:.1} ms", 1000.0 / mid.max(0.01));
+        let text = match gpu {
+            Some((g, gw)) => format!(
+                "Benchmark {tris} triangles, {panes} pane(s): GPU {g:.1} ms ({:.0} fps), worst {gw:.1} ms; {sw}",
+                1000.0 / g.max(0.01)
+            ),
+            None => format!("Benchmark {tris} triangles, {panes} pane(s): {sw} (no GPU context)"),
+        };
+        log::info!("{text}");
+        self.status = text;
     }
 
     /// The camera the view commands act on: in the four pane layout it is
@@ -543,6 +615,18 @@ impl AnvilApp {
                 } else {
                     self.status = "One view".into();
                 }
+            }
+            RibbonAction::Benchmark => {
+                self.bench = Some(Bench {
+                    phase: if self.gpu.available() { 0 } else { 1 },
+                    times: Vec::new(),
+                    gpu: None,
+                    restore_gpu: self.gpu.active(),
+                    restore_yaw: self.camera.yaw,
+                });
+                self.gpu.set_enabled(self.gpu.available());
+                self.show_perf = true;
+                self.status = "Benchmark running: the view spins for a few seconds".into();
             }
             RibbonAction::TogglePerf => self.show_perf = !self.show_perf,
             RibbonAction::ToggleGpu => {
@@ -1223,7 +1307,7 @@ impl AnvilApp {
     fn viewport(&mut self, ui: &mut egui::Ui) {
         self.refresh_scene();
         if !self.quad {
-            self.viewport_inner(ui, true);
+            self.viewport_inner(ui, true, true);
             return;
         }
         let full = ui.available_rect_before_wrap();
@@ -1240,7 +1324,7 @@ impl AnvilApp {
             std::mem::swap(&mut self.camera, &mut self.panes[pane].camera);
             std::mem::swap(&mut self.fb, &mut self.panes[pane].fb);
             std::mem::swap(&mut self.texture, &mut self.panes[pane].texture);
-            self.viewport_inner(&mut child, false);
+            self.viewport_inner(&mut child, false, pane == self.active_pane);
             std::mem::swap(&mut self.camera, &mut self.panes[pane].camera);
             std::mem::swap(&mut self.fb, &mut self.panes[pane].fb);
             std::mem::swap(&mut self.texture, &mut self.panes[pane].texture);
@@ -1274,7 +1358,7 @@ impl AnvilApp {
         ui.painter().line_segment([Pos2::new(full.left(), mid.y), Pos2::new(full.right(), mid.y)], line);
     }
 
-    fn viewport_inner(&mut self, ui: &mut egui::Ui, single: bool) {
+    fn viewport_inner(&mut self, ui: &mut egui::Ui, single: bool, overlay: bool) {
         let (resp, painter) = ui.allocate_painter(ui.available_size(), egui::Sense::click_and_drag());
         let rect = resp.rect;
         if single || resp.contains_pointer() {
@@ -1804,11 +1888,17 @@ impl AnvilApp {
         let gpu_shape =
             self.gpu.callback(rect, &self.scene, &proj, &self.style, selected_body, hovered, sel_face, hov_face);
         if let Some(shape) = gpu_shape {
-            // The GPU draws the picture; the id and depth buffers are
-            // still filled here, for picking and the overlays.
-            self.fb.draw_scene_ids(&self.scene, &pick_proj, &self.style);
+            // The GPU draws the picture. The id and depth buffers are
+            // filled here for picking, but only for the pane under the
+            // pointer, and only when the view or the model changed.
+            let key = (self.scene.id, self.camera.fingerprint(), self.fb.width as u64, self.fb.height as u64);
+            if (single || resp.contains_pointer()) && self.pick_key != Some(key) {
+                self.pick_key = Some(key);
+                self.fb.draw_scene_ids(&self.scene, &pick_proj, &self.style);
+            }
             painter.add(shape);
         } else {
+            self.pick_key = None;
             self.fb.draw_scene_faces(&self.scene, &pick_proj, &self.style, selected_body, hovered, sel_face, hov_face);
             let image = self.fb.to_image();
             let tex = match &mut self.texture {
@@ -2002,7 +2092,7 @@ impl AnvilApp {
             );
         }
         self.draw_triad(&painter, rect);
-        if self.show_perf {
+        if self.show_perf && overlay {
             let mut lines = self.perf.lines();
             if self.gpu.active() {
                 lines.push(format!("GL   {}", self.gpu.renderer()));
@@ -2183,6 +2273,9 @@ impl AnvilApp {
     fn frame_ui(&mut self, ctx: &egui::Context) {
         let started = std::time::Instant::now();
         self.frame_ui_inner(ctx);
+        if self.bench.is_some() {
+            self.bench_step(ctx, started.elapsed());
+        }
         if self.show_perf {
             self.perf.tick(started.elapsed());
             // Keep the numbers moving while nothing else redraws.
@@ -2404,6 +2497,30 @@ mod layout_tests {
             let _ = ctx.run(input(), |ctx| app.frame_ui(ctx));
         }
         app.view_rect
+    }
+
+    #[test]
+    fn the_benchmark_runs_and_reports() {
+        let ctx = egui::Context::default();
+        let mut app = AnvilApp::new_headless();
+        app.run_action(RibbonAction::Benchmark);
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(1024.0, 640.0))),
+            ..Default::default()
+        };
+        // Without a GL context only the software half runs.
+        for _ in 0..(BENCH_WARMUP + BENCH_FRAMES + 2) {
+            let _ = ctx.run(input(), |ctx| app.frame_ui(ctx));
+        }
+        assert!(app.bench.is_none(), "the benchmark did not finish");
+        assert!(app.status.starts_with("Benchmark"), "{}", app.status);
+        assert!(app.status.contains("software"), "{}", app.status);
+    }
+
+    #[test]
+    fn bench_result_takes_the_middle_and_the_worst() {
+        let mut t = [9.0, 1.0, 5.0, 3.0, 7.0];
+        assert_eq!(bench_result(&mut t), (5.0, 9.0));
     }
 
     #[test]
