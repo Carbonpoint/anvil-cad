@@ -30,7 +30,8 @@ fn main() {
         let mut doc = Document::new(name);
         let t0 = std::time::Instant::now();
         if grade == "distance" {
-            // A plate with a boss; the ribs thicken toward the boss.
+            // A plate with a boss. Wall runs from 0.8 at the boss to wall_end
+            // far from it, so the ribs thicken away from the boss.
             doc.add_feature(Box::new(BoxFeature {
                 x: "-30".into(),
                 y: "-20".into(),
