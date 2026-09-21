@@ -920,7 +920,10 @@ fn button_core(
     selected: bool,
     min_size: egui::Vec2,
 ) -> egui::Response {
-    let icon_size = 22.0;
+    let icon_size = crate::settings::icon_size(ui.ctx());
+    // The button grows with the icon, so a bigger icon is not squeezed
+    // into a button sized for the old one.
+    let min_size = min_size * (icon_size / crate::settings::BASE_ICON);
     let padding = ui.spacing().button_padding;
     let font_id = egui::TextStyle::Small.resolve(ui.style());
     let text_color = ui.visuals().text_color();

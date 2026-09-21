@@ -65,6 +65,36 @@ first-party features. Sandboxed third-party plugins (WASM) are planned; the
 research review in `docs/research/03-gui-rendering-and-plugins.md` explains
 why WASM was chosen over dynamic libraries.
 
+## Developer builds: pictures of the window
+
+`anvil-ui` has one optional feature, `devtools`. It is off in every
+normal build, so the shipped application carries none of it.
+
+```
+cargo run -p anvil-ui --features devtools --example shot -- --help
+scripts/ui_shots.sh              # every picture the documents use
+cargo test -p anvil-ui --features devtools
+```
+
+`crates/anvil-ui/src/shot.rs` runs the whole window headless and draws
+egui's own triangles into a pixel buffer, so a picture needs no display
+and no GPU. The 3D view inside the picture is the software viewport, the
+same one the application uses.
+
+Two things it buys:
+
+* **Layout checks.** Every pixel starts magenta. A pixel still magenta
+  at the end is an area no panel painted, which is how the gap beside an
+  overflowing side panel was found. The test
+  `shot::tests::the_window_has_no_unpainted_holes` guards it.
+* **Documents.** `scripts/ui_shots.sh` writes `docs/images/ui_*.png`,
+  used by `docs/USING_ANVIL.md` and `docs/tutorials/README.md`. Rerun it
+  after a change to the ribbon, the panels or the theme.
+
+A picture taken with the GPU viewport on shows a hole where the 3D view
+is: the GL callback has no software form. Leave the GPU viewport off for
+pictures.
+
 ## Known limits of the draft
 
 * Bodies do not combine. Each Extrude or Revolve makes a separate body. A

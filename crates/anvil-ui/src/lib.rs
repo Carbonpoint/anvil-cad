@@ -17,6 +17,7 @@ mod app;
 mod camera;
 mod drag_handle;
 mod dxf;
+mod ghost_view;
 mod gpu;
 pub mod icons;
 mod panels;
@@ -25,6 +26,9 @@ mod raster;
 mod ribbon;
 mod scene;
 mod settings;
+/// Offscreen pictures of the whole window. Developer builds only.
+#[cfg(feature = "devtools")]
+pub mod shot;
 mod sketch_editor;
 mod sketch_view;
 mod theme;

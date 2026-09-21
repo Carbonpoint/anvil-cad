@@ -170,7 +170,15 @@ impl Solid {
     }
 
     pub fn face_normal(&self, f: &Face) -> DVec3 {
-        // Newell's method: robust for any planar polygon.
+        self.face_normal_area(f).0
+    }
+
+    /// Face normal and face area. A sliver face has an area near zero and
+    /// a normal that is only noise, so callers that compare normals must
+    /// check the area first.
+    pub fn face_normal_area(&self, f: &Face) -> (DVec3, f64) {
+        // Newell's method: robust for any planar polygon. The length of
+        // the sum is twice the area of the polygon.
         let mut n = DVec3::ZERO;
         let k = f.outer.len();
         for i in 0..k {
@@ -180,7 +188,7 @@ impl Solid {
             n.y += (p.z - q.z) * (p.x + q.x);
             n.z += (p.x - q.x) * (p.y + q.y);
         }
-        n.normalize_or_zero()
+        (n.normalize_or_zero(), n.length() * 0.5)
     }
 
     pub fn bounds(&self) -> Aabb {
@@ -244,6 +252,9 @@ impl Solid {
     /// smooth surface are skipped.
     pub fn feature_edges(&self, min_angle: f64) -> Vec<[DVec3; 2]> {
         use std::collections::HashMap;
+        // Faces this small are slivers left by a boolean. Their normal is
+        // noise, so they are given no vote on what is a feature edge.
+        let sliver = 1e-9 * self.bounds().diagonal().max(1.0).powi(2);
         let mut adj: HashMap<(VertexId, VertexId), Vec<FaceId>> = HashMap::new();
         for (fid, f) in &self.faces {
             for lp in std::iter::once(&f.outer).chain(f.inner.iter()) {
@@ -257,21 +268,52 @@ impl Solid {
             }
         }
         let cos_min = min_angle.cos();
+        // Edges this short are the leftovers of two vertices that a
+        // boolean did not merge. They draw as a dot, never as an edge.
+        let tiny = 1e-7 * self.bounds().diagonal().max(1.0);
         let mut out = Vec::new();
         for ((a, b), faces) in adj {
-            let draw = match faces.as_slice() {
-                [f1, f2] => {
-                    let fa = &self.faces[*f1];
-                    let fb = &self.faces[*f2];
-                    let same_surface = fa.surface != Surface::Plane && fa.surface == fb.surface;
-                    let n1 = self.face_normal(fa);
-                    let n2 = self.face_normal(fb);
-                    !(same_surface && n1.dot(n2) > cos_min) && n1.dot(n2) < cos_min
+            let (pa, pb) = (self.pos(a), self.pos(b));
+            if (pb - pa).length() <= tiny {
+                continue;
+            }
+            // Every face around the edge that is big enough to trust.
+            let normals: Vec<(DVec3, Surface)> = faces
+                .iter()
+                .filter_map(|f| {
+                    let face = &self.faces[*f];
+                    let (n, area) = self.face_normal_area(face);
+                    (area > sliver && n != DVec3::ZERO).then_some((n, face.surface))
+                })
+                .collect();
+            let draw = match normals.as_slice() {
+                // One face and one face only: a true boundary edge of an
+                // open shell. Worth drawing.
+                [_] if faces.len() == 1 => true,
+                // Nothing to compare: slivers on every side, or slivers
+                // beside one real face after a repair. Not an edge.
+                [] | [_] => false,
+                // The ordinary case, and the many face case after a
+                // T-junction repair: draw when any two faces around the
+                // edge turn by more than the angle. Faces of one curved
+                // surface keep their seams hidden.
+                _ => {
+                    let mut turn = false;
+                    for i in 0..normals.len() {
+                        for j in i + 1..normals.len() {
+                            let (n1, s1) = normals[i];
+                            let (n2, s2) = normals[j];
+                            let same_surface = s1 != Surface::Plane && s1 == s2;
+                            if !(same_surface && n1.dot(n2) > cos_min) && n1.dot(n2) < cos_min {
+                                turn = true;
+                            }
+                        }
+                    }
+                    turn
                 }
-                _ => true,
             };
             if draw {
-                out.push([self.pos(a), self.pos(b)]);
+                out.push([pa, pb]);
             }
         }
         out
@@ -957,5 +999,60 @@ impl Solid {
                 face.surface = Surface::Plane;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod feature_edge_tests {
+    use super::*;
+    use anvil_math::DVec3;
+
+    /// A flat top split into two coplanar halves, with a sliver face
+    /// along the split. The split line is not a feature edge: before the
+    /// sliver was allowed to vote, its noisy normal drew a stray line
+    /// across the face.
+    #[test]
+    fn a_sliver_does_not_draw_a_line_across_a_flat_face() {
+        let mut s = Solid::default();
+        let p = |s: &mut Solid, x: f64, y: f64| s.add_vertex(DVec3::new(x, y, 0.0));
+        let (a, b) = (p(&mut s, 0.0, 0.0), p(&mut s, 10.0, 0.0));
+        let (c, d) = (p(&mut s, 10.0, 10.0), p(&mut s, 0.0, 10.0));
+        let (m0, m1) = (p(&mut s, 0.0, 5.0), p(&mut s, 10.0, 5.0));
+        // Two halves of one flat square.
+        s.add_face(vec![a, b, m1, m0], Surface::Plane);
+        s.add_face(vec![m0, m1, c, d], Surface::Plane);
+        // A sliver along the split, 1e-9 mm wide.
+        let n = s.add_vertex(DVec3::new(10.0, 5.0 + 1e-9, 0.0));
+        s.add_face(vec![m0, m1, n], Surface::Plane);
+        let edges = s.feature_edges(0.35);
+        let on_split = |e: &[DVec3; 2]| (e[0].y - 5.0).abs() < 1e-6 && (e[1].y - 5.0).abs() < 1e-6;
+        assert!(!edges.iter().any(on_split), "the split between two coplanar faces was drawn: {edges:?}");
+    }
+
+    /// Two vertices a boolean left unmerged make a zero length edge. It
+    /// must never reach the picture.
+    #[test]
+    fn a_zero_length_edge_is_never_drawn() {
+        let mut s = Solid::default();
+        let a = s.add_vertex(DVec3::ZERO);
+        let b = s.add_vertex(DVec3::new(1e-12, 0.0, 0.0));
+        let c = s.add_vertex(DVec3::new(0.0, 10.0, 0.0));
+        let d = s.add_vertex(DVec3::new(0.0, 0.0, 10.0));
+        s.add_face(vec![a, b, c], Surface::Plane);
+        s.add_face(vec![a, b, d], Surface::Plane);
+        for e in s.feature_edges(0.35) {
+            assert!((e[1] - e[0]).length() > 1e-9, "a zero length edge was drawn: {e:?}");
+        }
+    }
+
+    /// A true boundary edge of an open shell is still drawn.
+    #[test]
+    fn a_boundary_edge_of_an_open_shell_is_drawn() {
+        let mut s = Solid::default();
+        let a = s.add_vertex(DVec3::ZERO);
+        let b = s.add_vertex(DVec3::new(10.0, 0.0, 0.0));
+        let c = s.add_vertex(DVec3::new(10.0, 10.0, 0.0));
+        s.add_face(vec![a, b, c], Surface::Plane);
+        assert_eq!(s.feature_edges(0.35).len(), 3, "all three edges of a lone face are boundary edges");
     }
 }
