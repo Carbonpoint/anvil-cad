@@ -65,6 +65,7 @@ COMMON=(
   --no-auto-commits
   --no-gitignore
   --map-tokens 4096
+  --model-metadata-file "$BASE/model_metadata.json"
   --test-cmd "cargo test --workspace"
 )
 

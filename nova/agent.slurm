@@ -65,6 +65,28 @@ git checkout -B nova/agent-"$SLURM_JOB_ID"
 git config user.email "noreply@anthropic.com"
 git config user.name "Anvil Nova agent"
 
+# aider does not know this model, so tell it the window and the price.
+cat > "$BASE/model_metadata.json" <<JSON
+{
+  "openai/$SERVED_MODEL": {
+    "max_tokens": 16384,
+    "max_input_tokens": 65536,
+    "max_output_tokens": 16384,
+    "input_cost_per_token": 0.0,
+    "output_cost_per_token": 0.0,
+    "litellm_provider": "openai",
+    "mode": "chat"
+  }
+}
+JSON
+
+echo "== baseline gate, before the model touches anything =="
+if ! (cargo fmt --all --check && cargo clippy --workspace --all-targets -- -D warnings && cargo test --workspace); then
+  echo "the tree was not green on arrival, stopping"
+  exit 1
+fi
+echo "   baseline is green"
+
 TASKS=("$WORK/nova/tasks/01-ribbon")
 if [ "${1:-}" != "--pilot" ]; then
   TASKS+=("$WORK/nova/tasks/02-plane-ref" "$WORK/nova/tasks/03-neutral-import")

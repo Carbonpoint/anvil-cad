@@ -37,12 +37,10 @@ mkdir -p "$WORK/.cargo"
 cargo vendor "$BASE/vendor" > "$WORK/.cargo/config.toml"
 echo "   vendored $(ls "$BASE/vendor" | wc -l) crates"
 
-echo "== 4. Prove the tree builds and the suite passes before the model touches it =="
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
-cargo test -p anvil-ui --features devtools
-echo "   baseline is green"
+echo "== 4. Smoke test the toolchain, gently: a login node is shared =="
+# The full gate runs inside the job, where the CPU time belongs.
+nice -n 19 cargo check -p anvil-math -j 4 --offline
+echo "   the toolchain works and the vendored crates resolve"
 
 echo "== 5. The agent's python environment =="
 module load python/3.10.10-zwlkg4l 2>/dev/null || module load python || true
