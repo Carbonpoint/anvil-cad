@@ -61,7 +61,10 @@ pub fn part_navigator(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
     let mut set_rollback: Option<Option<usize>> = None;
     // Where each bar position sits on screen, for the drag.
     let mut bar_slots: Vec<(usize, egui::Rect)> = Vec::new();
-    ui.horizontal(|ui| {
+    // Wrapped, not a plain row: at a large text size the label and the
+    // three buttons are wider than the panel, and a row that overflows
+    // widens the whole panel (see `app::fit_panel`).
+    ui.horizontal_wrapped(|ui| {
         let held = doc.rollback.map(|r| doc.features.len() - r).unwrap_or(0);
         ui.label(if held == 0 { "All features computed".to_string() } else { format!("{held} feature(s) held back") });
         if ui.small_button("Roll forward").on_hover_text("Compute the whole history again").clicked() {

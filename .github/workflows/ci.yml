@@ -23,6 +23,9 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      # Developer tools: the window layout checks that need no display.
+      - run: cargo clippy -p anvil-ui --all-targets --features devtools -- -D warnings
+      - run: cargo test -p anvil-ui --features devtools
       - run: cargo build --release --bin anvil
       # A ready-built app per OS, so a low-memory laptop need not compile.
       - uses: actions/upload-artifact@v4

@@ -2,6 +2,22 @@
 
 This page walks through the sketch and feature workflow as it works today.
 
+## The window
+
+![The Anvil window](images/ui_window.png)
+
+Ribbon on top, Part Navigator on the left, Properties on the right,
+Expressions along the bottom, the 3D view in the middle. The status bar
+names the file, the triangle count, the Select filter and the last
+message.
+
+The same window in the dark scheme (View > Settings > Theme):
+
+![The Anvil window, dark](images/ui_window_dark.png)
+
+Every picture on this page is rendered from the application itself with
+`scripts/ui_shots.sh`, so it matches the code that made it.
+
 ## Start a sketch
 
 1. On the Solid tab, click **Sketch**.
@@ -50,6 +66,13 @@ downstream regenerates.
 
 ## Selecting and dimensioning
 
+![The selected feature, outlined inside the part](images/ui_selected_feature.png)
+
+Select a feature and its own shape is outlined in the view. The part of
+the outline that a later feature covers is drawn faint and dashed, so
+the feature reads as a ghost inside the solid. A feature that a boolean
+swallowed can still be seen this way.
+
 * Click a body to select its feature. Ctrl+click adds or removes features.
   Shift+drag draws a box; bodies fully inside are selected.
 * The face under the click is highlighted. With a face selected, **Sketch**
@@ -76,6 +99,17 @@ downstream regenerates.
 
 Fillet and Chamfer work on straight edges between flat faces, on outside
 and inside corners. Edges on curved facets are refused with a message.
+
+### Sketch regions
+
+A feature such as Extrude or Revolve can use some regions of its sketch
+and not others. Select the feature, tick **Pick regions in the view** in
+Properties, and click a region to add or remove it. Escape leaves region
+picking, and so does selecting another feature.
+
+While region picking is off, a click on the part selects a face, even
+where a sketch lies over it. That is what keeps Sketch on a face and
+Press Pull working on a part whose sketches are visible.
 
 ## Placing features on a face
 
@@ -287,6 +321,21 @@ three bodies. It uses the pattern, the tapered pipe, the wedge cut, the
 lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
 ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
 dimensions, the build order, and the casting plan.
+
+## Settings
+
+View > Settings opens the window:
+
+![The Settings window](images/ui_settings_window.png)
+
+* **Theme**: System, Light or Dark.
+* **UI scale**: 0.7 to 2.0, the zoom factor for the whole window.
+* **Text size**: 10 to 22 points, the base of the type scale.
+* **Icon size**: 0.8x to 2.0x, the size of the ribbon icons. The default
+  is 1.25x. A short window shrinks the icons a little whatever this says,
+  because the 3D view keeps its room first.
+
+Every value is kept between sessions.
 
 ## Export
 

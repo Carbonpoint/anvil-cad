@@ -12,3 +12,8 @@
   and `cargo test --workspace` before committing. CI enforces all three.
 * Keep the software viewport working. A GPU path is an addition, not a
   replacement.
+* To see the UI, take a picture: `scripts/ui_shots.sh`, or
+  `cargo run -p anvil-ui --features devtools --example shot -- --help`.
+  The `devtools` feature is developer only and stays out of normal
+  builds. Rerun `scripts/ui_shots.sh` after a UI change, because
+  `docs/USING_ANVIL.md` shows those pictures.

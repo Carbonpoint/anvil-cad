@@ -6,6 +6,12 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[features]
+# Developer only tools: offscreen pictures of the whole window, used for
+# layout checks and for the pictures in docs/tutorials. Off in a normal
+# build, so the shipped application carries none of it.
+devtools = []
+
 [dependencies]
 anvil-math.workspace = true
 anvil-kernel.workspace = true
@@ -22,3 +28,7 @@ serde.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
+
+[[example]]
+name = "shot"
+required-features = ["devtools"]
