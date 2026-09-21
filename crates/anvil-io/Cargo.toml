@@ -11,4 +11,5 @@ anvil-kernel.workspace = true
 anvil-math.workspace = true
 anvil-feature.workspace = true
 anvil-sketch.workspace = true
+flate2.workspace = true
 thiserror.workspace = true
