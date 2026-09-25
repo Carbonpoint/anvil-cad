@@ -939,6 +939,17 @@ impl AnvilApp {
                     }
                 }
             }
+            RibbonAction::KettleMatchPlate => {
+                self.doc = anvil_io::kettle::kettle_match_plate();
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.fit_view();
+                self.file_path = "kettle_match_plate.anvil".into();
+                self.status = "Match plate loaded: the pattern halves on the plate, with their gating.".into();
+            }
             RibbonAction::KettleMold => {
                 self.doc = anvil_io::kettle::kettle_mold();
                 self.panels = PanelState::default();

@@ -143,9 +143,27 @@ a printed pattern and a foundry pattern differ.
 
 ![Kettle mold](kettle_mold.png)
 
-The gating from stage 3 is not on the pattern yet. It goes onto the
-match plate between the halves, which is the next step, together with
-a plane pick for the parting plane so any body can be split the same way.
+### Match plate
+
+Examples > Casting samples > Match plate, `anvil_io::kettle::kettle_match_plate()`,
+or `anvil-cli kettle --variant match`. The two pattern halves sit on the
+two faces of a 12 mm plate, with the gating on the plate:
+
+| Part | Where |
+| --- | --- |
+| Runner, 20 x 15 mm | In the plate plane, from 12 mm past the sprue to the ridge band. The extension past the sprue catches the first, cold metal |
+| Ingate, 14 x 6 mm | In the plate plane, into the ridge band |
+| Side riser, 36 mm, with a neck | In the plate plane, beside the ridge band on the spout side, below the spout |
+| Sprue pin, 12 mm widening to 18 mm | A loose pattern on the cope side, standing on the runner at right angles to the plate |
+
+Everything in the plate plane is split with the pattern, so each half
+carries one half of the runner, the ingate and the riser. The halves are
+closed and equal, about 870 cm3 each. In the model the plate stands
+upright beside the kettle. In the foundry it lies flat, cope side up, so
+the sprue pin points up. The plate plane is a plane reference, so Split
+Body can use any flat face or plane Feature instead of XZ.
+
+![Kettle match plate](kettle_match_plate.png)
 
 ## Simulation (stage 5, first cut)
 
@@ -169,12 +187,16 @@ docs/research/casting_simulation.md and need one calibration pour.
   open edges, so slicers accept the meshes. ADR 0001 (a tolerant kernel)
   is the real fix.
 * The spout is a plain tapered tube. The lip is not thinned yet.
+* The match plate layout is a first cut: the gate and riser sizes come
+  from the textbook ratios of the casting check, not from a flow run.
 * An edit reruns the edited feature and everything after it. Put the
   pattern late in the history so most edits skip it. The pattern step
   itself takes under one second.
 
 ## Progress log
 
+* 2026-09-25: match plate sample with the gating split between the
+  halves; plane references let Split Body use a picked face.
 * 2026-09-16: plan written. Reference photos reviewed.
 * 2026-09-17 (later): mold split (stage 4), casting check and the
   Truchas case export (stage 5), and the split cap and orientation fixes.

@@ -68,6 +68,8 @@ pub enum RibbonAction {
     KettleGated,
     /// The kettle body split into pattern halves, core, and core box.
     KettleMold,
+    /// The kettle pattern halves on a match plate, with the gating.
+    KettleMatchPlate,
     Interference,
     /// What a click in the view picks: 0 All, 1 Body, 2 Face, 3 Edge.
     SetSelectFilter(u8),
@@ -147,6 +149,7 @@ impl RibbonAction {
             RibbonAction::Kettle => "kettle",
             RibbonAction::KettleGated => "kettle_gated",
             RibbonAction::KettleMold => "kettle_mold",
+            RibbonAction::KettleMatchPlate => "kettle_match_plate",
             RibbonAction::Interference => "interference",
             RibbonAction::SetSelectFilter(0) => "select_all",
             RibbonAction::SetSelectFilter(1) => "select_body",
@@ -204,7 +207,7 @@ const PINNED: &[(&str, &str, &[&str])] = &[
     ("View", "Display", &["toggle_edges"]),
     ("View", "Settings", &["settings"]),
     ("Examples", "Parts", &["demo_part", "sample_card"]),
-    ("Examples", "Casting samples", &["kettle", "kettle_gated", "kettle_mold"]),
+    ("Examples", "Casting samples", &["kettle", "kettle_gated", "kettle_mold", "kettle_match_plate"]),
 ];
 
 /// Keyboard shortcuts, as the menus show them. The keys work in the model
@@ -466,6 +469,16 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
             "Pattern halves, core, and core box for the kettle body",
             22,
             ButtonKind::Action(RibbonAction::KettleMold),
+        ),
+    );
+    place(
+        "Examples",
+        "Casting samples",
+        RibbonButton::new(
+            "Match plate",
+            "The kettle pattern halves on a match plate, with runner, ingate, riser and sprue pin",
+            23,
+            ButtonKind::Action(RibbonAction::KettleMatchPlate),
         ),
     );
     for (i, (label, tooltip)) in UP_AXES.iter().enumerate() {

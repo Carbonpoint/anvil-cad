@@ -639,6 +639,11 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             draw_kettle(&c);
             c.poly_closed(&[(0.35, 0.06), (0.55, 0.06), (0.48, 0.2), (0.42, 0.2)]);
         }
+        "kettle_match_plate" => {
+            c.rect((0.1, 0.46), (0.9, 0.54));
+            c.arc((0.5, 0.46), 0.26, std::f32::consts::PI, std::f32::consts::TAU);
+            c.arc((0.5, 0.54), 0.26, 0.0, std::f32::consts::PI);
+        }
         "kettle_mold" => {
             draw_kettle(&c);
             c.dashed((0.45, 0.15), (0.45, 0.85), 8);

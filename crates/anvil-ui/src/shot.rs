@@ -152,6 +152,7 @@ pub const SAMPLES: &[(&str, &str)] = &[
     ("wb6", "workbook 6: adapter"),
     ("card", "the business card"),
     ("kettle", "the kettle casting sample"),
+    ("match_plate", "the kettle pattern on a match plate"),
 ];
 
 fn sample_action(name: &str) -> Option<Option<crate::ribbon::RibbonAction>> {
@@ -167,6 +168,7 @@ fn sample_action(name: &str) -> Option<Option<crate::ribbon::RibbonAction>> {
         "wb6" => Some(A::Workbook(5)),
         "card" => Some(A::SampleCard),
         "kettle" => Some(A::Kettle),
+        "match_plate" => Some(A::KettleMatchPlate),
         _ => return None,
     })
 }

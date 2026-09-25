@@ -395,27 +395,24 @@ pub fn kettle_gated() -> Document {
     doc.0
 }
 
-/// The kettle body ready for sand casting: two pattern halves, the
-/// core, and two core box halves, all scaled by the cast iron shrink
-/// allowance. The parting plane is vertical, through the spout and the
-/// lugs (the XZ plane), so the halves pull along Y with no undercut on
-/// the body. Stage 4 of docs/KETTLE.md.
-pub fn kettle_mold() -> Document {
-    use anvil_feature::features::casting::DraftCheckFeature;
+/// The kettle with the pieces a mold needs, shared by the mold samples:
+/// the core (feature 31) and the dotted pattern (feature 39), which is
+/// the outer shape with the spout, the lug bosses, the mouth print and the
+/// spout bore joined on.
+fn mold_pattern() -> TimedDoc {
     let mut doc = TimedDoc(kettle());
     doc.set_expression("shrink", "1.01").ok();
     doc.set_expression("print_h", "32").ok();
     // 24, 25: the exact cavity, revolved.
-    let inner: [&[(f64, f64)]; 6] = [
+    let inner: [&[(f64, f64)]; 5] = [
         &[(0.0, 3.0)],
         &[(66.5, 3.0)],
         &[(75.5, 31.0), (74.0, 44.5), (69.0, 58.5), (61.0, 72.0), (52.0, 82.0), (44.0, 88.0)],
         &[(44.0, 96.0)],
         &[(0.0, 96.0)],
-        &[(0.0, 3.0)],
     ];
     let mut cav = SketchFeature::on_datum("XZ");
-    closed_loop(&mut cav, &inner[..5]);
+    closed_loop(&mut cav, &inner);
     doc.add_feature(Box::new(cav));
     doc.add_feature(Box::new(RevolveFeature {
         sketch: 24,
@@ -496,6 +493,17 @@ pub fn kettle_mold() -> Document {
         step: "0.6".into(),
         ..Default::default()
     }));
+    doc
+}
+
+/// The kettle body ready for sand casting: two pattern halves, the
+/// core, and two core box halves, all scaled by the cast iron shrink
+/// allowance. The parting plane is vertical, through the spout and the
+/// lugs (the XZ plane), so the halves pull along Y with no undercut on
+/// the body. Stage 4 of docs/KETTLE.md.
+pub fn kettle_mold() -> Document {
+    use anvil_feature::features::casting::DraftCheckFeature;
+    let mut doc = mold_pattern();
     // 40, 41: pattern halves, split on the XZ plane through the spout.
     for keep in ["below", "above"] {
         doc.add_feature(Box::new(SplitBodyFeature {
@@ -545,7 +553,107 @@ pub fn kettle_mold() -> Document {
     doc.appearance.insert(53, grey);
     doc.appearance.insert(54, grey);
     doc.appearance.insert(55, sand);
-    let _ = inner[5];
+    doc.0
+}
+
+/// The kettle pattern on a match plate, with its gating. The kettle lies
+/// on its side: the plate is the XZ plane, and the two pattern halves sit
+/// on its two faces. The runner, the ingate and a side riser lie in the
+/// plate plane, so each half carries one half of them. The sprue is a
+/// loose pin: it is cut through the cope, standing on the runner at right
+/// angles to the plate. Stage 4 of docs/KETTLE.md.
+pub fn kettle_match_plate() -> Document {
+    use anvil_feature::features::casting::RunnerFeature;
+    let mut doc = mold_pattern();
+    doc.set_expression("plate_t", "12").ok();
+    doc.set_expression("runner_z", "15").ok();
+    // 40: runner from the sprue to the body, beside the ridge band. It
+    // runs 12 mm past the sprue, so the first, cold metal has somewhere
+    // to go that is not the casting.
+    doc.add_feature(Box::new(RunnerFeature {
+        start_x: "-147".into(),
+        start_y: "0".into(),
+        end_x: "-84".into(),
+        end_y: "0".into(),
+        end_z: "runner_z".into(),
+        width: "20".into(),
+        height: "15".into(),
+        taper: "0".into(),
+    }));
+    // 41: ingate into the ridge band.
+    doc.add_feature(Box::new(RunnerFeature {
+        start_x: "-90".into(),
+        start_y: "0".into(),
+        end_x: "-76".into(),
+        end_y: "0".into(),
+        end_z: "runner_z + 11".into(),
+        width: "14".into(),
+        height: "6".into(),
+        taper: "0".into(),
+    }));
+    // 42: neck from the ridge band on the spout side to the riser.
+    doc.add_feature(Box::new(RunnerFeature {
+        start_x: "76".into(),
+        start_y: "0".into(),
+        end_x: "96".into(),
+        end_y: "0".into(),
+        end_z: "24".into(),
+        width: "16".into(),
+        height: "12".into(),
+        taper: "0".into(),
+    }));
+    // 43, 44: side riser, a cylinder across the plate, below the spout.
+    let mut riser_path = SketchFeature::on_plane(Plane { origin: DVec3::new(0.0, 0.0, 30.0), ..Plane::XY });
+    let a = riser_path.sketch.add_point(110.0, -25.0);
+    let b = riser_path.sketch.add_point(110.0, 25.0);
+    riser_path.sketch.add_line(a, b);
+    doc.add_feature(Box::new(riser_path));
+    doc.add_feature(Box::new(PipeFeature { path: 43, diameter: "36".into(), end_diameter: "0".into() }));
+    // 45 to 48: the gating joined onto the pattern.
+    doc.add_feature(Box::new(CombineFeature { body: 39, tool: 40, op: "join".into() }));
+    doc.add_feature(Box::new(CombineFeature { body: 45, tool: 41, op: "join".into() }));
+    doc.add_feature(Box::new(CombineFeature { body: 46, tool: 42, op: "join".into() }));
+    doc.add_feature(Box::new(CombineFeature { body: 47, tool: 44, op: "join".into() }));
+    // 49, 50: the halves, split on the plate plane. "below" is the +Y side.
+    for keep in ["below", "above"] {
+        doc.add_feature(Box::new(SplitBodyFeature {
+            body: 48,
+            plane: "XZ".into(),
+            offset: "0".into(),
+            keep: keep.into(),
+        }));
+    }
+    // 51: the plate.
+    doc.add_feature(Box::new(BoxFeature {
+        x: "-165".into(),
+        y: "-plate_t / 2".into(),
+        z: "-20".into(),
+        width: "320".into(),
+        depth: "plate_t".into(),
+        height: "145".into(),
+    }));
+    // 52, 53: each half onto its face of the plate.
+    doc.add_feature(Box::new(MoveFeature { body: 49, dy: "plate_t / 2".into(), ..Default::default() }));
+    doc.add_feature(Box::new(MoveFeature { body: 50, dy: "-plate_t / 2".into(), ..Default::default() }));
+    // 54, 55: the sprue pin on the cope side, 12 mm at the runner (the
+    // choke) widening to 18 mm at the top of the cope.
+    let mut sprue_path = SketchFeature::on_plane(Plane { origin: DVec3::new(0.0, 0.0, 22.5), ..Plane::XY });
+    let a = sprue_path.sketch.add_point(-135.0, 6.0);
+    let b = sprue_path.sketch.add_point(-135.0, 126.0);
+    sprue_path.sketch.add_line(a, b);
+    doc.add_feature(Box::new(sprue_path));
+    doc.add_feature(Box::new(PipeFeature { path: 54, diameter: "12".into(), end_diameter: "18".into() }));
+    // 56 to 59: the plate with everything on it, set beside the kettle.
+    doc.set_expression("plate_y", "200").ok();
+    for body in [51, 52, 53, 55] {
+        doc.add_feature(Box::new(MoveFeature { body, dy: "plate_y".into(), ..Default::default() }));
+    }
+    let wood = [196, 160, 110];
+    let brass = [178, 142, 66];
+    doc.appearance.insert(56, [150, 154, 160]);
+    doc.appearance.insert(57, wood);
+    doc.appearance.insert(58, wood);
+    doc.appearance.insert(59, brass);
     doc.0
 }
 
@@ -626,6 +734,37 @@ mod tests {
         let bb = bodies[0].bounds();
         assert!(bb.max.x > 98.0 && bb.max.x < 104.0, "spout tip reaches x = {}", bb.max.x);
         assert!(secs < 60.0, "kettle took {secs:.1} s");
+    }
+
+    #[test]
+    fn the_match_plate_holds_both_halves_with_their_gating() {
+        let doc = kettle_match_plate();
+        for (i, f) in doc.features.iter().enumerate() {
+            assert!(f.error.is_none(), "feature {i} ({}): {:?}", f.feature.name(), f.error);
+        }
+        let bodies = doc.visible_bodies();
+        // Plate, two pattern halves, the sprue pin, and the core.
+        let owners: Vec<usize> = bodies.iter().map(|(i, _)| *i).collect();
+        for want in [31, 56, 57, 58, 59] {
+            assert!(owners.contains(&want), "no body from feature {want}: {owners:?}");
+        }
+        let half = |i: usize| bodies.iter().find(|(k, _)| *k == i).unwrap().1;
+        // Each half stands on its face of the plate, which is 12 mm thick
+        // and set 200 mm along Y.
+        assert!((half(57).bounds().min.y - 206.0).abs() < 1e-6, "{:?}", half(57).bounds());
+        assert!((half(58).bounds().max.y - 194.0).abs() < 1e-6, "{:?}", half(58).bounds());
+        // The halves carry the runner (x = -147) and the riser (x = 128).
+        for i in [57, 58] {
+            let b = half(i).bounds();
+            assert!(b.min.x < -140.0 && b.max.x > 125.0, "half {i} lacks its gating: {b:?}");
+        }
+        let (a, b) = (half(57).volume(), half(58).volume());
+        assert!((a - b).abs() < 0.05 * a, "the halves differ: {a} vs {b}");
+        for i in [57, 58] {
+            let (open, over) = half(i).open_edge_report();
+            eprintln!("match plate half {i}: {open} open edges, {over} over-shared, {} mm3", half(i).volume());
+            assert_eq!(open, 0, "half {i} has open edges");
+        }
     }
 
     #[test]
