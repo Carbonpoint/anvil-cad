@@ -16,11 +16,13 @@ pub mod features;
 pub mod fonts;
 pub mod mesh_loader;
 pub mod param;
+pub mod plane_ref;
 pub mod region_select;
 pub mod registry;
 
 pub use document::{Document, FeatureId, FeatureNode, Material, RegenContext, RegenError, MATERIALS};
 pub use param::{ParamSpec, ParamValue};
+pub use plane_ref::PlaneRef;
 pub use registry::{descriptor, descriptors, FeatureDescriptor};
 
 use anvil_kernel::Solid;
@@ -125,6 +127,22 @@ pub trait Feature: Send + Sync + std::fmt::Debug + std::any::Any {
     fn remap_refs(&mut self, map: &dyn Fn(usize) -> Option<usize>) -> Vec<&'static str> {
         let mut broken = Vec::new();
         for p in self.params() {
+            if let ParamValue::Plane(r) = &p.value {
+                if let Some(old) = r.depends_on() {
+                    match r.remapped(map) {
+                        Some(new) if new != *r => {
+                            let _ = self.set_param(p.name, ParamValue::Plane(new));
+                        }
+                        Some(_) => {}
+                        None => {
+                            broken.push(p.name);
+                            let gone = r.remapped(&|i| Some(if i == old { usize::MAX } else { i }));
+                            let _ = self.set_param(p.name, ParamValue::Plane(gone.unwrap_or_default()));
+                            continue;
+                        }
+                    }
+                }
+            }
             if let ParamValue::FeatureRef(old) = p.value {
                 match map(old) {
                     Some(new) if new != old => {

@@ -206,6 +206,9 @@ enum SelectFilter {
 
 const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ", Plane::YZ)];
 
+/// Status text while a plane parameter waits for a pick in the view.
+const PLANE_PICK_HINT: &str = "Click a flat face, or a datum plane. Escape cancels.";
+
 impl AnvilApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let mut app = Self::new_headless();
@@ -508,6 +511,30 @@ impl AnvilApp {
     fn begin_pick_plane(&mut self) {
         self.mode = Mode::PickPlane;
         self.status = "Click a datum plane (XY, XZ, YZ) or a face to sketch on. Esc cancels.".into();
+    }
+
+    /// The plane reference under the pointer while a plane parameter of
+    /// feature `fi` is being picked: a flat face of an earlier feature, or
+    /// a datum square.
+    fn plane_ref_under_pointer(&self, fi: usize) -> Result<anvil_feature::PlaneRef, String> {
+        use anvil_feature::PlaneRef;
+        if let Some(t) = self.hovered_tri {
+            let (body_fi, body) = self.scene.body_of_tri(t).ok_or("No body under the pointer")?;
+            if body_fi >= fi {
+                return Err("Pick a face of a feature that comes before this one".into());
+            }
+            let solid = self.scene.solid_of_tri(&self.doc, t).ok_or("No body under the pointer")?;
+            let face = self.scene.face_of_tri(t).and_then(|f| solid.faces.get(f)).ok_or("Face not found")?;
+            if face.surface != anvil_kernel::Surface::Plane {
+                return Err("That face is curved. Click a flat face, or a datum plane.".into());
+            }
+            let plane = self.scene.face_plane(&self.doc, t).ok_or("Face not found")?;
+            return Ok(PlaneRef::Face { feature: body_fi, body, plane });
+        }
+        match self.hovered_datum {
+            Some(d) => Ok(PlaneRef::Datum(d.into())),
+            None => Err(PLANE_PICK_HINT.into()),
+        }
     }
 
     fn start_sketch_on(&mut self, feature: Box<dyn Feature>) {
@@ -1592,6 +1619,51 @@ impl AnvilApp {
         }
 
         match &mut self.mode {
+            Mode::Model if self.panels.plane_pick.is_some() => {
+                let (fi, name) = self.panels.plane_pick.unwrap();
+                if esc || fi >= self.doc.features.len() {
+                    self.panels.plane_pick = None;
+                    self.status = "Plane picking cancelled".into();
+                } else {
+                    let size = self.scene_size() * 0.6;
+                    if let Some((x, y)) = pointer {
+                        for (datum, plane) in DATUMS {
+                            if let Some(p) = proj.pixel_to_plane(x, y, &plane) {
+                                if p.x.abs() <= size && p.y.abs() <= size {
+                                    self.hovered_datum = Some(datum);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // A face in front of a datum square takes the click.
+                    if self.hovered_tri.is_some() {
+                        self.hovered_datum = None;
+                    }
+                    if resp.dragged_by(egui::PointerButton::Primary) {
+                        let d = resp.drag_delta();
+                        self.camera.orbit(d.x as f64, d.y as f64);
+                    }
+                    if resp.clicked() {
+                        match self.plane_ref_under_pointer(fi) {
+                            Ok(r) => {
+                                let label = r.label(&self.doc);
+                                self.doc.edit_feature(fi, |f| {
+                                    let _ = f.set_param(name, anvil_feature::ParamValue::Plane(r));
+                                });
+                                self.panels.drafts.retain(|(i, _), _| *i != fi);
+                                self.panels.plane_pick = None;
+                                self.invalidate();
+                                self.status = match &self.doc.features[fi].error {
+                                    Some(e) => format!("{label}: {e}"),
+                                    None => format!("Plane set to {label}"),
+                                };
+                            }
+                            Err(why) => self.status = why,
+                        }
+                    }
+                }
+            }
             Mode::Model => {
                 if esc && self.region_pick_mode {
                     self.region_pick_mode = false;
@@ -2034,7 +2106,9 @@ impl AnvilApp {
                 }
             }
         }
-        if let Mode::PickPlane = self.mode {
+        if matches!(self.mode, Mode::PickPlane)
+            || (matches!(self.mode, Mode::Model) && self.panels.plane_pick.is_some())
+        {
             let size = self.scene_size() * 0.6;
             for (name, plane) in DATUMS {
                 let corners = [
@@ -2490,6 +2564,7 @@ impl AnvilApp {
 
         if self.panels.selected != selected_before {
             self.region_pick_mode = false;
+            self.panels.plane_pick = None;
         }
 
         egui::SidePanel::right("properties").default_width((260.0 * text_room).min(side_max)).width_range(160.0..=side_max).show(
@@ -2497,8 +2572,15 @@ impl AnvilApp {
             |ui| {
                 fit_panel(ui, |ui| {
                     egui::ScrollArea::both().id_salt("properties_scroll").show(ui, |ui| {
+                        let picking_before = self.panels.plane_pick;
                         if panels::property_panel(ui, &mut self.doc, &mut self.panels) {
                             self.invalidate();
+                        }
+                        if self.panels.plane_pick != picking_before {
+                            self.status = match self.panels.plane_pick {
+                                Some(_) => PLANE_PICK_HINT.into(),
+                                None => "Plane picking cancelled".into(),
+                            };
                         }
                         if let Some(sel) = self.panels.selected {
                             let takes_edges = self
@@ -2799,6 +2881,68 @@ mod layout_tests {
         assert!(app.selected_face.is_some(), "no face selected at {at:?}, status: {}", app.status);
         app.add_feature_by_id("sketch");
         assert!(matches!(app.mode, Mode::Sketch(_)), "Sketch did not open on the face, status: {}", app.status);
+    }
+
+    /// A plate with a Midplane after it: feature 1 makes the Body,
+    /// feature 2 is the Midplane, selected.
+    fn plate_with_midplane(ctx: &egui::Context, w: f32, h: f32) -> AnvilApp {
+        let mut app = AnvilApp::new_headless();
+        let mut doc = Document::new("midplane");
+        doc.add_feature(Box::new(SketchFeature::rectangle("XY", 40.0, 20.0)));
+        doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "12".into(), ..Default::default() }));
+        doc.add_feature(Box::new(anvil_feature::features::solid_extra::MidplaneFeature::default()));
+        app.doc = doc;
+        app.invalidate();
+        app.refresh_scene();
+        app.fit_view();
+        let _ = view_after_ctx(ctx, &mut app, w, h, Some(2));
+        app
+    }
+
+    /// Pick in view: a click on a flat face sets the plane parameter to
+    /// that face, and the picking state ends.
+    #[test]
+    fn a_plane_parameter_takes_a_face_picked_in_the_view() {
+        let ctx = egui::Context::default();
+        let (w, h) = (1200.0, 800.0);
+        let mut app = plate_with_midplane(&ctx, w, h);
+        let at = point_on_a_face(&ctx, &mut app, w, h).expect("a face is visible");
+        app.panels.plane_pick = Some((2, "first"));
+        click_at(&ctx, &mut app, w, h, at);
+        assert!(app.panels.plane_pick.is_none(), "picking did not end, status: {}", app.status);
+        let first = app.doc.features[2].feature.params().into_iter().find(|p| p.name == "first").unwrap().value;
+        assert!(
+            matches!(first, anvil_feature::ParamValue::Plane(anvil_feature::PlaneRef::Face { feature: 1, .. })),
+            "first is {first:?}, status: {}",
+            app.status
+        );
+        assert!(app.doc.features[2].error.is_none(), "{:?}", app.doc.features[2].error);
+    }
+
+    /// Escape leaves plane picking and changes nothing.
+    #[test]
+    fn escape_cancels_plane_picking() {
+        let ctx = egui::Context::default();
+        let (w, h) = (1200.0, 800.0);
+        let mut app = plate_with_midplane(&ctx, w, h);
+        let at = app.view_rect.center();
+        move_pointer(&ctx, &mut app, w, h, at);
+        app.panels.plane_pick = Some((2, "first"));
+        let before = format!("{:?}", app.doc.features[2].feature.params());
+        let mut i = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(w, h))),
+            ..Default::default()
+        };
+        i.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        });
+        let _ = ctx.run(i, |ctx| app.frame_ui(ctx));
+        assert!(app.panels.plane_pick.is_none(), "Escape did not end picking");
+        assert_eq!(before, format!("{:?}", app.doc.features[2].feature.params()));
     }
 
     #[test]

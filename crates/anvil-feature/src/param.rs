@@ -14,6 +14,8 @@ pub enum ParamValue {
     /// A choice from a fixed list, stored by label.
     Choice(String),
     Text(String),
+    /// A plane: a datum, a plane Feature, or a flat face of a Body.
+    Plane(crate::PlaneRef),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -37,6 +39,8 @@ pub enum ParamKind {
     Regions {
         sketch: &'static str,
     },
+    /// A plane, chosen from a list or picked in the view.
+    PlaneRef,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -67,6 +71,9 @@ impl ParamSpec {
             kind: ParamKind::Regions { sketch },
             value: ParamValue::Expr(spec.to_string()),
         }
+    }
+    pub fn plane(name: &'static str, label: &'static str, value: crate::PlaneRef) -> Self {
+        ParamSpec { name, label, kind: ParamKind::PlaneRef, value: ParamValue::Plane(value) }
     }
     pub fn choice(name: &'static str, label: &'static str, options: Vec<&'static str>, v: &str) -> Self {
         ParamSpec { name, label, kind: ParamKind::Choice { options }, value: ParamValue::Choice(v.to_string()) }

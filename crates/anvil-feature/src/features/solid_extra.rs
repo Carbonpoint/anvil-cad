@@ -1,8 +1,9 @@
 //! Coil, Pipe, Insert Mesh, Split Body.
 
-use crate::features::{datum_plane, parse_index_list};
+use crate::features::datum_plane;
 use crate::{
-    Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, BODY_TYPES, PLANE_TYPES,
+    Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, PlaneRef, RegenContext, RegenError, BODY_TYPES,
+    PLANE_TYPES,
 };
 use anvil_math::{DVec2, DVec3, Plane};
 use serde::{Deserialize, Serialize};
@@ -356,28 +357,16 @@ impl Feature for Plane3PointsFeature {
     }
 }
 
-/// Midplane between two plane features (or datum planes by name).
+/// Midplane between two planes: datums, plane Features, or flat faces.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MidplaneFeature {
-    pub first: String,
-    pub second: String,
+    pub first: PlaneRef,
+    pub second: PlaneRef,
 }
 
 impl Default for MidplaneFeature {
     fn default() -> Self {
-        MidplaneFeature { first: "XY".into(), second: "0".into() }
-    }
-}
-
-fn plane_by_ref(s: &str, ctx: &RegenContext) -> Result<Plane, RegenError> {
-    match s.trim() {
-        "XY" | "XZ" | "YZ" => Ok(datum_plane(s.trim())),
-        other => {
-            let idx = parse_index_list(other);
-            let i =
-                *idx.first().ok_or(RegenError::Other(format!("'{other}' is not XY, XZ, YZ, or a feature index")))?;
-            ctx.plane_of(i)
-        }
+        MidplaneFeature { first: PlaneRef::Datum("XY".into()), second: PlaneRef::Datum("XZ".into()) }
     }
 }
 
@@ -387,35 +376,31 @@ impl Feature for MidplaneFeature {
         "midplane"
     }
     fn name(&self) -> String {
-        format!("Midplane ({} | {})", self.first, self.second)
+        format!("Midplane ({} | {})", self.first.short(), self.second.short())
     }
     fn params(&self) -> Vec<ParamSpec> {
         vec![
-            ParamSpec {
-                name: "first",
-                label: "First (XY/XZ/YZ or feature #)",
-                kind: crate::param::ParamKind::Text,
-                value: ParamValue::Expr(self.first.clone()),
-            },
-            ParamSpec {
-                name: "second",
-                label: "Second (XY/XZ/YZ or feature #)",
-                kind: crate::param::ParamKind::Text,
-                value: ParamValue::Expr(self.second.clone()),
-            },
+            ParamSpec::plane("first", "First plane", self.first.clone()),
+            ParamSpec::plane("second", "Second plane", self.second.clone()),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
-        match (name, value) {
-            ("first", ParamValue::Expr(s)) => self.first = s,
-            ("second", ParamValue::Expr(s)) => self.second = s,
-            (n, _) => return Err(format!("unknown parameter {n}")),
+        let value = match value {
+            ParamValue::Plane(r) => r,
+            // Typed text still works: XY, XZ, YZ or a Feature number.
+            ParamValue::Expr(s) | ParamValue::Text(s) => PlaneRef::parse(&s),
+            _ => return Err(format!("{name} takes a plane")),
+        };
+        match name {
+            "first" => self.first = value,
+            "second" => self.second = value,
+            n => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let a = plane_by_ref(&self.first, ctx)?;
-        let b = plane_by_ref(&self.second, ctx)?;
+        let a = ctx.plane_of_ref(&self.first)?;
+        let b = ctx.plane_of_ref(&self.second)?;
         let n = (a.normal() + b.normal()).normalize_or_zero();
         let n = if n.length_squared() < 1e-12 { a.normal() } else { n };
         let origin = (a.origin + b.origin) * 0.5;

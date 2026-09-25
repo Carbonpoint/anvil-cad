@@ -1,7 +1,7 @@
 //! Part navigator, property panel, expression table.
 
 use anvil_feature::param::ParamKind;
-use anvil_feature::{Document, ParamValue};
+use anvil_feature::{Document, ParamValue, PlaneRef};
 use std::collections::HashMap;
 
 #[derive(Default)]
@@ -22,6 +22,9 @@ pub struct PanelState {
     pub expr_drafts: HashMap<String, String>,
     /// True while the rollback bar is being dragged.
     pub dragging_rollback: bool,
+    /// Plane picking: the next click in the view sets this plane
+    /// parameter, (feature index, parameter name). Escape cancels.
+    pub plane_pick: Option<(usize, &'static str)>,
 }
 
 /// One slot the rollback bar can sit in. Returns the strip it drew.
@@ -311,6 +314,38 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
                     );
                     if v != *cur {
                         pending = Some((p.name, ParamValue::FeatureRef(v)));
+                    }
+                }
+                (ParamKind::PlaneRef, ParamValue::Plane(cur)) => {
+                    let mut v = cur.clone();
+                    ui.vertical(|ui| {
+                        egui::ComboBox::from_id_salt((idx, p.name, "plane")).selected_text(cur.label(doc)).show_ui(
+                            ui,
+                            |ui| {
+                                for d in ["XY", "XZ", "YZ"] {
+                                    ui.selectable_value(&mut v, PlaneRef::Datum(d.into()), d);
+                                }
+                                for (i, n) in doc.features.iter().enumerate().take(idx) {
+                                    if anvil_feature::PLANE_TYPES.contains(&n.feature.kind()) {
+                                        let r = PlaneRef::Feature(i);
+                                        let text = r.label(doc);
+                                        ui.selectable_value(&mut v, r, text);
+                                    }
+                                }
+                            },
+                        );
+                        let picking = st.plane_pick == Some((idx, p.name));
+                        let text = if picking { "Picking... (Esc)" } else { "Pick in view" };
+                        if ui
+                            .selectable_label(picking, text)
+                            .on_hover_text("Click a flat face or a datum plane")
+                            .clicked()
+                        {
+                            st.plane_pick = if picking { None } else { Some((idx, p.name)) };
+                        }
+                    });
+                    if v != *cur {
+                        pending = Some((p.name, ParamValue::Plane(v)));
                     }
                 }
                 (ParamKind::Choice { options }, ParamValue::Choice(cur)) => {
