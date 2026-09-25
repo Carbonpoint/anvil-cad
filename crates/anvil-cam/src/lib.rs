@@ -7,12 +7,14 @@
 //! * A **Post** (post-processor) turns a Toolpath into G-code text for one
 //!   controller family.
 //!
-//! This first version has one operation, 2.5D contour, and one post,
-//! `GenericGcode`, which writes plain RS-274 that LinuxCNC and GRBL accept.
+//! Operations: 2.5D contour, pocket (contour parallel, with islands) and
+//! drilling (canned cycles). Posts: generic RS-274, LinuxCNC, GRBL, Fanuc
+//! and Haas, see `post::posts`. Offsets go through `cavalier_contours`.
 
 pub mod ops;
 pub mod post;
+pub mod region;
 pub mod toolpath;
 
-pub use post::{GenericGcode, Post};
+pub use post::{posts, GenericGcode, Post};
 pub use toolpath::{Move, Tool, Toolpath};

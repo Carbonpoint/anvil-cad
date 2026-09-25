@@ -14,6 +14,7 @@
 //! stays in charge of picking and of any machine without a GL context.
 
 mod app;
+mod cam_view;
 mod camera;
 mod construct_view;
 mod drag_handle;

@@ -179,6 +179,9 @@ pub struct AnvilApp {
     gpu: crate::gpu::GpuViewport,
     perf: crate::perf::PerfMonitor,
     /// UI scale and text size (View > Settings > Settings), persisted.
+    /// The CAM window and its settings.
+    cam: crate::cam_view::CamState,
+    cam_open: bool,
     pub(crate) settings: crate::settings::UiSettings,
     settings_window_open: bool,
     /// In sketch mode: the Sketch tab is showing (not another ribbon tab).
@@ -280,6 +283,8 @@ impl AnvilApp {
             gpu: crate::gpu::GpuViewport::default(),
             perf: Default::default(),
             settings: crate::settings::UiSettings::default(),
+            cam: crate::cam_view::CamState::default(),
+            cam_open: false,
             settings_window_open: false,
             section_axis: 0,
             section_offset: 0.0,
@@ -695,44 +700,9 @@ impl AnvilApp {
                 }
             }
             RibbonAction::ExportGcode => {
-                let profile = self
-                    .doc
-                    .features
-                    .iter()
-                    .filter_map(|n| n.output.as_ref())
-                    .flat_map(|o| o.profiles.iter())
-                    .next()
-                    .cloned();
-                match profile {
-                    Some(prof) => {
-                        let tool = anvil_cam::Tool {
-                            number: 1,
-                            name: "6mm endmill".into(),
-                            diameter: 6.0,
-                            rpm: 12000.0,
-                            feed: 800.0,
-                            plunge: 200.0,
-                        };
-                        let params = anvil_cam::ops::ContourParams {
-                            top_z: 0.0,
-                            depth: 10.0,
-                            step_down: 2.5,
-                            clearance: 5.0,
-                            outside: true,
-                        };
-                        let tp = anvil_cam::ops::contour(&prof.points, &tool, &params);
-                        let text = anvil_cam::Post::emit(
-                            &anvil_cam::GenericGcode { program_name: self.doc.name.clone() },
-                            &tp,
-                        );
-                        let p = PathBuf::from(&self.file_path).with_extension("nc");
-                        self.status = match std::fs::write(&p, text) {
-                            Ok(()) => format!("Wrote {} ({:.0} mm of cutting)", p.display(), tp.cut_length()),
-                            Err(e) => format!("G-code export failed: {e}"),
-                        };
-                    }
-                    None => self.status = "No sketch profile to contour".into(),
-                }
+                self.cam_open = !self.cam_open;
+                self.status =
+                    if self.cam_open { "CAM: choose a sketch, an operation and a post".into() } else { String::new() };
             }
             RibbonAction::FitView => {
                 self.refresh_scene();
@@ -2640,6 +2610,13 @@ impl AnvilApp {
         crate::settings::set_icon_room(ctx, ctx.content_rect().height());
         self.export_windows(ctx);
         self.settings_window(ctx);
+        if self.cam_open {
+            let mut open = true;
+            if let Some(m) = crate::cam_view::window(ctx, &self.doc, self.panels.selected, &mut open, &mut self.cam) {
+                self.status = m;
+            }
+            self.cam_open = open;
+        }
         let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {
             (i.modifiers.command && i.key_pressed(egui::Key::Z), i.modifiers.command && i.key_pressed(egui::Key::Y))

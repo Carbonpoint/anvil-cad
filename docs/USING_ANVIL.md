@@ -279,6 +279,31 @@ each with its feature number.
 Circular Pattern and Revolve take an axis feature: set Axis to Feature
 and choose it.
 
+## CAM: G-code from a sketch
+
+File > Export > CAM opens a window that turns a flat sketch into G-code.
+Sketch X and Y are the machine's X and Y, and the top of the stock is
+the height of the sketch plane.
+
+| Operation | What it cuts |
+|---|---|
+| Contour outside, Contour inside | Round each closed profile, a tool radius out or in, in depth passes |
+| Pocket | The inside of each region, ring by ring from the middle out, leaving islands (holes in the sketch) standing |
+| Drill circle centres | A hole at the centre of every circle, with pecks when Peck is above 0 |
+
+Set the tool, feeds, depth, step down, stepover and clearance, choose a
+post, and press Save G-code. The posts:
+
+| Post | Notes |
+|---|---|
+| Generic G-code | Plain RS-274; drilling written as moves, so it runs anywhere |
+| LinuxCNC | G81 and G83 cycles, M6 with G43 tool length, ends M2 |
+| GRBL | No canned cycles and no tool changer: drilling as moves, M0 pause for a tool change |
+| Fanuc | Program number O0001, cycles, G28 home at the end |
+| Haas | As Fanuc, ending at G53 Z0 |
+
+Check a program in a simulator or with the spindle off before cutting.
+
 ## Open files from other CAD tools
 
 File > Open reads an Anvil document, and it also imports:

@@ -336,7 +336,12 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
         (
             "File",
             "Export",
-            RibbonButton::new("Contour G-code", "Contour the first sketch profile and write G-code", 0, A(ExportGcode)),
+            RibbonButton::new(
+                "CAM",
+                "Contour, pocket or drill a sketch and save G-code for LinuxCNC, GRBL, Fanuc or Haas",
+                0,
+                A(ExportGcode),
+            ),
         ),
         ("View", "Camera", RibbonButton::new("Fit", "Fit all bodies in the viewport", 0, A(FitView))),
         ("View", "Camera", RibbonButton::new("Iso", "Isometric view", 1, A(ViewIso))),
