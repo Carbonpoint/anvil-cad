@@ -275,10 +275,15 @@ fn fillet_and_chamfer_on_picked_edges() {
         ..Default::default()
     }));
     let e = [DVec3::new(0.0, 0.0, 10.0), DVec3::new(20.0, 0.0, 10.0)];
-    doc.add_feature(Box::new(FilletFeature { body_feature: 0, radius: "2".into(), edges: vec![e] }));
+    doc.add_feature(Box::new(FilletFeature {
+        body_feature: 0,
+        radius: "2".into(),
+        edges: vec![e],
+        edge_normals: vec![],
+    }));
     assert!(doc.features[1].error.is_none(), "{:?}", doc.features[1].error);
     let e2 = [DVec3::new(0.0, 10.0, 0.0), DVec3::new(20.0, 10.0, 0.0)];
-    doc.add_feature(Box::new(ChamferFeature { body: 1, distance: "1".into(), edges: vec![e2] }));
+    doc.add_feature(Box::new(ChamferFeature { body: 1, distance: "1".into(), edges: vec![e2], edge_normals: vec![] }));
     assert!(doc.features[2].error.is_none(), "{:?}", doc.features[2].error);
     assert_eq!(doc.bodies().len(), 1);
     let v = doc.bodies()[0].volume();

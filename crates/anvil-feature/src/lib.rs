@@ -132,6 +132,10 @@ pub trait Feature: Send + Sync + std::fmt::Debug + std::any::Any {
         false
     }
 
+    /// Take the edges found again on the last Regenerate, each with the
+    /// normals of its two faces, for features that keep picked edges.
+    fn update_edges(&mut self, _found: &[([anvil_math::DVec3; 2], [anvil_math::DVec3; 2])]) {}
+
     /// Rewrite references to other features after the history changes.
     /// `map(old)` returns the new index, or `None` if the target was
     /// deleted. The default walks `params()` for feature references.
