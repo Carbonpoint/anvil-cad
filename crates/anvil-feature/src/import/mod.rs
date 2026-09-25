@@ -5,7 +5,10 @@
 //! `read_3mf`. They read untrusted files, so they return errors and never
 //! panic on bad input.
 
+mod curved;
 pub mod step;
+mod surface;
+mod tess;
 pub mod threemf;
 mod zip;
 

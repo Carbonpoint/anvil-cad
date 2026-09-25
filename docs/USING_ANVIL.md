@@ -262,6 +262,25 @@ Mirror, and the patterns take a body feature as input; they default to the
 selected feature. Measure shows the volume and bounding box in the status
 bar.
 
+## Open files from other CAD tools
+
+File > Open reads an Anvil document, and it also imports:
+
+* **STEP** (`.step`, `.stp`). The file becomes an Import STEP feature
+  with one body per solid in the file. Flat faces and faces on
+  cylinders, cones, spheres, tori, B-spline surfaces, extrusions and
+  surfaces of revolution are read. A face that cannot be read is
+  skipped, and Properties names it, so a part with a missing face is
+  never silent.
+* **3MF** and **STL**. The file becomes an Insert Mesh feature.
+
+To bring a Fusion part in, open it in Fusion, then File > Export and
+choose STEP. Anvil cannot read `.f3d` files: that format is Autodesk's
+own and has no public description.
+
+An imported part saves next to its source file as `.anvil`. Solid >
+Insert has the same two features for adding a file to an open document.
+
 ## Planes from faces
 
 Midplane, Offset Plane, Plane at Angle and Split Body each take a plane.

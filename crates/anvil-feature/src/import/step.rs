@@ -7,7 +7,10 @@
 //! What becomes geometry today:
 //! * Bodies: `MANIFOLD_SOLID_BREP`, `FACETED_BREP`, `BREP_WITH_VOIDS`,
 //!   and the shells of a `SHELL_BASED_SURFACE_MODEL`.
-//! * Faces: `ADVANCED_FACE` or `FACE_SURFACE` on a `PLANE`.
+//! * Faces: `ADVANCED_FACE` or `FACE_SURFACE` on a `PLANE`, or on a
+//!   curved surface that `surface.rs` can map: cylinder, cone, sphere,
+//!   torus, B-spline (plain and rational), linear extrusion and surface
+//!   of revolution. A curved face is meshed in `curved.rs`.
 //! * Loops: `EDGE_LOOP` of `ORIENTED_EDGE`s, and `POLY_LOOP`.
 //! * Edges: `LINE`, `CIRCLE`, `ELLIPSE`, B-spline curves (plain and
 //!   rational), through `SURFACE_CURVE`, `SEAM_CURVE` and `TRIMMED_CURVE`.
@@ -15,8 +18,11 @@
 //! * Units: millimetre, centimetre, metre, and units defined from them,
 //!   such as the inch.
 //!
-//! A face on any other surface is skipped and counted in the notes.
+//! A face on any other surface (for example an offset surface) is skipped
+//! and counted in the notes, and so is a curved face whose boundary cannot
+//! be meshed.
 
+use super::surface::{BSplineSurface, Frame, Path, Surf};
 use super::Imported;
 use anvil_kernel::{Face, Solid, Surface};
 use anvil_math::DVec3;
@@ -392,20 +398,6 @@ fn parse(text: &str) -> Result<HashMap<u64, Entity>, String> {
 
 // -------------------------------------------------------------- geometry
 
-/// A local frame: origin, normal (z), and x axis.
-#[derive(Clone, Copy, Debug)]
-struct Frame {
-    o: DVec3,
-    z: DVec3,
-    x: DVec3,
-}
-
-impl Frame {
-    fn y(&self) -> DVec3 {
-        self.z.cross(self.x)
-    }
-}
-
 /// What a curve looks like as points, and whether it closes on itself.
 struct Samples {
     pts: Vec<DVec3>,
@@ -416,6 +408,8 @@ struct Builder<'a> {
     ents: &'a HashMap<u64, Entity>,
     /// Millimetres per file unit.
     scale: f64,
+    /// Radians per file angle unit.
+    angle: f64,
     /// Each edge sampled once, from its first vertex to its second, so
     /// that two faces sharing it get the same points.
     edges: HashMap<u64, Option<Vec<DVec3>>>,
@@ -430,12 +424,17 @@ impl<'a> Builder<'a> {
         let mut b = Builder {
             ents,
             scale: 1.0,
+            angle: 1.0,
             edges: HashMap::new(),
             skipped: Default::default(),
             notes: Vec::new(),
             straight: Default::default(),
         };
-        b.scale = b.length_scale();
+        b.scale = b.unit_scale("LENGTH_UNIT").unwrap_or_else(|| {
+            b.notes.push("no length unit found; millimetres assumed".into());
+            1.0
+        });
+        b.angle = b.unit_scale("PLANE_ANGLE_UNIT").unwrap_or(1.0);
         b
     }
 
@@ -451,8 +450,9 @@ impl<'a> Builder<'a> {
 
     // ------------------------------------------------------------ units
 
-    /// Millimetres per length unit of the file.
-    fn length_scale(&mut self) -> f64 {
+    /// Size of the file's unit of this kind (`LENGTH_UNIT` in millimetres,
+    /// `PLANE_ANGLE_UNIT` in radians), or `None` when the file names none.
+    fn unit_scale(&self, kind: &str) -> Option<f64> {
         // The unit named by the geometric context wins.
         let mut ctx_units: Vec<u64> = Vec::new();
         for e in self.ents.values() {
@@ -460,23 +460,18 @@ impl<'a> Builder<'a> {
                 ctx_units.extend(v.first().map(Value::refs).unwrap_or_default());
             }
         }
-        let is_length = |id: &u64| self.get(*id).is_some_and(|e| e.has("LENGTH_UNIT"));
-        let mut ids: Vec<u64> = ctx_units.into_iter().filter(is_length).collect();
+        let is_kind = |id: &u64| self.get(*id).is_some_and(|e| e.has(kind));
+        let mut ids: Vec<u64> = ctx_units.into_iter().filter(is_kind).collect();
         if ids.is_empty() {
-            let mut all: Vec<u64> = self.ents.iter().filter(|(_, e)| e.has("LENGTH_UNIT")).map(|(k, _)| *k).collect();
+            let mut all: Vec<u64> = self.ents.iter().filter(|(_, e)| e.has(kind)).map(|(k, _)| *k).collect();
             all.sort();
             ids = all;
         }
-        for id in ids {
-            if let Some(s) = self.unit_mm(id, 0) {
-                return s;
-            }
-        }
-        self.notes.push("no length unit found; millimetres assumed".into());
-        1.0
+        ids.into_iter().find_map(|id| self.unit_mm(id, 0))
     }
 
-    /// Millimetres per unit for the unit entity `#id`.
+    /// Size of the unit entity `#id`: millimetres for a length, radians
+    /// for an angle.
     fn unit_mm(&self, id: u64, depth: usize) -> Option<f64> {
         if depth > 8 {
             return None;
@@ -497,6 +492,7 @@ impl<'a> Builder<'a> {
             };
             return match v.get(1) {
                 Some(Value::Enum(n)) if n == "METRE" => Some(prefix * 1000.0),
+                Some(Value::Enum(n)) if n == "RADIAN" => Some(prefix),
                 _ => None,
             };
         }
@@ -666,8 +662,8 @@ impl<'a> Builder<'a> {
 
     // ------------------------------------------------------------ faces
 
-    /// Add one face to `out`. Returns the surface type name when the face
-    /// was skipped.
+    /// Add one face to `out`. On failure, returns the reason for the
+    /// notes, normally the surface type name.
     fn face(&mut self, id: u64, flip: bool, out: &mut FaceSink) -> Result<(), String> {
         let e = self.get(id).ok_or_else(|| "a missing face".to_string())?;
         let (bounds, surface, same) = match e.name() {
@@ -683,43 +679,136 @@ impl<'a> Builder<'a> {
         };
         let surface = surface.ok_or_else(|| "face without a surface".to_string())?;
         let s = self.get(surface).ok_or_else(|| "a missing surface".to_string())?;
-        if s.name() != "PLANE" {
-            return Err(s.name().to_string());
-        }
-        let frame =
-            self.frame(s.parts[0].1.get(1).and_then(Value::as_ref_id).ok_or("PLANE")?).ok_or("PLANE".to_string())?;
-        let normal = if same != flip { frame.z } else { -frame.z };
-        let mut outer: Option<Vec<DVec3>> = None;
-        let mut loops: Vec<Vec<DVec3>> = Vec::new();
+        let kind = s.name().to_string();
+        // The face normal follows the surface normal when `same` is true.
+        let sense = same != flip;
+        let mut loops: Vec<Bound> = Vec::new();
         for b in bounds {
             let Some(be) = self.get(b) else { continue };
-            let (is_outer, v) = match be.name() {
+            let (outer, v) = match be.name() {
                 "FACE_OUTER_BOUND" => (true, &be.parts[0].1),
                 "FACE_BOUND" => (false, &be.parts[0].1),
                 _ => continue,
             };
-            let Some(lp) = v.get(1).and_then(Value::as_ref_id).and_then(|l| self.loop_points(l)) else { continue };
-            if is_outer && outer.is_none() {
-                outer = Some(lp);
-            } else {
-                loops.push(lp);
+            let forward = v.get(2).and_then(Value::as_bool).unwrap_or(true);
+            let Some(mut pts) = v.get(1).and_then(Value::as_ref_id).and_then(|l| self.loop_points(l)) else { continue };
+            if !forward {
+                pts.reverse();
             }
+            if flip {
+                pts.reverse();
+            }
+            loops.push(Bound { pts, outer });
         }
-        // Without a marked outer bound, the largest loop is the outer one.
-        let outer = match outer {
-            Some(o) => o,
-            None => {
-                let k = (0..loops.len()).max_by(|&a, &b| {
-                    area_along(&loops[a], normal).abs().total_cmp(&area_along(&loops[b], normal).abs())
-                });
-                match k {
-                    Some(k) => loops.remove(k),
-                    None => return Err("PLANE with no usable loop".into()),
-                }
-            }
-        };
-        out.add(outer, loops, normal);
+        if kind == "PLANE" {
+            let frame = s.parts[0].1.get(1).and_then(Value::as_ref_id).and_then(|r| self.frame(r));
+            let frame = frame.ok_or_else(|| "PLANE".to_string())?;
+            let normal = if sense { frame.z } else { -frame.z };
+            let k = loops.iter().position(|l| l.outer).or_else(|| {
+                (0..loops.len()).max_by(|&a, &b| {
+                    area_along(&loops[a].pts, normal).abs().total_cmp(&area_along(&loops[b].pts, normal).abs())
+                })
+            });
+            let Some(k) = k else { return Err("PLANE with no usable loop".into()) };
+            let outer = loops.remove(k).pts;
+            out.add(outer, loops.into_iter().map(|l| l.pts).collect(), normal);
+            return Ok(());
+        }
+        let Some(surf) = self.surface(surface) else { return Err(kind) };
+        if loops.is_empty() {
+            return Err(format!("{kind} with no usable loop"));
+        }
+        let tris =
+            super::curved::mesh_face(&surf, &loops, sense).ok_or_else(|| format!("{kind} (could not be meshed)"))?;
+        out.add_triangles(&tris, matches!(surf, Surf::Cylinder { .. } | Surf::Cone { .. } | Surf::Extrusion { .. }));
         Ok(())
+    }
+
+    /// A curved surface the reader can mesh, from its entity.
+    fn surface(&mut self, id: u64) -> Option<Surf> {
+        let e = self.get(id)?;
+        let v = e.parts.first().map(|(_, v)| v.as_slice()).unwrap_or(&[]);
+        let frame = |b: &Self, k: usize| v.get(k).and_then(Value::as_ref_id).and_then(|r| b.frame(r));
+        let len = |k: usize| v.get(k).and_then(Value::as_num).map(|x| x * self.scale);
+        Some(match e.name() {
+            "CYLINDRICAL_SURFACE" => Surf::Cylinder { f: frame(self, 1)?, r: len(2)? },
+            "CONICAL_SURFACE" => {
+                let a = v.get(3)?.as_num()? * self.angle;
+                Surf::Cone { f: frame(self, 1)?, r: len(2)?, tan: a.tan() }
+            }
+            "SPHERICAL_SURFACE" => Surf::Sphere { f: frame(self, 1)?, r: len(2)? },
+            "TOROIDAL_SURFACE" => Surf::Torus { f: frame(self, 1)?, big: len(2)?, r: len(3)? },
+            "B_SPLINE_SURFACE_WITH_KNOTS" => {
+                let ctrl = self.point_grid(v.get(3)?)?;
+                let b = BSplineSurface::new(
+                    v.get(1)?.as_num()? as usize,
+                    v.get(2)?.as_num()? as usize,
+                    ctrl,
+                    None,
+                    (&v.get(8)?.nums(), &v.get(10)?.nums()),
+                    (&v.get(9)?.nums(), &v.get(11)?.nums()),
+                )?;
+                Surf::BSpline(Box::new(b))
+            }
+            _ if e.has("B_SPLINE_SURFACE") && e.has("B_SPLINE_SURFACE_WITH_KNOTS") => {
+                let bs = e.part("B_SPLINE_SURFACE")?;
+                let kn = e.part("B_SPLINE_SURFACE_WITH_KNOTS")?;
+                let ctrl = self.point_grid(bs.get(2)?)?;
+                let weights = e
+                    .part("RATIONAL_B_SPLINE_SURFACE")
+                    .and_then(|w| w.first())
+                    .map(|w| w.as_list().iter().map(Value::nums).collect::<Vec<_>>());
+                let b = BSplineSurface::new(
+                    bs.first()?.as_num()? as usize,
+                    bs.get(1)?.as_num()? as usize,
+                    ctrl,
+                    weights,
+                    (&kn.first()?.nums(), &kn.get(2)?.nums()),
+                    (&kn.get(1)?.nums(), &kn.get(3)?.nums()),
+                )?;
+                Surf::BSpline(Box::new(b))
+            }
+            "SURFACE_OF_LINEAR_EXTRUSION" => {
+                let path = self.curve_path(v.get(1)?.as_ref_id()?)?;
+                let vec = self.params(v.get(2)?.as_ref_id()?, "VECTOR")?;
+                let dir = self.direction(vec.get(1)?.as_ref_id()?)? * vec.get(2)?.as_num()? * self.scale;
+                Surf::Extrusion { path, dir }
+            }
+            "SURFACE_OF_REVOLUTION" => {
+                let path = self.curve_path(v.get(1)?.as_ref_id()?)?;
+                let path = path.points();
+                let ax = self.params(v.get(2)?.as_ref_id()?, "AXIS1_PLACEMENT")?;
+                let o = self.point(ax.get(1)?.as_ref_id()?)?;
+                let z = ax.get(2).and_then(Value::as_ref_id).and_then(|r| self.direction(r)).unwrap_or(DVec3::Z);
+                Surf::revolution(path, Frame { o, z, x: z.any_orthonormal_vector() })?
+            }
+            _ => return None,
+        })
+    }
+
+    /// Rows of control points from a list of lists of point references.
+    fn point_grid(&self, v: &Value) -> Option<Vec<Vec<DVec3>>> {
+        v.as_list()
+            .iter()
+            .map(|row| row.refs().into_iter().map(|r| self.point(r)).collect::<Option<Vec<_>>>())
+            .collect()
+    }
+
+    /// A whole curve as a path, for swept surfaces. A line becomes a long
+    /// straight path through its point.
+    fn curve_path(&mut self, id: u64) -> Option<Path> {
+        if let Some(v) = self.params(id, "LINE") {
+            let p = self.point(v.get(1)?.as_ref_id()?)?;
+            let vec = self.params(v.get(2)?.as_ref_id()?, "VECTOR")?;
+            let d = self.direction(vec.get(1)?.as_ref_id()?)?;
+            return Path::new(vec![p - d * 1e5, p + d * 1e5]);
+        }
+        let s = self.curve_samples(id, 0)?;
+        let mut pts = s.pts;
+        if s.closed {
+            pts.push(pts[0]);
+        }
+        Path::new(pts)
     }
 
     /// Faces of a shell. `flip` reverses them, for an oriented shell.
@@ -808,11 +897,20 @@ struct FaceSink {
     faces: usize,
     /// True when a face of this body was skipped.
     open: bool,
+    /// Last surface tag given to a curved face.
+    next_tag: u32,
 }
 
 impl FaceSink {
     fn new(scale: f64) -> Self {
-        FaceSink { solid: Solid::new(), index: HashMap::new(), q: 1e-6 * scale.max(1.0), faces: 0, open: false }
+        FaceSink {
+            solid: Solid::new(),
+            index: HashMap::new(),
+            q: 1e-6 * scale.max(1.0),
+            faces: 0,
+            open: false,
+            next_tag: 0,
+        }
     }
 
     fn vid(&mut self, p: DVec3) -> anvil_kernel::VertexId {
@@ -858,6 +956,22 @@ impl FaceSink {
         self.faces += 1;
     }
 
+    /// Add triangles of one curved face. They share a surface tag, so the
+    /// view shades them smooth and a click picks the whole face.
+    fn add_triangles(&mut self, tris: &[[DVec3; 3]], ruled: bool) {
+        self.next_tag += 1;
+        let surface =
+            if ruled { Surface::Cylindrical { id: self.next_tag } } else { Surface::Revolved { id: self.next_tag } };
+        for t in tris {
+            let ids = [self.vid(t[0]), self.vid(t[1]), self.vid(t[2])];
+            if ids[0] == ids[1] || ids[1] == ids[2] || ids[0] == ids[2] {
+                continue;
+            }
+            self.solid.faces.insert(Face { outer: ids.to_vec(), inner: Vec::new(), surface });
+        }
+        self.faces += 1;
+    }
+
     fn finish(mut self) -> Option<Solid> {
         if self.faces == 0 {
             return None;
@@ -865,6 +979,13 @@ impl FaceSink {
         self.solid.rebuild_edges();
         Some(self.solid)
     }
+}
+
+/// One face boundary: its points in order, and whether the file marked it
+/// as the outer one.
+pub(crate) struct Bound {
+    pub pts: Vec<DVec3>,
+    pub outer: bool,
 }
 
 /// Twice the signed area of a loop, measured about `normal`.
