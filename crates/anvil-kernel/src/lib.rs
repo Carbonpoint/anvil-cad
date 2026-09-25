@@ -23,7 +23,7 @@ pub mod shell;
 pub mod topology;
 
 pub use mesh::TriMesh;
-pub use topology::{Edge, EdgeId, Face, FaceId, Solid, Surface, SurfaceGeom, Vertex, VertexId};
+pub use topology::{Edge, EdgeId, Face, FaceId, MassProperties, Solid, Surface, SurfaceGeom, Vertex, VertexId};
 
 use anvil_math::{Axis, DVec2, DVec3, Plane};
 use thiserror::Error;

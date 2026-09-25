@@ -816,27 +816,52 @@ impl AnvilApp {
                 let errors = self.doc.features.iter().filter(|f| f.error.is_some()).count();
                 self.status = format!("Regenerated {} features, {errors} with errors", self.doc.features.len());
             }
-            RibbonAction::CenterOfMass => match self.panels.selected.and_then(|i| self.doc.features[i].output.as_ref())
-            {
-                Some(out) if !out.bodies.is_empty() => {
-                    let mut total = 0.0;
-                    let mut c = DVec3::ZERO;
-                    for b in &out.bodies {
-                        let v = b.volume();
-                        c += b.centroid() * v;
-                        total += v;
+            RibbonAction::CenterOfMass => {
+                match self.panels.selected.and_then(|i| self.doc.features[i].output.as_ref().map(|o| (i, o))) {
+                    Some((idx, out)) if !out.bodies.is_empty() => {
+                        // Sum the bodies: volumes and first moments add, and the
+                        // tensors add once each is moved to the common centre.
+                        let parts: Vec<anvil_kernel::MassProperties> =
+                            out.bodies.iter().map(|b| b.mass_properties()).collect();
+                        let total: f64 = parts.iter().map(|p| p.volume).sum();
+                        let c = if total > 0.0 {
+                            parts.iter().map(|p| p.centroid * p.volume).sum::<DVec3>() / total
+                        } else {
+                            DVec3::ZERO
+                        };
+                        let mut inertia = anvil_math::DMat3::ZERO;
+                        for p in &parts {
+                            let d = p.centroid - c;
+                            let shift = anvil_math::DMat3::from_diagonal(DVec3::splat(d.length_squared()))
+                                - anvil_math::DMat3::from_cols(d * d.x, d * d.y, d * d.z);
+                            inertia += p.inertia + shift * p.volume;
+                        }
+                        // Density in kg/mm3 from the material, if one is set.
+                        let density = self.doc.material.get(&idx).map(|m| m.density * 1e-6);
+                        self.com_marker = Some(c);
+                        let moments = match density {
+                        Some(rho) => format!(
+                            "; inertia about the centre Ixx {:.1}, Iyy {:.1}, Izz {:.1} kg mm2 ({})",
+                            inertia.x_axis.x * rho,
+                            inertia.y_axis.y * rho,
+                            inertia.z_axis.z * rho,
+                            self.doc.material[&idx].name
+                        ),
+                        None => format!(
+                            "; inertia per unit density Ixx {:.4e}, Iyy {:.4e}, Izz {:.4e} mm5 (set a material for kg mm2)",
+                            inertia.x_axis.x, inertia.y_axis.y, inertia.z_axis.z
+                        ),
+                    };
+                        self.status = format!(
+                            "Centre of mass: {}, {}, {}{moments}",
+                            self.doc.fmt_length(c.x),
+                            self.doc.fmt_length(c.y),
+                            self.doc.fmt_length(c.z)
+                        );
                     }
-                    let c = if total > 0.0 { c / total } else { DVec3::ZERO };
-                    self.com_marker = Some(c);
-                    self.status = format!(
-                        "Centre of mass: {}, {}, {}",
-                        self.doc.fmt_length(c.x),
-                        self.doc.fmt_length(c.y),
-                        self.doc.fmt_length(c.z)
-                    );
+                    _ => self.status = "Select a feature that produces a body".into(),
                 }
-                _ => self.status = "Select a feature that produces a body".into(),
-            },
+            }
             RibbonAction::BillOfMaterials => {
                 let mut lines = Vec::new();
                 let mut total_mass = 0.0;

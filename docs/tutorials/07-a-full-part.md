@@ -246,8 +246,6 @@ field.
 
 ## Not yet available
 
-* Mass properties for a lattice Body beyond volume and mass. No centre
-  of mass or inertia tensor in the report.
 * A structural check on the bracket. The report tells you what you
   built, not whether it holds.
 * Running OpenFOAM or reading its results back. Anvil writes the case;
