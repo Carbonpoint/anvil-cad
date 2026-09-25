@@ -30,6 +30,40 @@ pub fn shell(solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Sol
         let shift = if open.contains(&id) { thickness } else { -thickness };
         planes.insert(id, (n, n.dot(p) + shift));
     }
+    let inner = replane(solid, &planes, thickness)?;
+    // A face that turned over means the wall is thicker than a feature.
+    for (id, f) in &solid.faces {
+        let (n0, a0) = solid.face_normal_area(f);
+        let (n1, a1) = inner.face_normal_area(&inner.faces[id]);
+        if a0 > 1e-9 && a1 > 1e-12 && n0.dot(n1) < 0.0 {
+            return Err(KernelError::InvalidInput(format!(
+                "a {thickness} mm wall is thicker than a feature of the body; use a thinner wall"
+            )));
+        }
+    }
+    let out = crate::csg::boolean(solid, &inner, BooleanOp::Subtract);
+    if out.faces.is_empty() {
+        return Err(KernelError::BooleanFailed("the shell came out empty".into()));
+    }
+    Ok(out)
+}
+
+/// The solid with its faces moved to new planes (unit normal, offset) and
+/// every vertex placed where the new planes of its faces meet. A face with
+/// no entry in `planes` keeps its plane. `hint` is how far a vertex is
+/// expected to move along its average normal, inward when positive; it
+/// only matters where the planes leave a direction free.
+pub fn replane(solid: &Solid, planes: &HashMap<FaceId, (DVec3, f64)>, hint: f64) -> KernelResult<Solid> {
+    let mut all: HashMap<FaceId, (DVec3, f64)> = HashMap::new();
+    for (id, f) in &solid.faces {
+        let (n, area) = solid.face_normal_area(f);
+        if area <= 1e-12 {
+            continue;
+        }
+        let plane = planes.get(&id).copied().unwrap_or((n, n.dot(solid.pos(f.outer[0]))));
+        all.insert(id, plane);
+    }
+    let planes = &all;
     // Faces around each vertex.
     let mut around: HashMap<crate::VertexId, Vec<FaceId>> = HashMap::new();
     for (id, f) in &solid.faces {
@@ -53,7 +87,7 @@ pub fn shell(solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Sol
             continue;
         }
         let avg = seen.iter().map(|(n, _)| *n).sum::<DVec3>().normalize_or_zero();
-        let target = v.pos - avg * thickness;
+        let target = v.pos - avg * hint;
         // Least squares on the planes. Damped steps from `target` reach the
         // exact meeting point in every direction the planes fix; a
         // direction no plane fixes stays at `target`.
@@ -75,21 +109,47 @@ pub fn shell(solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Sol
         }
         inner.vertices[vid].pos = p;
     }
-    // A face that turned over means the wall is thicker than a feature.
+    Ok(inner)
+}
+
+/// Draft: tilt every side face (within about one degree of parallel to
+/// the pull, the normal of `neutral`) by `angle` radians about the line
+/// where it meets the neutral plane, so the body narrows away from the
+/// neutral plane along the pull and leaves a mold cleanly. Returns the
+/// drafted solid and the number of faces tilted.
+pub fn draft(solid: &Solid, neutral: &anvil_math::Plane, angle: f64) -> KernelResult<(Solid, usize)> {
+    if !(angle.is_finite() && angle.abs() < 1.2) {
+        return Err(KernelError::InvalidInput("the draft angle must be between -68 and 68 degrees".into()));
+    }
+    let pull = neutral.normal();
+    let (s, c) = angle.sin_cos();
+    let mut planes: HashMap<FaceId, (DVec3, f64)> = HashMap::new();
+    for (id, f) in &solid.faces {
+        let (n, area) = solid.face_normal_area(f);
+        if area <= 1e-12 || n.dot(pull).abs() > 0.0175 {
+            continue;
+        }
+        // The hinge: the face's plane meets the neutral plane. The face is
+        // parallel to the pull, so the pull lies in it.
+        let centre = f.outer.iter().map(|&v| solid.pos(v)).sum::<DVec3>() / f.outer.len() as f64;
+        let hinge = centre - pull * pull.dot(centre - neutral.origin);
+        let horizontal = (n - pull * n.dot(pull)).normalize_or_zero();
+        let tilted = (horizontal * c + pull * s).normalize();
+        planes.insert(id, (tilted, tilted.dot(hinge)));
+    }
+    let count = planes.len();
+    if count == 0 {
+        return Err(KernelError::InvalidInput("no face runs along the pull direction".into()));
+    }
+    let out = replane(solid, &planes, 0.0)?;
     for (id, f) in &solid.faces {
         let (n0, a0) = solid.face_normal_area(f);
-        let (n1, a1) = inner.face_normal_area(&inner.faces[id]);
+        let (n1, a1) = out.face_normal_area(&out.faces[id]);
         if a0 > 1e-9 && a1 > 1e-12 && n0.dot(n1) < 0.0 {
-            return Err(KernelError::InvalidInput(format!(
-                "a {thickness} mm wall is thicker than a feature of the body; use a thinner wall"
-            )));
+            return Err(KernelError::InvalidInput("the draft closes a face; use a smaller angle".into()));
         }
     }
-    let out = crate::csg::boolean(solid, &inner, BooleanOp::Subtract);
-    if out.faces.is_empty() {
-        return Err(KernelError::BooleanFailed("the shell came out empty".into()));
-    }
-    Ok(out)
+    Ok((out, count))
 }
 
 #[cfg(test)]
@@ -128,6 +188,22 @@ mod tests {
         let inner_r_ratio = 18.0 / 20.0;
         let want = outer - outer * inner_r_ratio * inner_r_ratio * (28.0 / 30.0);
         assert!((s.volume() - want).abs() < 0.01 * want, "{} vs {want}", s.volume());
+    }
+
+    #[test]
+    fn a_drafted_box_is_a_prismatoid() {
+        let b = ops::box_solid(DVec3::ZERO, DVec3::new(40.0, 30.0, 20.0)).unwrap();
+        let (d, n) = draft(&b, &anvil_math::Plane::XY, 5f64.to_radians()).unwrap();
+        assert_eq!(n, 4, "the four side faces");
+        let k = 20.0 * 5f64.to_radians().tan();
+        // Top and bottom are not similar rectangles, so the prismatoid
+        // formula: h / 6 (bottom + top + 4 middle).
+        let (a1, a2, am) = (40.0 * 30.0, (40.0 - 2.0 * k) * (30.0 - 2.0 * k), (40.0 - k) * (30.0 - k));
+        let want = 20.0 / 6.0 * (a1 + a2 + 4.0 * am);
+        assert!((d.volume() - want).abs() < 1e-6 * want, "{} vs {want}", d.volume());
+        // The bottom, on the neutral plane, keeps its size.
+        let bb = d.bounds();
+        assert!((bb.max.x - 40.0).abs() < 1e-9 && bb.min.x.abs() < 1e-9);
     }
 
     #[test]

@@ -241,6 +241,10 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.rect((0.16, 0.16), (0.84, 0.84));
             c.rect((0.32, 0.32), (0.68, 0.68));
         }
+        "draft" => {
+            c.poly_closed(&[(0.2, 0.82), (0.8, 0.82), (0.68, 0.22), (0.32, 0.22)]);
+            c.dashed((0.2, 0.22), (0.2, 0.82), 6);
+        }
         "fillet" => draw_corner(&c, true),
         "chamfer" => draw_corner(&c, false),
         "combine" => {

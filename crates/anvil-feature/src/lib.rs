@@ -65,6 +65,7 @@ pub const BODY_TYPES: &[&str] = &[
     "fillet",
     "chamfer",
     "shell",
+    "draft",
     "combine",
     "hole",
     "surface_pattern",

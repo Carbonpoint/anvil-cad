@@ -376,6 +376,15 @@ follows the body when an earlier feature changes, and Pick in view
 chooses another one. A wall thicker than a feature of the body is
 refused with a message.
 
+## Draft
+
+Draft (Solid > Modify) tilts the side faces of a body, the faces that
+run along the pull, so a pattern leaves the sand or a part leaves its
+mold. The neutral plane stays put and its normal is the pull; the body
+narrows away from it. Click the face to keep (for example the bottom),
+then Draft: that face becomes the neutral plane. One to three degrees is
+usual. Draft check (Solid > Casting) shows what is still undercut.
+
 ## Tapered pipe
 
 Pipe has a second value, Diameter at end. Leave it at 0 for one

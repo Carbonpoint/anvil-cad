@@ -94,6 +94,10 @@ pub trait Kernel {
     fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
     /// Hollow a solid with walls `thickness` thick, leaving `open` faces open.
     fn shell(&self, solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Solid>;
+    /// Tilt the faces that run along the pull (the normal of `neutral`) by
+    /// `angle` radians about the neutral plane. Returns the solid and the
+    /// number of faces tilted.
+    fn draft(&self, solid: &Solid, neutral: &Plane, angle: f64) -> KernelResult<(Solid, usize)>;
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)>;
     /// Closed loops of the face a plane cuts through a solid, in plane
     /// coordinates. Holes run the other way round, so the signed areas
@@ -195,6 +199,9 @@ impl Kernel for NativeKernel {
     }
     fn shell(&self, solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Solid> {
         shell::shell(solid, thickness, open)
+    }
+    fn draft(&self, solid: &Solid, neutral: &Plane, angle: f64) -> KernelResult<(Solid, usize)> {
+        shell::draft(solid, neutral, angle)
     }
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
         ops::split_by_plane(solid, plane)

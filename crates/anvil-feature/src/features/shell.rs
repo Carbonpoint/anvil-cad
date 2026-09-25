@@ -1,5 +1,6 @@
 //! Shell: hollow a body, leaving walls of one thickness, with one face
-//! left open if you pick one.
+//! left open if you pick one. Draft: tilt the side faces of a body so it
+//! leaves a mold.
 
 use crate::{
     Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, PlaneRef, RegenContext, RegenError, BODY_TYPES,
@@ -88,6 +89,69 @@ impl Feature for ShellFeature {
     }
 }
 
+/// Draft: tilt the side faces of a body so it leaves a mold. The neutral
+/// plane stays put; its normal is the pull direction.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DraftFeature {
+    pub body: usize,
+    /// Degrees. Positive narrows the body away from the neutral plane.
+    pub angle: String,
+    pub neutral: PlaneRef,
+}
+
+impl Default for DraftFeature {
+    fn default() -> Self {
+        DraftFeature { body: 1, angle: "2".into(), neutral: PlaneRef::Datum("XY".into()) }
+    }
+}
+
+#[typetag::serde(name = "draft")]
+impl Feature for DraftFeature {
+    fn kind(&self) -> &'static str {
+        "draft"
+    }
+    fn name(&self) -> String {
+        format!("Draft body {} ({} deg from {})", self.body, self.angle, self.neutral.short())
+    }
+    fn params(&self) -> Vec<ParamSpec> {
+        vec![
+            ParamSpec::feature_ref("body", "Body", BODY_TYPES.to_vec(), self.body),
+            ParamSpec::angle("angle", "Draft angle", &self.angle),
+            ParamSpec::plane("neutral", "Neutral plane (its normal is the pull)", self.neutral.clone()),
+        ]
+    }
+    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
+        match (name, value) {
+            ("body", ParamValue::FeatureRef(i)) => self.body = i,
+            ("angle", ParamValue::Expr(s)) => self.angle = s,
+            ("neutral", v) => self.neutral = crate::features::construct::plane_value(name, v)?,
+            (n, _) => return Err(format!("unknown parameter {n}")),
+        }
+        Ok(())
+    }
+    fn place_on_face(&mut self, plane: anvil_math::Plane, body: usize) -> bool {
+        self.body = body;
+        self.neutral = PlaneRef::Face { feature: body, body: 0, plane };
+        true
+    }
+    fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
+        let angle = ctx.eval(&self.angle)?.to_radians();
+        let neutral = ctx.plane_of_ref(&self.neutral)?;
+        let solid = ctx.bodies_of(self.body)?[0].clone();
+        let (out, n) = ctx.kernel.draft(&solid, &neutral, angle)?;
+        Ok(FeatureOutput {
+            bodies: vec![out],
+            consumes: vec![self.body],
+            note: Some(format!("{n} faces drafted")),
+            ..Default::default()
+        })
+    }
+    fn clone_box(&self) -> Box<dyn Feature> {
+        Box::new(self.clone())
+    }
+}
+
+inventory::submit! { FeatureDescriptor { id: "draft", label: "Draft", tab: "Solid", group: "Modify", tooltip: "Tilt the side faces so the body leaves a mold; the neutral plane stays put", order: 33, create: || Box::new(DraftFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "shell", label: "Shell", tab: "Solid", group: "Modify", tooltip: "Hollow a body with a wall thickness; pick a face to leave open", order: 32, create: || Box::new(ShellFeature::default()) } }
 
 #[cfg(test)]

@@ -274,7 +274,8 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 | Scale, Move/Copy | Done | |
 | Split Body | Done | Plane only; face and sketch-curve splitting not supported |
 | Change Parameters, Appearance, Physical Material, Bill of Materials, Delete, Compute All, undo/redo | Done | |
-| Draft, Offset Face, Replace Face, Split Face, Silhouette Split, Align | Missing | |
+| Draft | Done | Side faces tilted about a neutral plane (a plane reference); the pull is its normal |
+| Offset Face, Replace Face, Split Face, Silhouette Split, Align | Missing | |
 
 ### Solid > Assemble
 
