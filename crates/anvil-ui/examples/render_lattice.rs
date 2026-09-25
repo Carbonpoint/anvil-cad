@@ -66,7 +66,6 @@ fn main() {
                 plane: "XY".into(),
                 offset: "6".into(),
                 keep: "below".into(),
-                ..Default::default()
             }));
             for (i, f) in doc.features.iter().enumerate() {
                 if let Some(e) = &f.error {
@@ -116,7 +115,6 @@ fn main() {
             plane: "XZ".into(),
             offset: "0".into(),
             keep: "above".into(),
-            ..Default::default()
         }));
         for (i, f) in doc.features.iter().enumerate() {
             if let Some(e) = &f.error {

@@ -1,9 +1,7 @@
 //! Coil, Pipe, Insert Mesh, Split Body.
 
-use crate::features::datum_plane;
 use crate::{
     Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, PlaneRef, RegenContext, RegenError, BODY_TYPES,
-    PLANE_TYPES,
 };
 use anvil_math::{DVec2, DVec3, Plane};
 use serde::{Deserialize, Serialize};
@@ -220,18 +218,41 @@ impl Feature for MeshFeature {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "SplitBodySaved")]
 pub struct SplitBodyFeature {
     pub body: usize,
-    pub plane: String,
-    pub plane_feature: Option<usize>,
+    pub plane: PlaneRef,
     pub offset: String,
     /// "both", "below", or "above".
     pub keep: String,
 }
 
+/// What a file holds. Files written before plane references had
+/// `"plane":"Feature"` and the Feature number in `plane_feature`.
+#[derive(Deserialize)]
+struct SplitBodySaved {
+    body: usize,
+    plane: PlaneRef,
+    #[serde(default)]
+    plane_feature: Option<usize>,
+    offset: String,
+    keep: String,
+}
+
+impl From<SplitBodySaved> for SplitBodyFeature {
+    fn from(s: SplitBodySaved) -> Self {
+        SplitBodyFeature {
+            body: s.body,
+            plane: PlaneRef::from_saved(s.plane, s.plane_feature),
+            offset: s.offset,
+            keep: s.keep,
+        }
+    }
+}
+
 impl Default for SplitBodyFeature {
     fn default() -> Self {
-        SplitBodyFeature { body: 1, plane: "XY".into(), plane_feature: None, offset: "5".into(), keep: "both".into() }
+        SplitBodyFeature { body: 1, plane: PlaneRef::Datum("XY".into()), offset: "5".into(), keep: "both".into() }
     }
 }
 
@@ -241,30 +262,22 @@ impl Feature for SplitBodyFeature {
         "split_body"
     }
     fn name(&self) -> String {
-        format!("Split body {} by {}", self.body, self.plane)
+        format!("Split body {} by {}", self.body, self.plane.short())
     }
     fn params(&self) -> Vec<ParamSpec> {
-        let mut v = vec![
+        vec![
             ParamSpec::feature_ref("body", "Body", BODY_TYPES.to_vec(), self.body),
-            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature"], &self.plane),
+            ParamSpec::plane("plane", "Plane", self.plane.clone()),
             ParamSpec::length("offset", "Offset along normal", &self.offset),
             ParamSpec::choice("keep", "Keep", vec!["both", "below", "above"], &self.keep),
-        ];
-        if self.plane == "Feature" {
-            v.push(ParamSpec::feature_ref(
-                "plane_feature",
-                "Plane feature",
-                PLANE_TYPES.to_vec(),
-                self.plane_feature.unwrap_or(0),
-            ));
-        }
-        v
+        ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
             ("body", ParamValue::FeatureRef(i)) => self.body = i,
-            ("plane", ParamValue::Choice(p)) => self.plane = p,
-            ("plane_feature", ParamValue::FeatureRef(i)) => self.plane_feature = Some(i),
+            ("plane", v) if !matches!(v, ParamValue::FeatureRef(_)) => {
+                self.plane = crate::features::construct::plane_value(name, v)?
+            }
             ("offset", ParamValue::Expr(s)) => self.offset = s,
             ("keep", ParamValue::Choice(k)) => self.keep = k,
             (n, _) => return Err(format!("unknown parameter {n}")),
@@ -272,11 +285,7 @@ impl Feature for SplitBodyFeature {
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let mut plane = match (self.plane.as_str(), self.plane_feature) {
-            ("Feature", Some(i)) => ctx.plane_of(i)?,
-            ("Feature", None) => return Err(RegenError::Other("choose a plane feature".into())),
-            (d, _) => datum_plane(d),
-        };
+        let mut plane = ctx.plane_of_ref(&self.plane)?;
         plane.origin += plane.normal() * ctx.eval(&self.offset)?;
         let mut bodies = Vec::new();
         for b in ctx.bodies_of(self.body)? {

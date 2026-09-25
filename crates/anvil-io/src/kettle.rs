@@ -501,7 +501,6 @@ pub fn kettle_mold() -> Document {
         doc.add_feature(Box::new(SplitBodyFeature {
             body: 39,
             plane: "XZ".into(),
-            plane_feature: None,
             offset: "0".into(),
             keep: keep.into(),
         }));
@@ -520,7 +519,6 @@ pub fn kettle_mold() -> Document {
         doc.add_feature(Box::new(SplitBodyFeature {
             body: 43,
             plane: "XZ".into(),
-            plane_feature: None,
             offset: "0".into(),
             keep: keep.into(),
         }));

@@ -70,6 +70,12 @@ impl<'de> Deserialize<'de> for PlaneRef {
     }
 }
 
+impl From<&str> for PlaneRef {
+    fn from(s: &str) -> Self {
+        PlaneRef::parse(s)
+    }
+}
+
 impl PlaneRef {
     /// Read the old text form: a datum name or a Feature number. Anything
     /// else is `None`.
@@ -78,6 +84,15 @@ impl PlaneRef {
         match t.to_ascii_uppercase().as_str() {
             "XY" | "XZ" | "YZ" => PlaneRef::Datum(t.to_ascii_uppercase()),
             _ => t.parse::<usize>().map(PlaneRef::Feature).unwrap_or(PlaneRef::None),
+        }
+    }
+
+    /// Combine the old saved pair: a choice that was "Feature" and the
+    /// Feature number stored beside it.
+    pub fn from_saved(r: PlaneRef, feature: Option<usize>) -> PlaneRef {
+        match (r, feature) {
+            (PlaneRef::None, Some(i)) => PlaneRef::Feature(i),
+            (r, _) => r,
         }
     }
 

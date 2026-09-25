@@ -66,7 +66,7 @@ fn move_consumes_and_pattern_multiplies() {
 #[test]
 fn sketch_on_offset_plane_follows_the_plane() {
     let mut doc = Document::new("t");
-    doc.add_feature(Box::new(OffsetPlaneFeature { base: "XY".into(), base_feature: None, offset: "7".into() }));
+    doc.add_feature(Box::new(OffsetPlaneFeature { base: "XY".into(), offset: "7".into() }));
     let mut sk = SketchFeature::on_feature(0);
     sk.sketch.add_rectangle(0.0, 0.0, 4.0, 4.0);
     doc.add_feature(Box::new(sk));
@@ -429,4 +429,30 @@ fn the_rollback_bar_holds_back_later_features() {
     assert_eq!(doc.bodies().len(), 3);
     doc.undo();
     assert_eq!(doc.bodies().len(), 1, "undo puts the bar back");
+}
+
+/// Files written before plane references hold `"plane":"Feature"` with the
+/// Feature number beside it. They must still load and split the same way.
+#[test]
+fn an_old_split_body_with_a_plane_feature_still_loads() {
+    let mut doc = Document::new("old split");
+    doc.add_feature(Box::new(OffsetPlaneFeature { base: "XY".into(), offset: "4".into() }));
+    doc.add_feature(Box::new(anvil_feature::features::primitives::BoxFeature::default()));
+    doc.add_feature(Box::new(anvil_feature::features::solid_extra::SplitBodyFeature {
+        body: 1,
+        plane: anvil_feature::PlaneRef::Feature(0),
+        offset: "0".into(),
+        keep: "below".into(),
+    }));
+    // Rewrite the saved features into the old shape.
+    let mut v: serde_json::Value = serde_json::from_str(&doc.to_json().unwrap()).unwrap();
+    let f = &mut v["features"];
+    f[0]["feature"]["base"] = "XY".into();
+    f[0]["feature"]["base_feature"] = serde_json::Value::Null;
+    f[2]["feature"]["plane"] = "Feature".into();
+    f[2]["feature"]["plane_feature"] = 0.into();
+    let old = Document::from_json(&v.to_string()).expect("an old file loads");
+    let (a, b) = (doc.features[2].output.as_ref().unwrap(), old.features[2].output.as_ref().unwrap());
+    assert!(old.features[2].error.is_none(), "{:?}", old.features[2].error);
+    assert!((a.bodies[0].volume() - b.bodies[0].volume()).abs() < 1e-9);
 }
