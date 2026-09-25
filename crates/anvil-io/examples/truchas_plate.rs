@@ -19,13 +19,14 @@ fn main() {
     )
     .unwrap();
     let alloy = anvil_feature::features::casting::ALLOYS[0];
-    let (mesh, volume, inlet) = anvil_io::casting::voxel_mold(&[&plate, &sprue], voxel, 3.0 * voxel).unwrap();
+    let (mesh, volume, inlet) =
+        anvil_io::casting::voxel_mold(&[&plate, &sprue], voxel, (3.0 * voxel).max(30.0)).unwrap();
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("mesh.exo"), mesh.to_exodus("plate")).unwrap();
     let speed = 0.5;
     let fill = volume * 1e-9 / (inlet * 1e-6 * speed);
     let end = if end > 0.0 { end } else { fill * 1.5 };
-    std::fs::write(out.join("casting.inp"), anvil_io::casting::truchas_deck(&alloy, 1400.0, speed, end)).unwrap();
+    std::fs::write(out.join("casting.inp"), anvil_io::casting::truchas_deck(&alloy, 1400.0, speed, fill, end)).unwrap();
     println!(
         "{} cells, cavity {:.1} cm3, inlet {:.0} mm2, fills in {:.2} s, runs to {:.2} s",
         mesh.blocks.len(),

@@ -163,14 +163,15 @@ pub fn write_truchas_case(
     let stl = dir.join("cavity.stl");
     crate::write_stl(&cavity_mesh(doc, casting), &stl)?;
     let metal = metal_bodies(doc, casting);
-    let (mesh, volume, inlet_area) = voxel_mold(&metal, voxel, 3.0 * voxel)?;
+    // Sand thick enough not to fill up with heat during the freeze.
+    let (mesh, volume, inlet_area) = voxel_mold(&metal, voxel, (3.0 * voxel).max(30.0))?;
     let exo = dir.join("mesh.exo");
     std::fs::write(&exo, mesh.to_exodus(&doc.name))?;
     // Fill time: the cavity volume through the inlet at the pour speed.
     let fill_s = volume * 1e-9 / (inlet_area * 1e-6 * pour_speed.max(0.01));
     let end = if end_time > 0.0 { end_time } else { fill_s * 1.5 };
     let inp = dir.join("casting.inp");
-    std::fs::write(&inp, truchas_deck(alloy, pour_temp, pour_speed, end))?;
+    std::fs::write(&inp, truchas_deck(alloy, pour_temp, pour_speed, fill_s, end))?;
     let readme = dir.join("README.md");
     std::fs::write(&readme, truchas_readme(alloy, volume * 1e-3, fill_s, mesh.blocks.len(), voxel))?;
     Ok(vec![exo, inp, stl, readme])
@@ -179,11 +180,13 @@ pub fn write_truchas_case(
 /// A Truchas input deck for `mesh.exo` from `voxel_mold`. Units are SI
 /// (the mesh is in mm and scaled), temperatures in K. The namelists follow
 /// the Truchas reference manual and its freezing-flow tests.
-pub fn truchas_deck(alloy: &Alloy, pour_temp: f64, pour_speed: f64, end_s: f64) -> String {
+pub fn truchas_deck(alloy: &Alloy, pour_temp: f64, pour_speed: f64, fill_s: f64, end_s: f64) -> String {
     let tag = alloy.name.split_whitespace().next().unwrap_or("metal").to_lowercase();
     let latent_j_per_kg = alloy.latent_heat * 1e3;
     let pour_k = pour_temp + 273.15;
     let mold_k = 300.0;
+    // Pour until a little past the expected fill, then stop.
+    let stop = fill_s * 1.05;
     format!(
         r#"Truchas input deck written by Anvil: {name} poured at {pour_temp:.0} C into a
 sand mold. mesh.exo is a voxel mesh in mm: block 1 sand, block 2 the empty
@@ -257,12 +260,22 @@ The empty cavity.
   temperature = {mold_k:.1}
 /
 
-Metal pours down through the middle of the cup top.
+Metal pours down through the middle of the cup top until a little past
+the expected fill ({fill_s:.2} s), then the pour stops.
+&VFUNCTION
+  name = 'pour-speed'
+  type = 'tabular'
+  tabular_data(:,1) = 0.0, 0.0, 0.0, -{pour_speed:.3}
+  tabular_data(:,2) = {stop:.3}, 0.0, 0.0, -{pour_speed:.3}
+  tabular_data(:,3) = {stop_end:.3}, 0.0, 0.0, 0.0
+  tabular_data(:,4) = 1.0e6, 0.0, 0.0, 0.0
+/
+
 &FLOW_BC
   name = 'pour'
   face_set_ids = 1
   type = 'velocity'
-  velocity = 0.0, 0.0, -{pour_speed:.3}
+  velocity_func = 'pour-speed'
   inflow_material = '{tag}-liquid'
   inflow_temperature = {pour_k:.1}
 /
@@ -336,6 +349,9 @@ Green sand, starting values.
         mold_k = mold_k,
         pour_speed = pour_speed,
         pour_k = pour_k,
+        fill_s = fill_s,
+        stop = stop,
+        stop_end = stop + 0.05,
     )
 }
 
@@ -370,11 +386,13 @@ mod tests {
 
     #[test]
     fn truchas_case_has_the_alloy_numbers() {
-        let deck = truchas_deck(&ALLOYS[0], 1400.0, 1.5, 3.0);
+        let deck = truchas_deck(&ALLOYS[0], 1400.0, 1.5, 2.0, 3.0);
         assert!(deck.contains("solidus_temp  = 1423."), "{deck}");
         assert!(deck.contains("latent_heat   = 280000"));
         assert!(deck.contains("inflow_temperature = 1673."));
         assert!(deck.contains("temp = 1673."), "a temperature condition takes temp");
+        // The pour stops at 1.05 times the fill.
+        assert!(deck.contains("tabular_data(:,2) = 2.100, 0.0, 0.0, -1.500"), "{deck}");
     }
 
     #[test]
