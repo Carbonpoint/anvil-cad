@@ -82,6 +82,24 @@ impl RegenContext<'_> {
             .ok_or(RegenError::BadReference(self.index, idx, "plane"))
     }
 
+    /// Axis defined by an earlier construction feature.
+    pub fn axis_of(&self, idx: FeatureId) -> Result<anvil_math::Axis, RegenError> {
+        self.upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .and_then(|o| o.axis)
+            .ok_or(RegenError::BadReference(self.index, idx, "axis"))
+    }
+
+    /// Point defined by an earlier construction feature.
+    pub fn point_of(&self, idx: FeatureId) -> Result<anvil_math::DVec3, RegenError> {
+        self.upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .and_then(|o| o.point)
+            .ok_or(RegenError::BadReference(self.index, idx, "point"))
+    }
+
     /// Open paths of an earlier sketch feature, in world coordinates.
     pub fn paths_of(&self, idx: FeatureId) -> Result<Vec<Vec<anvil_math::DVec3>>, RegenError> {
         let out = self

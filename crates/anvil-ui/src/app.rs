@@ -1,4 +1,5 @@
 use crate::camera::{Camera, Projector, UpAxis};
+use crate::construct_view;
 use crate::drag_handle::{self, DragHandle};
 use crate::ghost_view;
 use crate::icons;
@@ -2259,6 +2260,7 @@ impl AnvilApp {
             if let Some(pk) = &pick {
                 sketch_view::draw_regions(&painter, origin, &proj, pk, hovered_region);
             }
+            construct_view::draw(&painter, origin, &proj, &self.doc, sel, self.scene_size());
             // The selected feature, outlined inside the part.
             if let Some(idx) = sel {
                 if self.ghost.as_ref().map(|(i, id, _)| (*i, *id)) != Some((idx, self.scene.id)) {

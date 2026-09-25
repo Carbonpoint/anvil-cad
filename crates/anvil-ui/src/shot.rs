@@ -42,6 +42,8 @@ pub struct ShotOptions {
     pub open_settings: bool,
     /// Ribbon tab to show, by name. `None` keeps the Solid tab.
     pub tab: Option<String>,
+    /// A file to open (as File > Open does) after the sample loads.
+    pub open: Option<std::path::PathBuf>,
     /// Keep only this part of the picture: (x, y, width, height) in
     /// pixels. Useful for a document that shows one panel or one ribbon
     /// group rather than the whole window.
@@ -58,6 +60,7 @@ impl Default for ShotOptions {
             select: None,
             open_settings: false,
             tab: None,
+            open: None,
             crop: None,
         }
     }
@@ -129,6 +132,9 @@ pub fn sample_image(name: &str, opts: &ShotOptions) -> Option<ColorImage> {
     if let Some(a) = action {
         app.run_action(a);
         app.fit_view();
+    }
+    if let Some(f) = &opts.open {
+        app.open_path(f);
     }
     app.panels.selected = opts.select;
     if opts.open_settings {

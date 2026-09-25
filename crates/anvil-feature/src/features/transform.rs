@@ -282,12 +282,15 @@ pub struct CircPatternFeature {
     pub body: usize,
     pub count: String,
     pub total_angle: String,
+    /// "X", "Y", "Z", or "Feature" for an axis feature.
     pub axis: String,
+    #[serde(default)]
+    pub axis_feature: usize,
 }
 
 impl Default for CircPatternFeature {
     fn default() -> Self {
-        CircPatternFeature { body: 1, count: "6".into(), total_angle: "360".into(), axis: "Z".into() }
+        CircPatternFeature { body: 1, count: "6".into(), total_angle: "360".into(), axis: "Z".into(), axis_feature: 0 }
     }
 }
 
@@ -302,15 +305,23 @@ impl Feature for CircPatternFeature {
     fn params(&self) -> Vec<ParamSpec> {
         vec![
             ParamSpec::feature_ref("body", "Body", BODY_TYPES.to_vec(), self.body),
-            ParamSpec::choice("axis", "Axis", vec!["X", "Y", "Z"], &self.axis),
+            ParamSpec::choice("axis", "Axis", vec!["X", "Y", "Z", "Feature"], &self.axis),
+        ]
+        .into_iter()
+        .chain((self.axis == "Feature").then(|| {
+            ParamSpec::feature_ref("axis_feature", "Axis feature", crate::AXIS_TYPES.to_vec(), self.axis_feature)
+        }))
+        .chain([
             ParamSpec::length("count", "Count", &self.count),
             ParamSpec::angle("total_angle", "Total angle", &self.total_angle),
-        ]
+        ])
+        .collect()
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
             ("body", ParamValue::FeatureRef(i)) => self.body = i,
             ("axis", ParamValue::Choice(p)) => self.axis = p,
+            ("axis_feature", ParamValue::FeatureRef(i)) => self.axis_feature = i,
             ("count", ParamValue::Expr(s)) => self.count = s,
             ("total_angle", ParamValue::Expr(s)) => self.total_angle = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
@@ -328,12 +339,16 @@ impl Feature for CircPatternFeature {
         } else {
             0.0
         };
-        let axis = datum_axis(&self.axis);
+        let axis = if self.axis == "Feature" {
+            ctx.axis_of(self.axis_feature)?
+        } else {
+            anvil_math::Axis::new(DVec3::ZERO, datum_axis(&self.axis))
+        };
         let src = ctx.bodies_of(self.body)?;
         let mut bodies = Vec::new();
         for i in 1..n {
-            let q = DQuat::from_axis_angle(axis, step * i as f64);
-            bodies.extend(src.iter().map(|b| b.transformed(|p| q * p, false)));
+            let angle = step * i as f64;
+            bodies.extend(src.iter().map(|b| b.transformed(|p| axis.rotate(p, angle), false)));
         }
         Ok(FeatureOutput { bodies, ..Default::default() })
     }
@@ -346,7 +361,7 @@ inventory::submit! { FeatureDescriptor { id: "move", label: "Move/Copy", tab: "S
 inventory::submit! { FeatureDescriptor { id: "scale", label: "Scale", tab: "Solid", group: "Modify", tooltip: "Scale a body about its centre", order: 41, create: || Box::new(ScaleFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "mirror", label: "Mirror", tab: "Solid", group: "Create", tooltip: "Mirror a body across a datum plane", order: 60, create: || Box::new(MirrorFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "rect_pattern", label: "Rect Pattern", tab: "Solid", group: "Create", tooltip: "Rectangular pattern of a body", order: 61, create: || Box::new(RectPatternFeature::default()) } }
-inventory::submit! { FeatureDescriptor { id: "circ_pattern", label: "Circ Pattern", tab: "Solid", group: "Create", tooltip: "Circular pattern of a body about a datum axis", order: 62, create: || Box::new(CircPatternFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "circ_pattern", label: "Circ Pattern", tab: "Solid", group: "Create", tooltip: "Circular pattern of a body about a datum axis or an axis feature", order: 62, create: || Box::new(CircPatternFeature::default()) } }
 
 #[cfg(test)]
 mod tests {

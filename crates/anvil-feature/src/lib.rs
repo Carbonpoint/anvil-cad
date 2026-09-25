@@ -39,6 +39,10 @@ pub struct FeatureOutput {
     pub paths: Vec<Vec<anvil_math::DVec2>>,
     /// The plane a sketch or construction feature defines.
     pub plane: Option<anvil_math::Plane>,
+    /// The axis a construction feature defines.
+    pub axis: Option<anvil_math::Axis>,
+    /// The point a construction feature defines.
+    pub point: Option<anvil_math::DVec3>,
     /// Short advice shown under the feature in Properties, for example a
     /// printability warning. Not an error: the feature still regenerated.
     pub note: Option<String>,
@@ -76,6 +80,12 @@ pub const BODY_TYPES: &[&str] = &[
 
 /// Feature type ids that define a plane.
 pub const PLANE_TYPES: &[&str] = &["sketch", "offset_plane", "angle_plane", "plane_3pt", "midplane"];
+
+/// Feature type ids that define an axis.
+pub const AXIS_TYPES: &[&str] = &["axis"];
+
+/// Feature type ids that define a point.
+pub const POINT_TYPES: &[&str] = &["point"];
 
 /// The trait every feature implements.
 ///

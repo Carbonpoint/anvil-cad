@@ -15,6 +15,7 @@
 
 mod app;
 mod camera;
+mod construct_view;
 mod drag_handle;
 mod dxf;
 mod ghost_view;

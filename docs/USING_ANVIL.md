@@ -262,6 +262,23 @@ Mirror, and the patterns take a body feature as input; they default to the
 selected feature. Measure shows the volume and bounding box in the status
 bar.
 
+## Construction axes and points
+
+![An axis, an offset plane and a point](images/ui_construction.png)
+
+Solid > Construct has Axis and Point. Construction planes, axes and
+points are drawn in the view in orange, faint, and bold when selected,
+each with its feature number.
+
+* **Axis:** where two planes meet, along a picked edge, through the
+  centre of a picked round face, or normal to a plane. Select an edge or
+  a round face first and the Axis takes it.
+* **Point:** by coordinates (expressions), where three planes meet, or
+  where an axis meets a plane.
+
+Circular Pattern and Revolve take an axis feature: set Axis to Feature
+and choose it.
+
 ## Open files from other CAD tools
 
 File > Open reads an Anvil document, and it also imports:

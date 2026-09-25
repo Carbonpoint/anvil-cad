@@ -288,7 +288,9 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 | Command | Status | Note |
 |---|---|---|
 | Offset Plane, Plane at Angle, Midplane, Plane Through Three Points | Done | |
-| Tangent Plane, Perpendicular Plane, Plane Through Two Edges, Plane Along Path, User Coordinate System, all axis tools, all point tools | Missing | |
+| Axis Through Two Planes, Axis Through Edge, Axis Through Cylinder/Cone/Torus, Axis Perpendicular to Face | Done | One Axis feature with a method; Circular Pattern and Revolve take an axis feature |
+| Point Through Three Planes, Point at Edge and Plane (axis and plane), point by coordinates | Done | One Point feature with a method |
+| Tangent Plane, Perpendicular Plane, Plane Through Two Edges, Plane Along Path, User Coordinate System, Axis Through Two Points, Point at Vertex, Point Through Two Edges, Point at Center, Point Along Path | Missing | |
 
 ### Solid > Inspect
 
