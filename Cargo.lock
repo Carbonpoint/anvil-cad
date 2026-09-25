@@ -209,6 +209,7 @@ name = "anvil-io"
 version = "0.1.0"
 dependencies = [
  "anvil-feature",
+ "anvil-implicit",
  "anvil-kernel",
  "anvil-math",
  "anvil-sketch",

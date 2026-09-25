@@ -11,6 +11,7 @@
 pub mod aero;
 pub mod beams;
 pub mod casting;
+pub mod exodus;
 pub mod export;
 pub mod kettle;
 pub mod workbook;
