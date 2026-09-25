@@ -14,6 +14,7 @@
 pub mod document;
 pub mod features;
 pub mod fonts;
+pub mod import;
 pub mod mesh_loader;
 pub mod param;
 pub mod plane_ref;

@@ -513,6 +513,57 @@ impl AnvilApp {
         self.status = "Click a datum plane (XY, XZ, YZ) or a face to sketch on. Esc cancels.".into();
     }
 
+    /// Open a file. An Anvil document replaces the current one. A STEP,
+    /// 3MF or STL file starts a new document that imports it, so a file
+    /// exported from another CAD tool opens like a document.
+    pub fn open_path(&mut self, p: &std::path::Path) {
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported").to_string();
+        let path = p.display().to_string();
+        let doc = match ext.as_str() {
+            "step" | "stp" => {
+                let mut d = Document::new(&stem);
+                d.add_feature(Box::new(anvil_feature::features::solid_extra::ImportStepFeature {
+                    path: path.clone(),
+                    scale: "1".into(),
+                }));
+                Ok(d)
+            }
+            "3mf" | "stl" => {
+                let mut d = Document::new(&stem);
+                d.add_feature(Box::new(anvil_feature::features::solid_extra::MeshFeature {
+                    path: path.clone(),
+                    scale: "1".into(),
+                }));
+                Ok(d)
+            }
+            _ => anvil_io::load_document(p).map_err(|e| e.to_string()),
+        };
+        match doc {
+            Ok(d) => {
+                let imported = !matches!(ext.as_str(), "anvil" | "json");
+                self.doc = d;
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.fit_view();
+                // An import saves next to the file it came from, as .anvil.
+                self.file_path = if imported { p.with_extension("anvil").display().to_string() } else { path.clone() };
+                self.status = match self.doc.features.first() {
+                    Some(n) if imported => match (&n.error, n.output.as_ref().and_then(|o| o.note.as_ref())) {
+                        (Some(e), _) => format!("Import failed: {e}"),
+                        (None, Some(note)) => format!("Imported {path}. {note}"),
+                        (None, None) => format!("Imported {path}"),
+                    },
+                    _ => format!("Loaded {path}"),
+                };
+            }
+            Err(e) => self.status = format!("Open failed: {e}"),
+        }
+    }
+
     /// Show the ribbon tab with this name. Returns false when no tab has it.
     pub fn show_tab(&mut self, name: &str) -> bool {
         match self.ribbon.iter().position(|t| t.name.eq_ignore_ascii_case(name)) {
@@ -627,19 +678,19 @@ impl AnvilApp {
                 self.export_dialog = Some(self.export_format);
             }
             RibbonAction::Load => {
-                let p = PathBuf::from(&self.file_path);
-                match anvil_io::load_document(&p) {
-                    Ok(d) => {
-                        self.doc = d;
-                        self.panels = PanelState::default();
-                        self.mode = Mode::Model;
-                        self.camera.unlock();
-                        self.invalidate();
-                        self.refresh_scene();
-                        self.fit_view();
-                        self.status = format!("Loaded {}", p.display());
-                    }
-                    Err(e) => self.status = format!("Load failed: {e}"),
+                let dir = PathBuf::from(&self.file_path).parent().map(|p| p.to_path_buf()).filter(|p| p.is_dir());
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Open")
+                    .add_filter("Anvil, STEP, 3MF or STL", &["anvil", "json", "step", "stp", "3mf", "stl"])
+                    .add_filter("Anvil document", &["anvil", "json"])
+                    .add_filter("STEP (from Fusion: File > Export)", &["step", "stp"])
+                    .add_filter("Mesh", &["3mf", "stl"]);
+                if let Some(d) = dir {
+                    dialog = dialog.set_directory(d);
+                }
+                match dialog.pick_file() {
+                    Some(p) => self.open_path(&p),
+                    None => self.status = "Open cancelled".into(),
                 }
             }
             RibbonAction::ExportGcode => {

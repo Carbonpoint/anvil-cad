@@ -222,7 +222,11 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
     use RibbonAction::*;
     vec![
         ("File", "Document", RibbonButton::new("New", "Start an empty document", 0, A(NewDocument))),
-        ("File", "Document", RibbonButton::new("Open", "Open the .anvil file named in the status bar", 1, A(Load))),
+        (
+            "File",
+            "Document",
+            RibbonButton::new("Open", "Open an Anvil document, or import a STEP, 3MF or STL file", 1, A(Load)),
+        ),
         ("File", "Document", RibbonButton::new("Save", "Save to the .anvil path in the status bar", 2, A(Save))),
         ("File", "Document", RibbonButton::new("Save As", "Choose where to save the .anvil document", 3, A(SaveAs))),
         (

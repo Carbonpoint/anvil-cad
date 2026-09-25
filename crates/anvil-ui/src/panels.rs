@@ -217,6 +217,26 @@ pub fn property_panel(ui: &mut egui::Ui, doc: &mut Document, st: &mut PanelState
         for p in &params {
             ui.label(p.label);
             match (&p.kind, &p.value) {
+                (ParamKind::Text, ParamValue::Expr(cur)) if p.name == "path" => {
+                    let draft = st.drafts.entry((idx, p.name)).or_insert_with(|| cur.clone());
+                    ui.horizontal(|ui| {
+                        let resp = ui.add(egui::TextEdit::singleline(draft).desired_width(140.0));
+                        if resp.lost_focus() && draft != cur {
+                            pending = Some((p.name, ParamValue::Expr(draft.clone())));
+                        }
+                        if ui.button("Browse").clicked() {
+                            let kind = doc.features[idx].feature.kind();
+                            let (label, exts): (&str, &[&str]) = match kind {
+                                "import_step" => ("STEP", &["step", "stp"]),
+                                "mesh" => ("STL or 3MF", &["stl", "3mf"]),
+                                _ => ("Any file", &["*"]),
+                            };
+                            if let Some(f) = rfd::FileDialog::new().add_filter(label, exts).pick_file() {
+                                pending = Some((p.name, ParamValue::Expr(f.display().to_string())));
+                            }
+                        }
+                    });
+                }
                 (ParamKind::Length | ParamKind::Angle | ParamKind::Text, ParamValue::Expr(cur)) => {
                     let draft = st.drafts.entry((idx, p.name)).or_insert_with(|| cur.clone());
                     let resp = ui.text_edit_singleline(draft);

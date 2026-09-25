@@ -188,7 +188,7 @@ impl Feature for MeshFeature {
         vec![
             ParamSpec {
                 name: "path",
-                label: "STL file",
+                label: "STL or 3MF file",
                 kind: crate::param::ParamKind::Text,
                 value: ParamValue::Expr(self.path.clone()),
             },
@@ -205,12 +205,85 @@ impl Feature for MeshFeature {
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let k = ctx.eval(&self.scale)?;
-        let tris = crate::mesh_loader::load(&self.path).map_err(RegenError::Other)?;
+        let lower = self.path.to_ascii_lowercase();
+        let (tris, note) = if lower.ends_with(".3mf") {
+            let got = crate::import::threemf::read(std::path::Path::new(&self.path)).map_err(RegenError::Other)?;
+            (got.triangles(), (!got.notes.is_empty()).then(|| got.notes.join("; ")))
+        } else if lower.ends_with(".step") || lower.ends_with(".stp") {
+            return Err(RegenError::Other("a STEP file holds solids: use Import STEP (Solid > Insert)".into()));
+        } else {
+            (crate::mesh_loader::load(&self.path).map_err(RegenError::Other)?, None)
+        };
         let tris: Vec<[DVec3; 3]> = tris.iter().map(|t| [t[0] * k, t[1] * k, t[2] * k]).collect();
         if tris.is_empty() {
             return Err(RegenError::Other("no triangles in file".into()));
         }
-        Ok(FeatureOutput { bodies: vec![anvil_kernel::ops::from_triangles(&tris, 1e-6)], ..Default::default() })
+        Ok(FeatureOutput { bodies: vec![anvil_kernel::ops::from_triangles(&tris, 1e-6)], note, ..Default::default() })
+    }
+    fn clone_box(&self) -> Box<dyn Feature> {
+        Box::new(self.clone())
+    }
+}
+
+/// Bodies from a STEP file. Faces the reader cannot use are named in
+/// the Feature's note, so a part with missing faces is never silent.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportStepFeature {
+    pub path: String,
+    pub scale: String,
+}
+
+impl Default for ImportStepFeature {
+    fn default() -> Self {
+        ImportStepFeature { path: "part.step".into(), scale: "1".into() }
+    }
+}
+
+#[typetag::serde(name = "import_step")]
+impl Feature for ImportStepFeature {
+    fn kind(&self) -> &'static str {
+        "import_step"
+    }
+    fn name(&self) -> String {
+        let file = std::path::Path::new(&self.path).file_name().and_then(|f| f.to_str()).unwrap_or(&self.path);
+        format!("STEP ({file})")
+    }
+    fn params(&self) -> Vec<ParamSpec> {
+        vec![
+            ParamSpec {
+                name: "path",
+                label: "STEP file",
+                kind: crate::param::ParamKind::Text,
+                value: ParamValue::Expr(self.path.clone()),
+            },
+            ParamSpec::length("scale", "Scale", &self.scale),
+        ]
+    }
+    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
+        match (name, value) {
+            ("path", ParamValue::Expr(s)) => self.path = s,
+            ("scale", ParamValue::Expr(s)) => self.scale = s,
+            (n, _) => return Err(format!("unknown parameter {n}")),
+        }
+        Ok(())
+    }
+    fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
+        let k = ctx.eval(&self.scale)?;
+        let got = crate::import::step::read(std::path::Path::new(&self.path)).map_err(RegenError::Other)?;
+        if got.solids.is_empty() {
+            let why = if got.notes.is_empty() { String::new() } else { format!(": {}", got.notes.join("; ")) };
+            return Err(RegenError::Other(format!("no body could be read{why}")));
+        }
+        let mut bodies = got.solids;
+        if (k - 1.0).abs() > 1e-12 {
+            for b in &mut bodies {
+                for v in b.vertices.values_mut() {
+                    v.pos *= k;
+                }
+            }
+        }
+        let note = (!got.notes.is_empty()).then(|| got.notes.join("; "));
+        Ok(FeatureOutput { bodies, note, ..Default::default() })
     }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())
@@ -424,7 +497,8 @@ impl Feature for MidplaneFeature {
 
 inventory::submit! { FeatureDescriptor { id: "coil", label: "Coil", tab: "Solid", group: "Create", tooltip: "Helical coil about the Z axis", order: 54, create: || Box::new(CoilFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "pipe", label: "Pipe", tab: "Solid", group: "Create", tooltip: "Round pipe along a path sketch", order: 55, create: || Box::new(PipeFeature::default()) } }
-inventory::submit! { FeatureDescriptor { id: "mesh", label: "Insert Mesh", tab: "Solid", group: "Insert", tooltip: "Insert an STL file as a body", order: 0, create: || Box::new(MeshFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "mesh", label: "Insert Mesh", tab: "Solid", group: "Insert", tooltip: "Insert an STL or 3MF file as a body", order: 0, create: || Box::new(MeshFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "import_step", label: "Import STEP", tab: "Solid", group: "Insert", tooltip: "Read the bodies of a STEP file (Fusion: File > Export > STEP)", order: 1, create: || Box::new(ImportStepFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "split_body", label: "Split Body", tab: "Solid", group: "Modify", tooltip: "Cut a body with a plane", order: 45, create: || Box::new(SplitBodyFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "plane_3pt", label: "Plane 3 Points", tab: "Solid", group: "Construct", tooltip: "Plane through three points", order: 2, create: || Box::new(Plane3PointsFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "midplane", label: "Midplane", tab: "Solid", group: "Construct", tooltip: "Plane halfway between two planes", order: 3, create: || Box::new(MidplaneFeature::default()) } }

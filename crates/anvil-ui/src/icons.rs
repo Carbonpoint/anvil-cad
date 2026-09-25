@@ -314,6 +314,10 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.line((0.35, 0.5), (0.65, 0.5));
             c.line((0.5, 0.25), (0.5, 0.75));
         }
+        "import_step" => {
+            c.poly_closed(&[(0.2, 0.4), (0.5, 0.25), (0.8, 0.4), (0.8, 0.75), (0.5, 0.9), (0.2, 0.75)]);
+            c.arrow((0.5, 0.05), (0.5, 0.55));
+        }
         "split_body" => {
             c.rect((0.18, 0.28), (0.82, 0.75));
             c.dashed((0.1, 0.5), (0.9, 0.5), 8);
