@@ -16,7 +16,7 @@ The tutorials drive `anvil-cli`, because a headless run is repeatable
 and quotes its numbers. The same features sit on the Solid tab, in the
 Field group:
 
-![The Field group of the Solid tab](../images/ui_ribbon_field.png)
+![The Field tab](../images/ui_ribbon_field.png)
 
 **Lattice fill** is tutorials 2, 3 and 4. **Density body** is tutorial 5.
 **Aircraft** is tutorial 7. Add the feature in the window, set the same

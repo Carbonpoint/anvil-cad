@@ -8,7 +8,7 @@ Examples > Workbook (WB 1 to WB 6). Saved documents are in `examples/workbook/`
 and renders in `docs/workbook/`.
 
 Units are millimetres. Material is steel at 7.85 g/cm3 unless stated.
-Mass properties come from Measure and Center of Mass on the Solid tab.
+Mass properties come from Measure and Center of Mass on the Inspect tab.
 
 ## Reading the expected values
 

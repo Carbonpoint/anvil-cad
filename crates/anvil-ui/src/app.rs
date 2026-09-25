@@ -198,7 +198,7 @@ pub struct AnvilApp {
 /// What a click in the model viewport may select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectFilter {
-    All,
+    All = 0,
     Body,
     Face,
     Edge,
@@ -511,6 +511,17 @@ impl AnvilApp {
     fn begin_pick_plane(&mut self) {
         self.mode = Mode::PickPlane;
         self.status = "Click a datum plane (XY, XZ, YZ) or a face to sketch on. Esc cancels.".into();
+    }
+
+    /// Show the ribbon tab with this name. Returns false when no tab has it.
+    pub fn show_tab(&mut self, name: &str) -> bool {
+        match self.ribbon.iter().position(|t| t.name.eq_ignore_ascii_case(name)) {
+            Some(i) => {
+                self.active_tab = i;
+                true
+            }
+            None => false,
+        }
     }
 
     /// The plane reference under the pointer while a plane parameter of
@@ -922,6 +933,15 @@ impl AnvilApp {
                 self.file_path = format!("workbook_{}.anvil", &name[..2]);
                 self.status = format!("Workbook {name} loaded. Steps in docs/WORKBOOK.md.");
             }
+            RibbonAction::SetSelectFilter(n) => {
+                self.filter = match n {
+                    0 => SelectFilter::All,
+                    1 => SelectFilter::Body,
+                    2 => SelectFilter::Face,
+                    _ => SelectFilter::Edge,
+                };
+                self.status = format!("Select: {:?}", self.filter);
+            }
             RibbonAction::ToggleUnits => {
                 self.doc.unit = if self.doc.unit == "mm" { "in".into() } else { "mm".into() };
                 self.status = format!("Display unit: {}", self.doc.unit);
@@ -1126,26 +1146,58 @@ impl AnvilApp {
             }
         });
         ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            if let Some(tab) = self.ribbon.get(self.active_tab) {
+        // One row of panels, as in Fusion. A narrow window scrolls the row
+        // instead of clipping it.
+        let filter = self.filter as u8;
+        egui::ScrollArea::horizontal().id_salt("ribbon_row").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let Some(tab) = self.ribbon.get(self.active_tab) else { return };
+                let mut click = |b: &crate::ribbon::RibbonButton| match b.kind {
+                    ButtonKind::Feature(id) => clicked_feature = Some(id),
+                    ButtonKind::Action(a) => clicked_action = Some(a),
+                };
                 for g in &tab.groups {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
-                            for b in &g.buttons {
-                                let btn = icons::icon_button(ui, b.kind.icon_id(), b.label);
-                                if btn.on_hover_text(b.tooltip).clicked() {
-                                    match b.kind {
-                                        ButtonKind::Feature(id) => clicked_feature = Some(id),
-                                        ButtonKind::Action(a) => clicked_action = Some(a),
-                                    }
+                            let mut any = false;
+                            for b in g.buttons.iter().filter(|b| b.pinned) {
+                                any = true;
+                                let tip = match b.shortcut {
+                                    Some(k) => format!("{} ({k})", b.tooltip),
+                                    None => b.tooltip.to_string(),
+                                };
+                                if icons::icon_only(ui, b.kind.icon_id(), b.label).on_hover_text(tip).clicked() {
+                                    click(b);
                                 }
                             }
+                            if !any {
+                                // Keep the panel names in one line.
+                                ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
+                            }
                         });
-                        ui.label(egui::RichText::new(g.name).small().weak());
+                        // The name is a menu; the triangle comes from egui's icon font.
+                        ui.menu_button(egui::RichText::new(format!("{} \u{23F7}", g.name.to_uppercase())).small(), |ui| {
+                            for b in &g.buttons {
+                                let chosen = matches!(b.kind, ButtonKind::Action(RibbonAction::SetSelectFilter(n)) if n == filter);
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                                    icons::paint(b.kind.icon_id(), ui.painter(), r, ui.visuals().text_color());
+                                    let mut btn = egui::Button::new(b.label).frame(false).selected(chosen);
+                                    if let Some(k) = b.shortcut {
+                                        btn = btn.shortcut_text(k);
+                                    }
+                                    let resp = ui.add(btn).on_hover_text(b.tooltip);
+                                    if resp.clicked() {
+                                        click(b);
+                                        ui.close();
+                                    }
+                                });
+                            }
+                        });
                     });
                     ui.separator();
                 }
-            }
+            });
         });
         if let Some(id) = clicked_feature {
             if in_sketch {
@@ -1677,6 +1729,13 @@ impl AnvilApp {
                     && !self.selected_edges.is_empty()
                 {
                     self.add_feature_by_id("fillet");
+                }
+                // E and H, as the ribbon menus show them.
+                if !typing && ui.input(|i| i.key_pressed(egui::Key::E) && !i.modifiers.any()) {
+                    self.add_feature_by_id("extrude");
+                }
+                if !typing && ui.input(|i| i.key_pressed(egui::Key::H) && !i.modifiers.any()) {
+                    self.add_feature_by_id("hole");
                 }
                 if !typing && ui.input(|i| i.key_pressed(egui::Key::Q)) && self.selected_face.is_some() {
                     self.press_pull();
@@ -2499,15 +2558,7 @@ impl AnvilApp {
                 ui.separator();
                 ui.label(format!("{} tris", self.scene.mesh.triangle_count()));
                 ui.separator();
-                ui.label("Select:");
-                for (f, label) in [
-                    (SelectFilter::All, "All"),
-                    (SelectFilter::Body, "Body"),
-                    (SelectFilter::Face, "Face"),
-                    (SelectFilter::Edge, "Edge"),
-                ] {
-                    ui.selectable_value(&mut self.filter, f, label);
-                }
+                ui.label(format!("Select: {:?}", self.filter)).on_hover_text("Change it in Solid > SELECT");
                 ui.separator();
                 ui.checkbox(&mut self.show_used_sketches, "Used sketches")
                     .on_hover_text("Also show sketches that a feature already uses");

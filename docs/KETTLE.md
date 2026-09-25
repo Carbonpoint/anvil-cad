@@ -109,7 +109,7 @@ holds the base and the cope holds the dome and the spout. A sprue on
 the side away from the spout has its pouring cup at z = 150 and its well
 below the parting plane. A runner in the drag carries the metal to an
 ingate in the ridge band. A blind riser sits over the spout base, the
-thickest junction. All four are Casting tab features with expressions
+thickest junction. All four are features on the Casting panel of the Solid tab with expressions
 `part_z` and `pour_z`, so the layout moves with the plane.
 
 ![Kettle with gating](kettle_gated.png)
@@ -135,7 +135,7 @@ by 1.01 for the shrink of grey cast iron:
 | Core | The exact cavity revolved, plus a 43.5 mm print through the mouth and the spout bore that reaches past the tip |
 | Core box halves (2) | A block minus the core, split on XZ |
 
-Draft check (Casting tab) reports the undercut area of each pattern half
+Draft check (Solid tab, Casting panel) reports the undercut area of each pattern half
 along its pull. The dots themselves are the only undercuts: the far side
 of every dot leans away from the pull by about one millimetre. Real
 arare kettles get their dots by hand-pressing the sand, so this is where

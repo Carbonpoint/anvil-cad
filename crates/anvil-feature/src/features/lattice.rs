@@ -345,7 +345,7 @@ impl Feature for LatticeFillFeature {
     }
 }
 
-inventory::submit! { FeatureDescriptor { id: "lattice_fill", label: "Lattice fill", tab: "Solid", group: "Field", tooltip: "Replace the inside of a body with a gyroid, Schwarz, or diamond sheet lattice under a skin", order: 90, create: || Box::new(LatticeFillFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "lattice_fill", label: "Lattice fill", tab: "Field", group: "Fill", tooltip: "Replace the inside of a body with a gyroid, Schwarz, or diamond sheet lattice under a skin", order: 90, create: || Box::new(LatticeFillFeature::default()) } }
 
 #[cfg(test)]
 mod tests {

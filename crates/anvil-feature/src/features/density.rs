@@ -138,7 +138,7 @@ impl Feature for DensityBodyFeature {
     }
 }
 
-inventory::submit! { FeatureDescriptor { id: "density_body", label: "Density body", tab: "Solid", group: "Field", tooltip: "A body from a density or scalar grid (VTK) above a threshold, as from a topology optimisation", order: 92, create: || Box::new(DensityBodyFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "density_body", label: "Density body", tab: "Field", group: "Generate", tooltip: "A body from a density or scalar grid (VTK) above a threshold, as from a topology optimisation", order: 92, create: || Box::new(DensityBodyFeature::default()) } }
 
 #[cfg(test)]
 mod tests {
