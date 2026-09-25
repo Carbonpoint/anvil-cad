@@ -224,7 +224,8 @@ the sheet stays continuous.
 
 ## Not yet available
 
-* Cell size grading for beam lattices or honeycomb. Sheet lattices only.
+* Cell size grading for honeycomb. Sheet and beam lattices grade
+  (`CellRamp`, `BeamRamp`).
 * Cell size grading along a radius, or by a data field. The ramp is
   along one of x, y or z.
 * Conformal maps other than the cylinder.
