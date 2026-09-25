@@ -270,7 +270,7 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 |---|---|---|
 | Fillet, Chamfer | Done | Straight edges between flat faces, outside and inside corners |
 | Combine, Hole | Done | CSG booleans; Hole has counterbore |
-| Shell | Partial | On the ribbon, returns unsupported |
+| Shell | Done | Wall thickness, one open face picked in the view (a plane reference); closed shells keep a hollow inside |
 | Scale, Move/Copy | Done | |
 | Split Body | Done | Plane only; face and sketch-curve splitting not supported |
 | Change Parameters, Appearance, Physical Material, Bill of Materials, Delete, Compute All, undo/redo | Done | |

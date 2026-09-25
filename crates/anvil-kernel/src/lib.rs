@@ -19,6 +19,7 @@ pub mod csg;
 pub mod mesh;
 pub mod ops;
 pub mod relief;
+pub mod shell;
 pub mod topology;
 
 pub use mesh::TriMesh;
@@ -91,7 +92,8 @@ pub trait Kernel {
     fn torus(&self, center: DVec3, major: f64, minor: f64) -> KernelResult<Solid>;
     fn mirror(&self, solid: &Solid, plane: &Plane) -> Solid;
     fn chamfer(&self, solid: &Solid, edges: &[EdgeId], distance: f64) -> KernelResult<Solid>;
-    fn shell(&self, solid: &Solid, thickness: f64) -> KernelResult<Solid>;
+    /// Hollow a solid with walls `thickness` thick, leaving `open` faces open.
+    fn shell(&self, solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Solid>;
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)>;
     /// Closed loops of the face a plane cuts through a solid, in plane
     /// coordinates. Holes run the other way round, so the signed areas
@@ -191,8 +193,8 @@ impl Kernel for NativeKernel {
     fn chamfer(&self, _solid: &Solid, _edges: &[EdgeId], _distance: f64) -> KernelResult<Solid> {
         Err(KernelError::Unsupported("chamfer"))
     }
-    fn shell(&self, _solid: &Solid, _thickness: f64) -> KernelResult<Solid> {
-        Err(KernelError::Unsupported("shell"))
+    fn shell(&self, solid: &Solid, thickness: f64, open: &[FaceId]) -> KernelResult<Solid> {
+        shell::shell(solid, thickness, open)
     }
     fn split(&self, solid: &Solid, plane: &Plane) -> KernelResult<(Solid, Solid)> {
         ops::split_by_plane(solid, plane)

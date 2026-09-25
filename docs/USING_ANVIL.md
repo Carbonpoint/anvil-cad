@@ -366,6 +366,16 @@ that would reach a cut edge or the end of the surface are dropped whole,
 like dots. On a vertical wall printed upright the tubes are small
 overhangs that need no support.
 
+## Shell
+
+Shell (Solid > Modify) hollows a body and leaves walls of one thickness.
+Click the face to leave open, then Shell: the face you clicked becomes
+the Open face, so a box turns into a tray. With no open face, the body
+keeps a closed hollow inside. The Open face is a plane reference, so it
+follows the body when an earlier feature changes, and Pick in view
+chooses another one. A wall thicker than a feature of the body is
+refused with a message.
+
 ## Tapered pipe
 
 Pipe has a second value, Diameter at end. Leave it at 0 for one

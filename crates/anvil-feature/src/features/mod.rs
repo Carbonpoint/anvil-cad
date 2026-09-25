@@ -16,6 +16,7 @@ pub mod loft;
 pub mod pending;
 pub mod primitives;
 pub mod revolve;
+pub mod shell;
 pub mod sketch;
 pub mod solid_extra;
 pub mod surface_pattern;
