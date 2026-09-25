@@ -172,9 +172,13 @@ pub fn write_truchas_case(
     let end = if end_time > 0.0 { end_time } else { fill_s * 1.5 };
     let inp = dir.join("casting.inp");
     std::fs::write(&inp, truchas_deck(alloy, pour_temp, pour_speed, fill_s, end))?;
+    // The freeze: long enough for the Chvorinov time of the casting, at
+    // least a minute.
+    let freeze = dir.join("freeze.inp");
+    std::fs::write(&freeze, truchas_freeze_deck(alloy, pour_temp, 60f64.max(4.0 * fill_s)))?;
     let readme = dir.join("README.md");
     std::fs::write(&readme, truchas_readme(alloy, volume * 1e-3, fill_s, mesh.blocks.len(), voxel))?;
-    Ok(vec![exo, inp, stl, readme])
+    Ok(vec![exo, inp, freeze, stl, readme])
 }
 
 /// A Truchas input deck for `mesh.exo` from `voxel_mold`. Units are SI
@@ -211,10 +215,13 @@ outside. Units SI, temperatures in K.
   body_force_density = 0.0, 0.0, -9.81
 /
 
+Freezing metal next to void needs the interface order that Truchas's
+htvoid3 test (flow, void and phase change together) gives.
 &FLOW
   inviscid = .true.
   courant_number = 0.4
   vol_track_subcycles = 2
+  material_priority = 'SOLID', '{tag}-liquid', 'VOID'
 /
 
 &FLOW_PRESSURE_SOLVER
@@ -355,6 +362,113 @@ Green sand, starting values.
     )
 }
 
+/// A Truchas deck for the freeze alone, on the same `mesh.exo`: heat only,
+/// the cavity full of liquid metal at the pour temperature from the start
+/// (an instant fill). Truchas crashes when void, flow and freezing meet
+/// (its own htvoid3 test is marked broken), so the freeze runs apart from
+/// the fill.
+pub fn truchas_freeze_deck(alloy: &Alloy, pour_temp: f64, end_s: f64) -> String {
+    let tag = alloy.name.split_whitespace().next().unwrap_or("metal").to_lowercase();
+    format!(
+        r#"Truchas input deck written by Anvil: the freeze of {name} poured at
+{pour_temp:.0} C, starting from a full cavity (instant fill). Same mesh as
+casting.inp. Units SI, temperatures in K.
+
+&MESH
+  mesh_file = 'mesh.exo'
+  coord_scale_factor = 0.001
+/
+
+&OUTPUTS
+  output_t  = 0.0, {end_s:.3}
+  output_dt = {out_dt:.4}
+/
+
+&PHYSICS
+  materials = 'sand', '{tag}'
+  heat_transport = .true.
+/
+
+&DIFFUSION_SOLVER
+  abs_temp_tol       = 0.0
+  rel_temp_tol       = 1.0e-3
+  abs_enthalpy_tol   = 0.0
+  rel_enthalpy_tol   = 1.0e-3
+  max_nlk_itr        = 5
+  nlk_tol            = 0.02
+  nlk_preconditioner = 'hypre_amg'
+/
+
+&NUMERICS
+  dt_init = 1.0e-3
+  dt_min  = 1.0e-8
+  dt_max  = 1.0
+  dt_grow = 1.2
+/
+
+&BODY
+  surface_name = 'from mesh file'
+  mesh_material_number = 1
+  material_name = 'sand'
+  temperature = 300.0
+/
+
+&BODY
+  surface_name = 'from mesh file'
+  mesh_material_number = 2
+  material_name = '{tag}-liquid'
+  temperature = {pour_k:.1}
+/
+
+&THERMAL_BC
+  name = 'outside'
+  face_set_ids = 1, 2, 3
+  type = 'htc'
+  htc = 10.0
+  ambient_temp = 300.0
+/
+
+&MATERIAL
+  name = 'sand'
+  density = 1600.0
+  specific_heat = 1100.0
+  conductivity = 0.7
+/
+
+&MATERIAL
+  name = '{tag}'
+  density = {rho_l:.0}
+  specific_heat = {cp:.0}
+  conductivity = {k:.1}
+  phases = '{tag}-solid', '{tag}-liquid'
+/
+
+&PHASE
+  name = '{tag}-liquid'
+/
+
+&PHASE_CHANGE
+  low_temp_phase  = '{tag}-solid'
+  high_temp_phase = '{tag}-liquid'
+  solidus_temp  = {solidus:.1}
+  liquidus_temp = {liquidus:.1}
+  latent_heat   = {latent:.0}
+/
+"#,
+        name = alloy.name,
+        end_s = end_s,
+        out_dt = (end_s / 20.0).max(1e-3),
+        tag = tag,
+        pour_k = pour_temp + 273.15,
+        rho_l = alloy.density_liquid,
+        cp = alloy.specific_heat,
+        k = alloy.conductivity,
+        solidus = alloy.solidus + 273.15,
+        liquidus = alloy.liquidus + 273.15,
+        latent = alloy.latent_heat * 1e3,
+    )
+}
+
 fn truchas_readme(alloy: &Alloy, volume_cm3: f64, fill_s: f64, cells: usize, voxel: f64) -> String {
     format!(
         r#"# Truchas case from Anvil
@@ -365,8 +479,11 @@ block 2 the empty cavity. Side set 1 is the pour inlet in the middle of the
 cup rim, side set 3 the rest of the rim, open to the room, and side set 2
 the rest of the outside.
 
-Run it with `truchas casting.inp`, or on several cores with
-`mpirun -np 8 truchas casting.inp`. Results go to `casting_output/` as an
+`casting.inp` is the fill (flow and heat). `freeze.inp` is the freeze on
+its own, starting from a full cavity: Truchas crashes when void, flow and
+freezing meet, so the two run apart. Run either with `truchas -f
+casting.inp`, or on several cores with `mpirun -np 8 truchas -f
+freeze.inp`. Results go to `casting_output/` as an
 HDF5 file. `scripts/truchas_fill.py casting_output/casting.h5` in the Anvil
 repository prints how full and how frozen the cavity is at each output
 time; `write-xdmf.py` from Truchas makes a file ParaView opens.

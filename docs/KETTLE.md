@@ -220,8 +220,37 @@ counts.
 pour. With it, the check reports the mold constant C = t / M^2 for that
 alloy and sand; enter it as the mold constant of both features.
 
-`anvil-cli kettle --variant gated` writes the Truchas case for the real
-fill and freeze run. The numbers are starting values from the survey in
+### Truchas (a real run)
+
+`anvil-cli kettle --variant gated --voxel 2` writes a Truchas case into
+`truchas/`: `mesh.exo`, an Exodus II voxel mesh of the mold (block 1 sand,
+block 2 the empty cavity, at least 30 mm of sand round it), and two decks.
+
+* `casting.inp` is the fill: flow and heat. Metal pours at the pour speed
+  through the middle of the cup top until a little past the expected
+  fill; the rest of the cup top is open to the room, so the air (void)
+  can leave.
+* `freeze.inp` is the freeze on its own, from a full cavity at the pour
+  temperature. Truchas crashes when void, flow and freezing meet (its own
+  htvoid3 test crashes the same way), so the two run apart.
+
+Both were checked against Truchas built from source on stalker, with a
+60 x 30 x 8 mm grey iron plate fed by a 12 mm sprue
+(`cargo run -p anvil-io --example truchas_plate`), at 2 mm voxels:
+
+| Run | Result |
+| --- | --- |
+| Fill, 4 cores, 1 s | Fills at the predicted rate, 9% per 0.05 s, full in 0.56 s; 91% at 1 s and 99.5% at 20 s as trapped air leaves |
+| Freeze, 16 cores, 1 minute | First solid at 6 s, half at 24 s, 99.7% at 60 s |
+| Last metal to freeze | Truchas: (17, 15, 6) mm, the sprue to plate junction; Hot spots: (7.5, 14.5, 6.5), the same junction, 10 mm nearer the sprue axis |
+
+`scripts/truchas_fill.py` prints the fill and freeze table from a run.
+Two things follow. The textbook mold constant of 1.5 s/mm2 gives this
+plate about 13 s to freeze; Truchas, with the sand properties in the deck,
+gives 60 s, which is a mold constant near 7 s/mm2. Calibrate from one pour
+before trusting either. And the kettle at 2 mm is 924,000 cells and about
+13 s per step on 32 cores, so its fill wants a day on one machine or a
+few hours on the cluster. The numbers are starting values from the survey in
 docs/research/casting_simulation.md and need one calibration pour.
 
 ## Known limits
@@ -238,6 +267,8 @@ docs/research/casting_simulation.md and need one calibration pour.
 
 ## Progress log
 
+* 2026-09-25: Truchas built and run: an Exodus voxel mold, a fill deck
+  and a separate freeze deck, checked on a plate casting.
 * 2026-09-25: Hot spots voxel model (fill, freezing order, isolated
   pockets) and calibration of the mold constant from a measured pour.
 * 2026-09-25: spout re-aimed to a 48 degree rise with a thin lip (Pipe

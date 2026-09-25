@@ -27,6 +27,14 @@ fn main() {
     let fill = volume * 1e-9 / (inlet * 1e-6 * speed);
     let end = if end > 0.0 { end } else { fill * 1.5 };
     std::fs::write(out.join("casting.inp"), anvil_io::casting::truchas_deck(&alloy, 1400.0, speed, fill, end)).unwrap();
+    std::fs::write(out.join("freeze.inp"), anvil_io::casting::truchas_freeze_deck(&alloy, 1400.0, 60.0)).unwrap();
+    // Anvil's own estimate of where the metal freezes last, to set
+    // beside the Truchas freeze.
+    let a = anvil_feature::features::hot_spots::analyse(&[&plate, &sprue], &[], &[], None, 1.0).unwrap();
+    println!(
+        "Hot spots: the last metal to freeze is {:.1} mm from the mold at ({:.1}, {:.1}, {:.1})",
+        a.d_max, a.at_max.x, a.at_max.y, a.at_max.z
+    );
     println!(
         "{} cells, cavity {:.1} cm3, inlet {:.0} mm2, fills in {:.2} s, runs to {:.2} s",
         mesh.blocks.len(),
