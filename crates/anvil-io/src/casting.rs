@@ -345,13 +345,15 @@ fn truchas_readme(alloy: &Alloy, volume_cm3: f64, fill_s: f64, cells: usize, vox
 
 Cavity {volume_cm3:.0} cm3 of {name}, fills in about {fill_s:.1} s at the
 pour speed. mesh.exo has {cells} hex cells of {voxel} mm: block 1 sand,
-block 2 the empty cavity; side set 1 is the inlet at the cup rim, side set 2
+block 2 the empty cavity. Side set 1 is the pour inlet in the middle of the
+cup rim, side set 3 the rest of the rim, open to the room, and side set 2
 the rest of the outside.
 
 Run it with `truchas casting.inp`, or on several cores with
 `mpirun -np 8 truchas casting.inp`. Results go to `casting_output/` as an
-HDF5 file; `write-xdmf.py` from Truchas turns them into a file ParaView
-opens.
+HDF5 file. `scripts/truchas_fill.py casting_output/casting.h5` in the Anvil
+repository prints how full and how frozen the cavity is at each output
+time; `write-xdmf.py` from Truchas makes a file ParaView opens.
 
 The material numbers are starting values from
 docs/research/casting_simulation.md. Calibrate the mold heat transfer and
