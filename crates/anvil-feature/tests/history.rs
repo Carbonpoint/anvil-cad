@@ -343,11 +343,10 @@ fn glyphs_with_counters_tessellate_to_the_right_area() {
     }
 }
 
-/// Known issue: ear clipping inverts one triangle in some glyphs with
-/// counters (visible as a notch in R). A fix that passed this test
-/// changed boolean results elsewhere and was reverted; see PROGRESS.md.
+/// Ear clipping once inverted one triangle in glyphs with counters (a
+/// notch in R): an ear was accepted with a bridge copy of a reflex point
+/// on its corner. Ears now check reflex points on the boundary too.
 #[test]
-#[ignore = "known triangulation fault in glyphs with counters"]
 fn glyph_cap_triangles_all_face_the_same_way() {
     use anvil_feature::features::emboss::{nest_loops, text_outlines};
     use anvil_feature::fonts;
