@@ -2,6 +2,8 @@
 
 Newest first. One line per work session or milestone.
 
+- 2026-09-25: CAM (pocket with islands, drilling cycles, posts for generic, LinuxCNC, GRBL, Fanuc, Haas; offsets through cavalier_contours; File > Export > CAM window). Truchas built on stalker and run: Exodus II voxel mold written by anvil_io::exodus, a fill deck and a separate freeze deck (void plus freezing crashes Truchas), checked on a plate casting (docs/KETTLE.md). Fillet and Chamfer edges persist through edits; beam lattices grade cell size; Center of Mass reports the inertia tensor. Open: the kettle's full Truchas fill (a cluster job), OCCT kernel, native container, Rhai, LOD, WASM plugins, adaptive clearing, 3-axis CAM, stock simulation.
+
 - 2026-09-25: Planned features: Shell (open face as a plane reference) and Draft (neutral plane) in the kernel via a shared replane step; Insert SVG and SVG in the sketch import; construction Axis and Point features, drawn in the view with the construction planes, and axis features for Circular Pattern and Revolve; Loft lines up sections in space (no twist on turned planes); Sweep takes Regions (a ring sweeps to a tube); Loft picks the largest region, then the nearest. Casting: Hot spots voxel model and mold constant calibration; kettle spout at a 48 degree rise with a thin lip (Pipe lip).
 
 - 2026-09-25: Kettle match plate (`kettle::kettle_match_plate`, Examples > Match plate, `anvil-cli kettle --variant match`): the pattern halves on a 12 mm plate with the runner, ingate and a side riser in the plate plane, split between the halves, and a loose sprue pin on the cope side. `mold_pattern()` is shared with the mold sample. Glyph ear clipping fixed (earcut rule for reflex points on an ear's boundary); the ignored glyph test runs again.
