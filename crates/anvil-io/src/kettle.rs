@@ -81,40 +81,35 @@ fn dome_surface(body: &Solid, z_lo: f64, z_hi: f64) -> Option<u32> {
         .map(|(id, _)| id)
 }
 
-fn circumcentre(a: DVec2, b: DVec2, c: DVec2) -> DVec2 {
-    let d = 2.0 * (a.x * (b.y - c.y) + b.x * (c.y - a.y) + c.x * (a.y - b.y));
-    let ux = ((a.x * a.x + a.y * a.y) * (b.y - c.y)
-        + (b.x * b.x + b.y * b.y) * (c.y - a.y)
-        + (c.x * c.x + c.y * c.y) * (a.y - b.y))
-        / d;
-    let uy = ((a.x * a.x + a.y * a.y) * (c.x - b.x)
-        + (b.x * b.x + b.y * b.y) * (a.x - c.x)
-        + (c.x * c.x + c.y * c.y) * (b.x - a.x))
-        / d;
-    DVec2::new(ux, uy)
-}
-
-/// Arc sketch on the XZ plane along the spout centreline, from angle
-/// `a0` to `a1` (radians) about the spout circle, clockwise from the body
-/// to the tip. `extend` widens the arc at both ends by that many radians.
+/// Arc sketch on the XZ plane along the spout centreline, from inside the
+/// wall to the tip. The arc is set by its two ends and the rise of the
+/// spout at the tip: 40 to 50 degrees pours cleanly, a steeper tip makes
+/// the kettle tilt far and the water run down the outside. The arc is
+/// longer by `extend_start` and `extend_end` millimetres at its ends.
 fn spout_path(extend_start: f64, extend_end: f64) -> SketchFeature {
-    // Three points the spout centreline passes through: inside the wall,
-    // mid, tip (r, z in mm). The centre of the arc lies above and left.
+    // Start inside the wall and the tip, as (r, z) in mm.
     let s = DVec2::new(60.0, 56.0);
-    let m = DVec2::new(80.0, 66.0);
-    let t = DVec2::new(94.0, 90.0);
-    let c = circumcentre(s, m, t);
-    let r = (s - c).length();
+    let t = DVec2::new(97.0, 88.0);
+    let rise = SPOUT_RISE_DEG.to_radians();
+    // The centre lies on the normal at the tip, to the left of travel, at
+    // the distance that makes the arc pass through the start too.
+    let n = DVec2::new(-rise.sin(), rise.cos());
+    let k = -(t - s).length_squared() / (2.0 * (t - s).dot(n));
+    let c = t + n * k;
+    let r = k.abs();
     let a_s = (s - c).y.atan2((s - c).x);
     let a_t = (t - c).y.atan2((t - c).x);
     // Counter-clockwise from the start to the tip is the short way round.
-    let a_start = a_s - extend_start;
-    let a_end = a_t + extend_end;
+    let a_start = a_s - extend_start / r;
+    let a_end = a_t + extend_end / r;
     let p = |a: f64| c + DVec2::new(r * a.cos(), r * a.sin());
     let mut sk = SketchFeature::on_datum("XZ");
     sk.sketch.add_arc_center(c, p(a_start), p(a_end));
     sk
 }
+
+/// Rise of the spout at its tip, in degrees above horizontal.
+pub const SPOUT_RISE_DEG: f64 = 48.0;
 
 /// The kettle: body, bail, and lid as three bodies.
 pub fn kettle() -> Document {
@@ -127,6 +122,10 @@ pub fn kettle() -> Document {
         ("spout_tip", "15"),
         ("bore_d", "18"),
         ("bore_tip", "11"),
+        // The last lip_len mm of the spout narrow to a thin lip, 0.8 mm
+        // over the bore at the tip, so the water leaves cleanly.
+        ("lip_len", "8"),
+        ("lip_d", "13.4"),
         ("bail_d", "8"),
         ("lug_hole", "4.5"),
         ("segments", "96"),
@@ -170,7 +169,13 @@ pub fn kettle() -> Document {
         .unwrap_or(0);
     // 2, 3, 4: spout path, tapered pipe, join.
     doc.add_feature(Box::new(spout_path(0.0, 0.0)));
-    doc.add_feature(Box::new(PipeFeature { path: 2, diameter: "spout_d".into(), end_diameter: "spout_tip".into() }));
+    doc.add_feature(Box::new(PipeFeature {
+        path: 2,
+        diameter: "spout_d".into(),
+        end_diameter: "spout_tip".into(),
+        lip_length: "lip_len".into(),
+        lip_diameter: "lip_d".into(),
+    }));
     doc.add_feature(Box::new(CombineFeature { body: 1, tool: 3, op: "join".into() }));
     // 5, 6, 7: a wedge of the cavity, 0.3 mm inside the wall and 40 degrees
     // wide around the spout, removes the spout stub inside the kettle. A
@@ -202,8 +207,13 @@ pub fn kettle() -> Document {
     }));
     doc.add_feature(Box::new(CombineFeature { body: 4, tool: 6, op: "cut".into() }));
     // 8, 9, 10: bore through the wall and out of the tip.
-    doc.add_feature(Box::new(spout_path(0.12, 0.16)));
-    doc.add_feature(Box::new(PipeFeature { path: 8, diameter: "bore_d".into(), end_diameter: "bore_tip".into() }));
+    doc.add_feature(Box::new(spout_path(5.3, 7.0)));
+    doc.add_feature(Box::new(PipeFeature {
+        path: 8,
+        diameter: "bore_d".into(),
+        end_diameter: "bore_tip".into(),
+        ..Default::default()
+    }));
     doc.add_feature(Box::new(CombineFeature { body: 7, tool: 9, op: "cut".into() }));
     // 11, 12: lugs for the bail, two bosses on the shoulder along Y.
     let mut lugs = SketchFeature::on_plane(Plane { origin: DVec3::new(0.0, 5.0, 0.0), ..Plane::XZ });
@@ -436,8 +446,13 @@ fn mold_pattern() -> TimedDoc {
     }));
     // 28 to 31: core = cavity + print + spout bore (its end past the tip is the print).
     doc.add_feature(Box::new(CombineFeature { body: 25, tool: 27, op: "join".into() }));
-    doc.add_feature(Box::new(spout_path(0.12, 0.16)));
-    doc.add_feature(Box::new(PipeFeature { path: 29, diameter: "bore_d".into(), end_diameter: "bore_tip".into() }));
+    doc.add_feature(Box::new(spout_path(5.3, 7.0)));
+    doc.add_feature(Box::new(PipeFeature {
+        path: 29,
+        diameter: "bore_d".into(),
+        end_diameter: "bore_tip".into(),
+        ..Default::default()
+    }));
     doc.add_feature(Box::new(CombineFeature { body: 28, tool: 30, op: "join".into() }));
     // 32, 33: the outer shape as a solid, the start of the pattern.
     let mut outer_sk = SketchFeature::on_datum("XZ");
@@ -608,7 +623,12 @@ pub fn kettle_match_plate() -> Document {
     let b = riser_path.sketch.add_point(110.0, 25.0);
     riser_path.sketch.add_line(a, b);
     doc.add_feature(Box::new(riser_path));
-    doc.add_feature(Box::new(PipeFeature { path: 43, diameter: "36".into(), end_diameter: "0".into() }));
+    doc.add_feature(Box::new(PipeFeature {
+        path: 43,
+        diameter: "36".into(),
+        end_diameter: "0".into(),
+        ..Default::default()
+    }));
     // 45 to 48: the gating joined onto the pattern.
     doc.add_feature(Box::new(CombineFeature { body: 39, tool: 40, op: "join".into() }));
     doc.add_feature(Box::new(CombineFeature { body: 45, tool: 41, op: "join".into() }));
@@ -642,7 +662,12 @@ pub fn kettle_match_plate() -> Document {
     let b = sprue_path.sketch.add_point(-135.0, 126.0);
     sprue_path.sketch.add_line(a, b);
     doc.add_feature(Box::new(sprue_path));
-    doc.add_feature(Box::new(PipeFeature { path: 54, diameter: "12".into(), end_diameter: "18".into() }));
+    doc.add_feature(Box::new(PipeFeature {
+        path: 54,
+        diameter: "12".into(),
+        end_diameter: "18".into(),
+        ..Default::default()
+    }));
     // 56 to 59: the plate with everything on it, set beside the kettle.
     doc.set_expression("plate_y", "200").ok();
     for body in [51, 52, 53, 55] {
@@ -732,6 +757,7 @@ mod tests {
             assert!(over < 400, "{over} edges shared by more than two faces");
         }
         let bb = bodies[0].bounds();
+        eprintln!("spout tip reaches x = {:.1}, body {:.0} mm3", bb.max.x, body);
         assert!(bb.max.x > 98.0 && bb.max.x < 104.0, "spout tip reaches x = {}", bb.max.x);
         assert!(secs < 60.0, "kettle took {secs:.1} s");
     }

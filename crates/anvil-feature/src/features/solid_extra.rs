@@ -98,6 +98,13 @@ pub struct PipeFeature {
     /// Diameter at the far end of the path. `0` keeps `diameter` all along.
     #[serde(default = "zero_expr")]
     pub end_diameter: String,
+    /// Length of a lip at the far end: over this last stretch of the path
+    /// the outside eases down to `lip_diameter`, starting tangent to the
+    /// taper. `0` means no lip. A spout pours cleanly from a thin lip.
+    #[serde(default = "zero_expr")]
+    pub lip_length: String,
+    #[serde(default = "zero_expr")]
+    pub lip_diameter: String,
 }
 
 fn zero_expr() -> String {
@@ -106,8 +113,39 @@ fn zero_expr() -> String {
 
 impl Default for PipeFeature {
     fn default() -> Self {
-        PipeFeature { path: 0, diameter: "4".into(), end_diameter: "0".into() }
+        PipeFeature {
+            path: 0,
+            diameter: "4".into(),
+            end_diameter: "0".into(),
+            lip_length: "0".into(),
+            lip_diameter: "0".into(),
+        }
     }
+}
+
+/// The path with extra points over its last `length`, `n` steps at least,
+/// so a lip there is smooth.
+fn refine_end(path: &[DVec3], length: f64, n: usize) -> Vec<DVec3> {
+    let mut out = vec![path[0]];
+    let total: f64 = path.windows(2).map(|w| (w[1] - w[0]).length()).sum();
+    let start = (total - length).max(0.0);
+    let step = length / n as f64;
+    let mut at = 0.0;
+    for w in path.windows(2) {
+        let seg = (w[1] - w[0]).length();
+        if at + seg > start && seg > step {
+            let k = (seg / step).ceil() as usize;
+            for i in 1..k {
+                let f = i as f64 / k as f64;
+                if at + seg * f > start {
+                    out.push(w[0].lerp(w[1], f));
+                }
+            }
+        }
+        out.push(w[1]);
+        at += seg;
+    }
+    out
 }
 
 #[typetag::serde(name = "pipe")]
@@ -123,6 +161,8 @@ impl Feature for PipeFeature {
             ParamSpec::feature_ref("path", "Path sketch", vec!["sketch"], self.path),
             ParamSpec::length("diameter", "Diameter", &self.diameter),
             ParamSpec::length("end_diameter", "Diameter at end (0 = same)", &self.end_diameter),
+            ParamSpec::length("lip_length", "Lip length (0 = none)", &self.lip_length),
+            ParamSpec::length("lip_diameter", "Lip diameter", &self.lip_diameter),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
@@ -130,6 +170,8 @@ impl Feature for PipeFeature {
             ("path", ParamValue::FeatureRef(i)) => self.path = i,
             ("diameter", ParamValue::Expr(s)) => self.diameter = s,
             ("end_diameter", ParamValue::Expr(s)) => self.end_diameter = s,
+            ("lip_length", ParamValue::Expr(s)) => self.lip_length = s,
+            ("lip_diameter", ParamValue::Expr(s)) => self.lip_diameter = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
@@ -138,20 +180,40 @@ impl Feature for PipeFeature {
         let paths = ctx.paths_of(self.path)?;
         let r = ctx.eval(&self.diameter)? / 2.0;
         let r_end = ctx.eval(&self.end_diameter)? / 2.0;
+        let lip_len = ctx.eval(&self.lip_length)?;
+        let r_lip = ctx.eval(&self.lip_diameter)? / 2.0;
+        if lip_len > 0.0 && r_lip <= 0.0 {
+            return Err(RegenError::Other("a lip needs a lip diameter above 0".into()));
+        }
         let mut bodies = Vec::new();
         for path in &paths {
+            // A lip needs path points close together near the end.
+            let path = if lip_len > 0.0 { refine_end(path, lip_len, 12) } else { path.clone() };
+            let path = &path;
             let t = (path[1] - path[0]).normalize_or_zero();
             let helper = if t.dot(DVec3::Z).abs() < 0.9 { DVec3::Z } else { DVec3::X };
             let x = helper.cross(t).normalize();
             let plane = Plane { origin: path[0], x_axis: x, y_axis: t.cross(x) };
-            // Taper by arc length from `diameter` to `end_diameter`.
-            let scales: Vec<f64> = if r_end > 0.0 && r > 0.0 {
-                let mut cum = vec![0.0];
-                for w in path.windows(2) {
-                    cum.push(cum.last().unwrap() + (w[1] - w[0]).length());
+            let mut cum = vec![0.0];
+            for w in path.windows(2) {
+                cum.push(cum[cum.len() - 1] + (w[1] - w[0]).length());
+            }
+            let total = cum[cum.len() - 1].max(1e-9);
+            // Radius along the path: the taper from `diameter` to
+            // `end_diameter`, then over the lip a quadratic ease that
+            // starts tangent to the taper and ends at the lip radius.
+            let taper = |c: f64| if r_end > 0.0 { r + (r_end - r) * c / total } else { r };
+            let lip_start = (total - lip_len).max(0.0);
+            let radius = |c: f64| {
+                if lip_len > 0.0 && c > lip_start {
+                    let f = (c - lip_start) / (total - lip_start).max(1e-9);
+                    taper(c) - (taper(total) - r_lip) * f * f
+                } else {
+                    taper(c)
                 }
-                let total = cum.last().copied().unwrap_or(1.0).max(1e-9);
-                cum.iter().map(|c| 1.0 + (r_end / r - 1.0) * c / total).collect()
+            };
+            let scales: Vec<f64> = if r > 0.0 && (r_end > 0.0 || lip_len > 0.0) {
+                cum.iter().map(|&c| radius(c) / r).collect()
             } else {
                 Vec::new()
             };
@@ -502,3 +564,59 @@ inventory::submit! { FeatureDescriptor { id: "import_step", label: "Import STEP"
 inventory::submit! { FeatureDescriptor { id: "split_body", label: "Split Body", tab: "Solid", group: "Modify", tooltip: "Cut a body with a plane", order: 45, create: || Box::new(SplitBodyFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "plane_3pt", label: "Plane 3 Points", tab: "Solid", group: "Construct", tooltip: "Plane through three points", order: 2, create: || Box::new(Plane3PointsFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "midplane", label: "Midplane", tab: "Solid", group: "Construct", tooltip: "Plane halfway between two planes", order: 3, create: || Box::new(MidplaneFeature::default()) } }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::features::sketch::SketchFeature;
+    use crate::Document;
+
+    /// A 50 mm straight pipe along X, 24 mm tapering to 15 mm.
+    fn pipe(lip_length: &str, lip_diameter: &str) -> (Document, usize) {
+        let mut doc = Document::new("pipe");
+        let mut sk = SketchFeature::on_datum("XY");
+        let a = sk.sketch.add_point(0.0, 0.0);
+        let b = sk.sketch.add_point(50.0, 0.0);
+        sk.sketch.add_line(a, b);
+        doc.add_feature(Box::new(sk));
+        let i = doc.add_feature(Box::new(PipeFeature {
+            path: 0,
+            diameter: "24".into(),
+            end_diameter: "15".into(),
+            lip_length: lip_length.into(),
+            lip_diameter: lip_diameter.into(),
+        }));
+        (doc, i)
+    }
+
+    #[test]
+    fn a_lip_thins_only_the_end_of_the_pipe() {
+        let (plain, i) = pipe("0", "0");
+        let (lipped, j) = pipe("8", "13.4");
+        let body = |d: &Document, k: usize| d.features[k].output.as_ref().unwrap().bodies[0].clone();
+        let (p, l) = (body(&plain, i), body(&lipped, j));
+        assert!(lipped.features[j].error.is_none(), "{:?}", lipped.features[j].error);
+        // The ring at the far end has the lip radius.
+        let end_r = |s: &anvil_kernel::Solid| {
+            s.vertices
+                .values()
+                .filter(|v| (v.pos.x - 50.0).abs() < 1e-6)
+                .map(|v| v.pos.y.hypot(v.pos.z))
+                .fold(0.0, f64::max)
+        };
+        assert!((end_r(&p) - 7.5).abs() < 1e-6, "{}", end_r(&p));
+        assert!((end_r(&l) - 6.7).abs() < 1e-6, "{}", end_r(&l));
+        // Before the lip the pipe is unchanged; the lip takes a little off.
+        let before = |s: &anvil_kernel::Solid| {
+            s.vertices
+                .values()
+                .filter(|v| (v.pos.x - 30.0).abs() < 1.0)
+                .map(|v| v.pos.y.hypot(v.pos.z))
+                .fold(0.0, f64::max)
+        };
+        assert!((before(&p) - before(&l)).abs() < 1e-9);
+        let (vp, vl) = (p.volume(), l.volume());
+        assert!(vl < vp && vl > vp * 0.97, "{vl} vs {vp}");
+        assert!(l.open_edges().is_empty());
+    }
+}

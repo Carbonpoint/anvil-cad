@@ -372,6 +372,11 @@ Pipe has a second value, Diameter at end. Leave it at 0 for one
 diameter along the whole path. Set it for a spout that narrows toward
 the tip: the section scales linearly by arc length.
 
+Lip length and Lip diameter give the far end a thin lip. Over the last
+Lip length of the path, the outside eases down to Lip diameter, starting
+tangent to the taper. A spout with a thin, sharp lip pours without
+dripping. Leave Lip length at 0 for no lip.
+
 ## Kettle sample
 
 Examples > Kettle loads a cast iron kettle: body, bail, and lid as

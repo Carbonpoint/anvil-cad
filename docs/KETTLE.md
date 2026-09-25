@@ -25,8 +25,20 @@ the mold. Stage 5 is the simulation.
 
 Spout: the shape must pour without dripping. The rules of thumb are a
 sharp thin lip, a bore that narrows toward the tip, an outlet above the
-full water level, and a rise of 40 to 50 degrees. The spout is parametric
-so these can be tuned, and stage 5 can test pouring later.
+full water level, and a rise of 40 to 50 degrees. The sample meets them:
+
+* **Rise:** 48 degrees at the tip (`SPOUT_RISE_DEG`). The first spout rose
+  78 degrees at the tip, which makes the kettle tilt far before it pours
+  and lets the water run down the outside.
+* **Lip:** over the last 8 mm (`lip_len`) the outside eases from the
+  taper down to 13.4 mm (`lip_d`), which leaves a 0.8 mm edge over the
+  11.8 mm bore at the tip. The Pipe feature does this with its lip
+  length and lip diameter, so the mold pattern gets the same lip.
+* **Bore:** narrows from 18 mm to 11 mm.
+* **Outlet:** the tip sits at z = 88 mm, above the ridge and 6 mm under
+  the collar, so the kettle fills to just under the outlet.
+
+Stage 5 can test the pouring later.
 
 ## Design decisions
 
@@ -68,8 +80,8 @@ against the full mesh, so the result is still exact.
 Examples > Casting samples > Kettle, or `anvil_io::kettle::kettle()`. The document
 builds in about 4 seconds on a workstation and renders in under a
 second. Three bodies: body 208 cm3 (1.50 kg in cast iron), bail 15 cm3,
-lid 27 cm3. The spout tip reaches x = 101 mm, so the kettle is 181 mm
-wide, the bail apex is at 189 mm.
+lid 27 cm3. The spout tip reaches x = 101.8 mm, so the kettle is about
+182 mm wide, the bail apex is at 189 mm.
 
 ![Kettle](kettle.png)
 
@@ -186,7 +198,6 @@ docs/research/casting_simulation.md and need one calibration pour.
   edges shared by more than two faces, the lid about 100. There are no
   open edges, so slicers accept the meshes. ADR 0001 (a tolerant kernel)
   is the real fix.
-* The spout is a plain tapered tube. The lip is not thinned yet.
 * The match plate layout is a first cut: the gate and riser sizes come
   from the textbook ratios of the casting check, not from a flow run.
 * An edit reruns the edited feature and everything after it. Put the
@@ -195,6 +206,8 @@ docs/research/casting_simulation.md and need one calibration pour.
 
 ## Progress log
 
+* 2026-09-25: spout re-aimed to a 48 degree rise with a thin lip (Pipe
+  lip length and lip diameter).
 * 2026-09-25: match plate sample with the gating split between the
   halves; plane references let Split Body use a picked face.
 * 2026-09-16: plan written. Reference photos reviewed.
