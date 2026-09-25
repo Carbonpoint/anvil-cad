@@ -995,6 +995,14 @@ impl AnvilApp {
                 self.file_path = format!("workbook_{}.anvil", &name[..2]);
                 self.status = format!("Workbook {name} loaded. Steps in docs/WORKBOOK.md.");
             }
+            RibbonAction::InsertSvg => {
+                let picked =
+                    rfd::FileDialog::new().set_title("Insert SVG").add_filter("SVG drawing", &["svg"]).pick_file();
+                match picked {
+                    Some(p) => self.insert_svg(&p),
+                    None => self.status = "Insert SVG cancelled".into(),
+                }
+            }
             RibbonAction::SetSelectFilter(n) => {
                 self.filter = match n {
                     0 => SelectFilter::All,
@@ -1135,6 +1143,31 @@ impl AnvilApp {
         self.selected_face = None;
         self.invalidate();
         self.status = "Press Pull added as a new body. Set its distance in Properties (negative goes inward).".into();
+    }
+
+    /// Add the SVG drawing at `path` as a new sketch, on the selected face
+    /// or on XY, and open it.
+    pub fn insert_svg(&mut self, path: &std::path::Path) {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = format!("Insert SVG: {e}");
+                return;
+            }
+        };
+        let plane = self.selected_face.and_then(|(_, _, tri)| self.scene.face_plane(&self.doc, tri));
+        let mut sk = match plane {
+            Some(p) => SketchFeature::on_plane(p),
+            None => SketchFeature::on_datum("XY"),
+        };
+        match anvil_feature::import::svg::import(&text, &mut sk.sketch) {
+            Ok(n) => {
+                self.selected_face = None;
+                self.start_sketch_on(Box::new(sk));
+                self.status = format!("Inserted {n} shapes from {}", path.display());
+            }
+            Err(e) => self.status = format!("Insert SVG: {e}"),
+        }
     }
 
     fn sketch_on_selected_face(&mut self) {
@@ -1440,10 +1473,20 @@ impl AnvilApp {
             ui.separator();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut ed.dxf_path).desired_width(110.0).hint_text("file.dxf"));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut ed.dxf_path).desired_width(110.0).hint_text("file.dxf or .svg"),
+                    );
+                    if ui.button("Browse").clicked() {
+                        if let Some(p) = rfd::FileDialog::new().add_filter("Drawing", &["dxf", "svg"]).pick_file() {
+                            ed.dxf_path = p.display().to_string();
+                            import_dxf = true;
+                        }
+                    }
                     if ui
-                        .button("Import DXF")
-                        .on_hover_text("Add lines, arcs, circles, and polylines from a DXF file (mm)")
+                        .button("Import")
+                        .on_hover_text(
+                            "Add the drawing: DXF lines, arcs, circles and polylines (mm), or SVG shapes and paths",
+                        )
                         .clicked()
                     {
                         import_dxf = true;

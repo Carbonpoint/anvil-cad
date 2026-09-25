@@ -73,6 +73,8 @@ pub enum RibbonAction {
     Interference,
     /// What a click in the view picks: 0 All, 1 Body, 2 Face, 3 Edge.
     SetSelectFilter(u8),
+    /// Pick an SVG file and add it as a new sketch.
+    InsertSvg,
 }
 
 pub struct RibbonButton {
@@ -151,6 +153,7 @@ impl RibbonAction {
             RibbonAction::KettleMold => "kettle_mold",
             RibbonAction::KettleMatchPlate => "kettle_match_plate",
             RibbonAction::Interference => "interference",
+            RibbonAction::InsertSvg => "insert_svg",
             RibbonAction::SetSelectFilter(0) => "select_all",
             RibbonAction::SetSelectFilter(1) => "select_body",
             RibbonAction::SetSelectFilter(2) => "select_face",
@@ -197,7 +200,7 @@ const PINNED: &[(&str, &str, &[&str])] = &[
     ("Solid", "Create", &["sketch", "extrude", "revolve", "hole"]),
     ("Solid", "Modify", &["press_pull", "fillet", "chamfer", "combine"]),
     ("Solid", "Construct", &["offset_plane", "midplane"]),
-    ("Solid", "Insert", &["mesh"]),
+    ("Solid", "Insert", &["mesh", "import_step", "insert_svg"]),
     ("Solid", "Casting", &["sprue", "runner", "riser", "casting_check"]),
     ("Field", "Fill", &["lattice_fill"]),
     ("Field", "Generate", &["aircraft", "density_body"]),
@@ -224,6 +227,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
     use ButtonKind::Action as A;
     use RibbonAction::*;
     vec![
+        (
+            "Solid",
+            "Insert",
+            RibbonButton::new(
+                "Insert SVG",
+                "Add an SVG drawing as a new sketch, on the selected face or on XY",
+                2,
+                A(InsertSvg),
+            ),
+        ),
         ("File", "Document", RibbonButton::new("New", "Start an empty document", 0, A(NewDocument))),
         (
             "File",

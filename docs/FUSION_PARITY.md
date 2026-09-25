@@ -305,7 +305,8 @@ Status is Done, Partial, or Missing. Partial means the command exists on the rib
 | Insert Mesh (STL) | Done | |
 | QR Code | Done | Bundled generator, not an installed add-in |
 | Insert DXF | Done | Into the active sketch |
-| Canvas, Decal, Insert SVG, Insert McMaster-Carr Component | Missing | |
+| Insert SVG | Done | Paths, rects, circles, ellipses, lines and polygons with transforms, into a new sketch on the selected face or XY; the sketch editor imports DXF or SVG |
+| Canvas, Decal, Insert McMaster-Carr Component | Missing | |
 
 ### Solid > Select
 

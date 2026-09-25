@@ -8,8 +8,10 @@
 mod curved;
 pub mod step;
 mod surface;
+pub mod svg;
 mod tess;
 pub mod threemf;
+pub mod xml;
 mod zip;
 
 use anvil_kernel::{Solid, TriMesh};

@@ -366,6 +366,17 @@ that would reach a cut edge or the end of the surface are dropped whole,
 like dots. On a vertical wall printed upright the tubes are small
 overhangs that need no support.
 
+## Insert SVG
+
+Solid > Insert > Insert SVG asks for an SVG file and adds it as a new
+sketch, on the selected face or on XY. Paths (lines, curves and arcs),
+rectangles (with rounded corners), circles, ellipses, lines, polylines
+and polygons are read, with their transforms. The size comes from the
+file's width and viewBox; a file in px is taken at 96 px per inch.
+Curves become short lines within 0.05 mm, and a circle stays a circle.
+Closed shapes are profiles, ready to extrude. In the sketch editor,
+Import reads a DXF or an SVG file into the open sketch.
+
 ## Shell
 
 Shell (Solid > Modify) hollows a body and leaves walls of one thickness.

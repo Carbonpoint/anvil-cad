@@ -323,6 +323,11 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.poly_closed(&[(0.5, 0.12), (0.64, 0.34), (0.6, 0.52), (0.5, 0.58), (0.4, 0.52), (0.36, 0.34)]);
             c.dot((0.5, 0.45));
         }
+        "insert_svg" => {
+            c.rect((0.15, 0.2), (0.85, 0.8));
+            c.arc((0.5, 0.62), 0.22, std::f32::consts::PI, std::f32::consts::TAU);
+            c.line((0.28, 0.62), (0.72, 0.62));
+        }
         "import_step" => {
             c.poly_closed(&[(0.2, 0.4), (0.5, 0.25), (0.8, 0.4), (0.8, 0.75), (0.5, 0.9), (0.2, 0.75)]);
             c.arrow((0.5, 0.05), (0.5, 0.55));
