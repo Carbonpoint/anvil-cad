@@ -15,6 +15,29 @@ The same window in the dark scheme (View > Settings > Theme):
 
 ![The Anvil window, dark](images/ui_window_dark.png)
 
+### The ribbon
+
+![The Solid tab of the ribbon](images/ui_ribbon_solid.png)
+
+The ribbon works like Fusion's. The tabs are File, Solid, Field,
+Inspect, View and Examples. Each tab is one row of panels. A panel shows
+a few icons for its most used commands. The name under the icons is a
+menu. Click it to see every command of the panel, with its key on the
+right.
+
+The keys work in the model view while no text box has the keyboard:
+
+| Key | Command |
+|---|---|
+| E | Extrude |
+| H | Hole |
+| Q | Press Pull on the selected face |
+| F | Fillet on the selected edges |
+| Del | Delete the selected feature |
+
+The Select panel on the Solid tab sets what a click in the view picks:
+All, Body, Face or Edge. The status bar shows the current choice.
+
 Every picture on this page is rendered from the application itself with
 `scripts/ui_shots.sh`, so it matches the code that made it.
 
@@ -91,7 +114,7 @@ swallowed can still be seen this way.
 ## Fillet, chamfer, and edges
 
 1. Click an edge in the viewport. It turns orange. Ctrl+click adds more
-   edges. The Select filter in the status bar can limit clicks to edges.
+   edges. The Select panel (Solid > SELECT) can limit clicks to edges.
 2. Press F, or Solid > Fillet or Chamfer. The feature uses the selected
    edges and their body. Set the radius or distance in Properties.
 3. To change the edges later, select the Fillet feature, click new edges,
@@ -239,10 +262,45 @@ Mirror, and the patterns take a body feature as input; they default to the
 selected feature. Measure shows the volume and bounding box in the status
 bar.
 
-## Casting tab
+## Open files from other CAD tools
 
-The Casting tab holds three features for laying out a sand casting gating
-system. Each one makes a single body, in the Gating group.
+File > Open reads an Anvil document, and it also imports:
+
+* **STEP** (`.step`, `.stp`). The file becomes an Import STEP feature
+  with one body per solid in the file. Flat faces and faces on
+  cylinders, cones, spheres, tori, B-spline surfaces, extrusions and
+  surfaces of revolution are read. A face that cannot be read is
+  skipped, and Properties names it, so a part with a missing face is
+  never silent.
+* **3MF** and **STL**. The file becomes an Insert Mesh feature.
+
+To bring a Fusion part in, open it in Fusion, then File > Export and
+choose STEP. Anvil cannot read `.f3d` files: that format is Autodesk's
+own and has no public description.
+
+An imported part saves next to its source file as `.anvil`. Solid >
+Insert has the same two features for adding a file to an open document.
+
+## Planes from faces
+
+Midplane, Offset Plane, Plane at Angle and Split Body each take a plane.
+The plane can be a datum (XY, XZ, YZ), a plane Feature, or a flat face of
+a body.
+
+1. Select the feature. Properties shows the plane with a dropdown.
+2. Choose a datum or a plane Feature from the dropdown, or click
+   **Pick in view**.
+3. While picking, click a flat face or a datum square. Escape cancels.
+
+A picked face is kept by its position, not by a number. When an earlier
+feature changes, Anvil finds the face again, so a Midplane between the
+top and the bottom of an Extrude follows its distance. When the face is
+gone, the last known plane is kept and Properties says so.
+
+## Casting panel
+
+The Casting panel of the Solid tab holds three features for laying out a sand casting gating
+system. Each one makes a single body.
 
 **Sprue.** The channel that carries poured metal down into the mold. Set
 the x and y position of its vertical axis and the z of its top rim. It is
@@ -319,7 +377,7 @@ the tip: the section scales linearly by arc length.
 Examples > Kettle loads a cast iron kettle: body, bail, and lid as
 three bodies. It uses the pattern, the tapered pipe, the wedge cut, the
 lug bosses, and the holes. Kettle + gating adds a sprue, a runner, an
-ingate, and a riser from the Casting tab. Read docs/KETTLE.md for the
+ingate, and a riser from the Casting panel of the Solid tab. Read docs/KETTLE.md for the
 dimensions, the build order, and the casting plan.
 
 ## Settings
@@ -380,7 +438,7 @@ and the Fidget back end.
 
 ## Lattice fill
 
-Lattice fill (Solid tab, Field group) replaces the inside of a body with
+Lattice fill (Field tab) replaces the inside of a body with
 a lattice under a solid skin, the way nTop lightens a part. Pick the
 body, choose the lattice, and set the cell size, the thickness (sheet
 wall or beam diameter), the skin thickness, and the resolution.
@@ -427,7 +485,7 @@ plan for the field driven product that grows from this feature.
 
 ## Density body
 
-Density body (Solid tab, Field group) turns a scalar grid into a part:
+Density body (Field tab) turns a scalar grid into a part:
 the density a topology optimiser writes per voxel, or any field on a
 grid. Give it a legacy VTK file (STRUCTURED_POINTS with POINT_DATA
 scalars) or a CSV point map, a threshold (0.5 for a density), a
@@ -459,7 +517,7 @@ total beam length, and the material it amounts to.
 
 ## Aircraft
 
-Aircraft (Solid tab, Field group) builds a fuselage, a lofted NACA wing,
+Aircraft (Field tab) builds a fuselage, a lofted NACA wing,
 a tailplane, and a fin as one implicit body, and reports a lifting line
 estimate for it. Parameters: fuselage length and diameter, wing
 position, span, root and tip chord, leading edge sweep, dihedral, root
@@ -510,7 +568,7 @@ the two agree on a straight wing and part on a swept one.
 
 ## Casting check and the Truchas export
 
-Casting check (Casting tab, Check group) takes the casting body, an
+Casting check (Solid tab, Casting panel) takes the casting body, an
 alloy (grey cast iron, A356 aluminium, or AZ91 magnesium), the pouring
 temperature, and optionally a sprue and a riser. Its note gives the
 volume, the mass, the surface area, the casting modulus, the Chvorinov
@@ -527,9 +585,9 @@ reference manual before a run.
 
 ## Mold split
 
-Split body (Solid tab) cuts a body on a datum plane and keeps one or
+Split body (Solid tab) cuts a body on a plane and keeps one or
 both halves; the halves are closed with a flat cap. Draft check
-(Casting tab, Mold group) reports how much of a body faces away from a
+(Solid tab, Casting panel) reports how much of a body faces away from a
 pull direction, so you can tell whether a pattern half will leave the
 sand. Scale by 1.01 for grey cast iron shrink. Examples > Kettle
 mold shows the whole flow: pattern halves, core, and core box.

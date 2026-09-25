@@ -23,7 +23,7 @@ pub mod icons;
 mod panels;
 mod perf;
 mod raster;
-mod ribbon;
+pub mod ribbon;
 mod scene;
 mod settings;
 /// Offscreen pictures of the whole window. Developer builds only.

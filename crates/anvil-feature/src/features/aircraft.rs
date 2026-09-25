@@ -308,7 +308,7 @@ impl Feature for AircraftFeature {
     }
 }
 
-inventory::submit! { FeatureDescriptor { id: "aircraft", label: "Aircraft", tab: "Solid", group: "Field", tooltip: "Fuselage, lofted NACA wing, tail, and fin as one implicit body with a lifting line estimate", order: 91, create: || Box::new(AircraftFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "aircraft", label: "Aircraft", tab: "Field", group: "Generate", tooltip: "Fuselage, lofted NACA wing, tail, and fin as one implicit body with a lifting line estimate", order: 91, create: || Box::new(AircraftFeature::default()) } }
 
 #[cfg(test)]
 mod tests {

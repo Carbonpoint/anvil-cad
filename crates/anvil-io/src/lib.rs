@@ -3,6 +3,8 @@
 //! * `.anvil`: native document, JSON today. See ADR 0002 for the planned
 //!   zip container with binary blobs.
 //! * `.stl`: binary STL export of tessellated bodies.
+//! * `read_step`, `read_3mf`: STEP and 3MF import, so files from other CAD
+//!   tools (Fusion exports both) open in Anvil.
 //! * `export`: STL, 3MF, OBJ, PLY, OFF, AMF, glTF, and STEP (faceted
 //!   B-rep) behind one `Format` list for the Export dialog.
 
@@ -25,6 +27,22 @@ pub enum IoError {
     Io(#[from] std::io::Error),
     #[error("json: {0}")]
     Json(#[from] serde_json_error::Error),
+    /// A STEP or 3MF file that could not be read.
+    #[error("{0}")]
+    Import(String),
+}
+
+pub use anvil_feature::import::Imported;
+
+/// Read a STEP file (ISO 10303-21) into Bodies. Faces on surfaces the
+/// reader does not handle are skipped and named in `Imported::notes`.
+pub fn read_step(path: &Path) -> Result<Imported, IoError> {
+    anvil_feature::import::step::read(path).map_err(IoError::Import)
+}
+
+/// Read a 3MF package into meshes, one per placed object.
+pub fn read_3mf(path: &Path) -> Result<Imported, IoError> {
+    anvil_feature::import::threemf::read(path).map_err(IoError::Import)
 }
 
 mod serde_json_error {

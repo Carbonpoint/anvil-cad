@@ -46,6 +46,14 @@ pub struct RegenContext<'a> {
     pub upstream: &'a [Option<FeatureOutput>],
     /// Index of the feature being regenerated.
     pub index: FeatureId,
+    /// Faces that `PlaneRef::Face` references matched last time.
+    pub face_memory: &'a std::collections::HashMap<crate::plane_ref::FaceKey, crate::plane_ref::FaceMemory>,
+    /// Notes the feature gets besides its own, for example a picked face
+    /// that was not found.
+    pub notes: std::cell::RefCell<Vec<String>>,
+    /// Face references that matched: the reference, the plane found, and
+    /// the face. The Document writes the plane back into the reference.
+    pub face_hits: std::cell::RefCell<Vec<(crate::PlaneRef, anvil_math::Plane, crate::plane_ref::FaceMemory)>>,
 }
 
 impl RegenContext<'_> {
@@ -142,6 +150,9 @@ pub struct Document {
     /// computed. `None` runs the whole history.
     #[serde(default)]
     pub rollback: Option<usize>,
+    /// Faces that plane references matched on the last Regenerate.
+    #[serde(skip)]
+    face_memory: std::collections::HashMap<crate::plane_ref::FaceKey, crate::plane_ref::FaceMemory>,
     #[serde(skip)]
     undo: Vec<Snapshot>,
     #[serde(skip)]
@@ -169,6 +180,7 @@ impl Default for Document {
             material: Default::default(),
             unit: default_unit(),
             rollback: None,
+            face_memory: Default::default(),
             undo: Vec::new(),
             redo: Vec::new(),
         }
@@ -354,6 +366,9 @@ impl Document {
         }
         remap(&mut self.appearance, map);
         remap(&mut self.material, map);
+        // Face memory is keyed by Feature index; after a renumber the
+        // stored planes are enough to find the faces again.
+        self.face_memory.clear();
     }
 
     /// Edit a feature in place through a closure, with undo.
@@ -439,12 +454,28 @@ impl Document {
                 outputs.push(None);
                 continue;
             }
-            let result = {
-                let mut ctx = RegenContext { kernel: &kernel, exprs: &self.exprs, upstream: &outputs, index: i };
-                self.features[i].feature.regenerate(&mut ctx)
+            let (result, notes, hits) = {
+                let mut ctx = RegenContext {
+                    kernel: &kernel,
+                    exprs: &self.exprs,
+                    upstream: &outputs,
+                    index: i,
+                    face_memory: &self.face_memory,
+                    notes: Default::default(),
+                    face_hits: Default::default(),
+                };
+                let r = self.features[i].feature.regenerate(&mut ctx);
+                (r, ctx.notes.into_inner(), ctx.face_hits.into_inner())
             };
+            self.remember_faces(i, hits);
             match result {
-                Ok(out) => {
+                Ok(mut out) => {
+                    for n in notes {
+                        out.note = Some(match out.note.take() {
+                            Some(old) => format!("{old}; {n}"),
+                            None => n,
+                        });
+                    }
                     self.features[i].output = Some(out.clone());
                     self.features[i].error = None;
                     outputs.push(Some(out));
@@ -454,6 +485,30 @@ impl Document {
                     self.features[i].output = None;
                     self.features[i].error = Some(e.to_string());
                     outputs.push(None);
+                }
+            }
+        }
+    }
+
+    /// Store the faces that feature `i`'s plane references matched, and
+    /// write each new plane back into its reference.
+    fn remember_faces(
+        &mut self,
+        i: FeatureId,
+        hits: Vec<(crate::PlaneRef, anvil_math::Plane, crate::plane_ref::FaceMemory)>,
+    ) {
+        use crate::{ParamValue, PlaneRef};
+        for (old, plane, memory) in hits {
+            let PlaneRef::Face { feature, body, .. } = old else { continue };
+            self.face_memory.insert(crate::plane_ref::face_key(i, feature, body, &plane), memory);
+            let new = PlaneRef::Face { feature, body, plane };
+            if new == old {
+                continue;
+            }
+            let f = &mut self.features[i].feature;
+            for p in f.params() {
+                if p.value == ParamValue::Plane(old.clone()) {
+                    let _ = f.set_param(p.name, ParamValue::Plane(new.clone()));
                 }
             }
         }

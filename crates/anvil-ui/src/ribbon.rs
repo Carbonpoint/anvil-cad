@@ -6,6 +6,12 @@
 //!
 //! The Sketch tab is contextual. It is drawn by the app while the sketch
 //! editor is open and is not part of this list.
+//!
+//! The layout copies Fusion: one row of panels per tab. A panel shows a
+//! few pinned icons, and its name under them is a menu of every command of
+//! the panel. `PINNED` and `SHORTCUTS` decide which icons show and which
+//! keys the menus name. A command that no table names is still in its
+//! panel's menu, so a new feature needs no edit here.
 
 use anvil_feature::descriptors;
 
@@ -63,6 +69,8 @@ pub enum RibbonAction {
     /// The kettle body split into pattern halves, core, and core box.
     KettleMold,
     Interference,
+    /// What a click in the view picks: 0 All, 1 Body, 2 Face, 3 Edge.
+    SetSelectFilter(u8),
 }
 
 pub struct RibbonButton {
@@ -70,6 +78,17 @@ pub struct RibbonButton {
     pub tooltip: &'static str,
     pub order: u32,
     pub kind: ButtonKind,
+    /// True when the command shows as an icon in the row. Every command
+    /// is in its panel's menu either way.
+    pub pinned: bool,
+    /// The key that runs the command, as the menus show it.
+    pub shortcut: Option<&'static str>,
+}
+
+impl RibbonButton {
+    fn new(label: &'static str, tooltip: &'static str, order: u32, kind: ButtonKind) -> Self {
+        RibbonButton { label, tooltip, order, kind, pinned: false, shortcut: None }
+    }
 }
 
 pub enum ButtonKind {
@@ -129,6 +148,10 @@ impl RibbonAction {
             RibbonAction::KettleGated => "kettle_gated",
             RibbonAction::KettleMold => "kettle_mold",
             RibbonAction::Interference => "interference",
+            RibbonAction::SetSelectFilter(0) => "select_all",
+            RibbonAction::SetSelectFilter(1) => "select_body",
+            RibbonAction::SetSelectFilter(2) => "select_face",
+            RibbonAction::SetSelectFilter(_) => "select_edge",
         }
     }
 }
@@ -143,7 +166,7 @@ pub struct RibbonTab {
     pub groups: Vec<RibbonGroup>,
 }
 
-const TAB_ORDER: &[&str] = &["File", "Examples", "Solid", "CAM", "View"];
+const TAB_ORDER: &[&str] = &["File", "Solid", "Field", "Inspect", "View", "Examples"];
 const GROUP_ORDER: &[&str] = &[
     "Document",
     "Export",
@@ -155,274 +178,212 @@ const GROUP_ORDER: &[&str] = &[
     "Construct",
     "Inspect",
     "Insert",
+    "Casting",
     "Manage",
-    "Output",
     "Camera",
     "Display",
     "Settings",
+    "Select",
 ];
+
+/// Commands pinned as icons, panel by panel, in the order shown. An id is
+/// a feature id, or the icon id of an app action. At most four a panel.
+const PINNED: &[(&str, &str, &[&str])] = &[
+    ("File", "Document", &["new_document", "load", "save", "save_as"]),
+    ("File", "Export", &["export", "export_gcode"]),
+    ("Solid", "Create", &["sketch", "extrude", "revolve", "hole"]),
+    ("Solid", "Modify", &["press_pull", "fillet", "chamfer", "combine"]),
+    ("Solid", "Construct", &["offset_plane", "midplane"]),
+    ("Solid", "Insert", &["mesh"]),
+    ("Solid", "Casting", &["sprue", "runner", "riser", "casting_check"]),
+    ("Field", "Fill", &["lattice_fill"]),
+    ("Field", "Generate", &["aircraft", "density_body"]),
+    ("Inspect", "Inspect", &["measure", "section_analysis", "interference", "center_of_mass"]),
+    ("Inspect", "Manage", &["bill_of_materials", "compute_all"]),
+    ("View", "Camera", &["fit_view", "view_iso", "view_quad", "projection"]),
+    ("View", "Display", &["toggle_edges"]),
+    ("View", "Settings", &["settings"]),
+    ("Examples", "Parts", &["demo_part", "sample_card"]),
+    ("Examples", "Casting samples", &["kettle", "kettle_gated", "kettle_mold"]),
+];
+
+/// Keyboard shortcuts, as the menus show them. The keys work in the model
+/// view while no text field has the keyboard.
+const SHORTCUTS: &[(&str, &str)] =
+    &[("extrude", "E"), ("hole", "H"), ("press_pull", "Q"), ("fillet", "F"), ("delete_feature", "Del")];
+
+/// The key that runs a command, by feature id or action icon id.
+pub fn shortcut_of(id: &str) -> Option<&'static str> {
+    SHORTCUTS.iter().find(|(i, _)| *i == id).map(|(_, k)| *k)
+}
 
 fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
     use ButtonKind::Action as A;
     use RibbonAction::*;
     vec![
+        ("File", "Document", RibbonButton::new("New", "Start an empty document", 0, A(NewDocument))),
         (
             "File",
             "Document",
-            RibbonButton { label: "New", tooltip: "Start an empty document", order: 0, kind: A(NewDocument) },
+            RibbonButton::new("Open", "Open an Anvil document, or import a STEP, 3MF or STL file", 1, A(Load)),
+        ),
+        ("File", "Document", RibbonButton::new("Save", "Save to the .anvil path in the status bar", 2, A(Save))),
+        ("File", "Document", RibbonButton::new("Save As", "Choose where to save the .anvil document", 3, A(SaveAs))),
+        (
+            "File",
+            "Export",
+            RibbonButton::new(
+                "Export",
+                "Choose a format (STL, 3MF, OBJ, PLY, OFF, AMF, glTF, STEP) and where to save",
+                0,
+                A(Export),
+            ),
+        ),
+        ("Examples", "Parts", RibbonButton::new("Demo part", "Load a sample part", 0, A(DemoPart))),
+        (
+            "Solid",
+            "Create",
+            RibbonButton::new(
+                "Edit Sketch",
+                "Open the selected sketch in the editor (or double-click it)",
+                1,
+                A(EditSketch),
+            ),
         ),
         (
-            "File",
-            "Document",
-            RibbonButton {
-                label: "Open",
-                tooltip: "Open the .anvil file named in the status bar",
-                order: 1,
-                kind: A(Load),
-            },
+            "Inspect",
+            "Inspect",
+            RibbonButton::new("Measure", "Volume and bounding box of the selected feature's bodies", 0, A(Measure)),
         ),
         (
-            "File",
-            "Document",
-            RibbonButton {
-                label: "Save",
-                tooltip: "Save to the .anvil path in the status bar",
-                order: 2,
-                kind: A(Save),
-            },
+            "Inspect",
+            "Inspect",
+            RibbonButton::new(
+                "Center of Mass",
+                "Centre of mass of the selected feature's bodies, shown in the viewport",
+                1,
+                A(CenterOfMass),
+            ),
         ),
         (
-            "File",
-            "Document",
-            RibbonButton {
-                label: "Save As",
-                tooltip: "Choose where to save the .anvil document",
-                order: 3,
-                kind: A(SaveAs),
-            },
+            "Solid",
+            "Modify",
+            RibbonButton::new("Delete", "Delete the selected feature (Del in model mode)", 90, A(DeleteFeature)),
+        ),
+        ("Inspect", "Manage", RibbonButton::new("Compute All", "Regenerate the whole history", 0, A(ComputeAll))),
+        (
+            "Inspect",
+            "Manage",
+            RibbonButton::new(
+                "Bill of Materials",
+                "List bodies with volume and mass in the status bar and log",
+                1,
+                A(BillOfMaterials),
+            ),
+        ),
+        ("Inspect", "Manage", RibbonButton::new("Units mm/in", "Toggle the display unit", 2, A(ToggleUnits))),
+        (
+            "Examples",
+            "Parts",
+            RibbonButton::new(
+                "Business card",
+                "Credit-card blank with two fillet radii, embossed name, and QR code",
+                1,
+                A(SampleCard),
+            ),
+        ),
+        (
+            "Solid",
+            "Modify",
+            RibbonButton::new("Press Pull", "Extrude the selected face into a new body (Q)", 0, A(PressPull)),
+        ),
+        (
+            "Inspect",
+            "Inspect",
+            RibbonButton::new(
+                "Section analysis",
+                "Area, perimeter, and centre of the face the section plane cuts (turn Section on first)",
+                3,
+                A(SectionAnalysis),
+            ),
+        ),
+        (
+            "Inspect",
+            "Inspect",
+            RibbonButton::new(
+                "Interference",
+                "Overlap volume between two selected features (Ctrl+click the second)",
+                2,
+                A(Interference),
+            ),
         ),
         (
             "File",
             "Export",
-            RibbonButton {
-                label: "Export",
-                tooltip: "Choose a format (STL, 3MF, OBJ, PLY, OFF, AMF, glTF, STEP) and where to save",
-                order: 0,
-                kind: A(Export),
-            },
+            RibbonButton::new("Contour G-code", "Contour the first sketch profile and write G-code", 0, A(ExportGcode)),
         ),
+        ("View", "Camera", RibbonButton::new("Fit", "Fit all bodies in the viewport", 0, A(FitView))),
+        ("View", "Camera", RibbonButton::new("Iso", "Isometric view", 1, A(ViewIso))),
         (
-            "Examples",
-            "Parts",
-            RibbonButton { label: "Demo part", tooltip: "Load a sample part", order: 0, kind: A(DemoPart) },
-        ),
-        (
-            "Solid",
-            "Create",
-            RibbonButton {
-                label: "Edit Sketch",
-                tooltip: "Open the selected sketch in the editor (or double-click it)",
-                order: 1,
-                kind: A(EditSketch),
-            },
-        ),
-        (
-            "Solid",
-            "Inspect",
-            RibbonButton {
-                label: "Measure",
-                tooltip: "Volume and bounding box of the selected feature's bodies",
-                order: 0,
-                kind: A(Measure),
-            },
-        ),
-        (
-            "Solid",
-            "Inspect",
-            RibbonButton {
-                label: "Center of Mass",
-                tooltip: "Centre of mass of the selected feature's bodies, shown in the viewport",
-                order: 1,
-                kind: A(CenterOfMass),
-            },
-        ),
-        (
-            "Solid",
-            "Modify",
-            RibbonButton {
-                label: "Delete",
-                tooltip: "Delete the selected feature (Del in model mode)",
-                order: 90,
-                kind: A(DeleteFeature),
-            },
-        ),
-        (
-            "Solid",
-            "Manage",
-            RibbonButton {
-                label: "Compute All",
-                tooltip: "Regenerate the whole history",
-                order: 0,
-                kind: A(ComputeAll),
-            },
-        ),
-        (
-            "Solid",
-            "Manage",
-            RibbonButton {
-                label: "Bill of Materials",
-                tooltip: "List bodies with volume and mass in the status bar and log",
-                order: 1,
-                kind: A(BillOfMaterials),
-            },
-        ),
-        (
-            "Solid",
-            "Manage",
-            RibbonButton { label: "Units mm/in", tooltip: "Toggle the display unit", order: 2, kind: A(ToggleUnits) },
-        ),
-        (
-            "Examples",
-            "Parts",
-            RibbonButton {
-                label: "Business card",
-                tooltip: "Credit-card blank with two fillet radii, embossed name, and QR code",
-                order: 1,
-                kind: A(SampleCard),
-            },
-        ),
-        (
-            "Solid",
-            "Modify",
-            RibbonButton {
-                label: "Press Pull",
-                tooltip: "Extrude the selected face into a new body (Q)",
-                order: 0,
-                kind: A(PressPull),
-            },
-        ),
-        (
-            "Solid",
-            "Inspect",
-            RibbonButton {
-                label: "Section analysis",
-                tooltip: "Area, perimeter, and centre of the face the section plane cuts (turn Section on first)",
-                order: 3,
-                kind: A(SectionAnalysis),
-            },
-        ),
-        (
-            "Solid",
-            "Inspect",
-            RibbonButton {
-                label: "Interference",
-                tooltip: "Overlap volume between two selected features (Ctrl+click the second)",
-                order: 2,
-                kind: A(Interference),
-            },
-        ),
-        (
-            "CAM",
-            "Output",
-            RibbonButton {
-                label: "Contour G-code",
-                tooltip: "Contour the first sketch profile and write G-code",
-                order: 0,
-                kind: A(ExportGcode),
-            },
+            "View",
+            "Camera",
+            RibbonButton::new(
+                "Ortho/Persp",
+                "Orthographic (like a drawing) or perspective for the view under the pointer",
+                6,
+                A(ToggleProjection),
+            ),
         ),
         (
             "View",
             "Camera",
-            RibbonButton { label: "Fit", tooltip: "Fit all bodies in the viewport", order: 0, kind: A(FitView) },
+            RibbonButton::new(
+                "Four views",
+                "Front, Right, Top, and an angled view in four panes",
+                5,
+                A(ToggleQuadView),
+            ),
         ),
-        ("View", "Camera", RibbonButton { label: "Iso", tooltip: "Isometric view", order: 1, kind: A(ViewIso) }),
+        ("View", "Camera", RibbonButton::new("Top", "Look down the Z axis", 2, A(ViewTop))),
+        ("View", "Camera", RibbonButton::new("Front", "Look along the Y axis", 3, A(ViewFront))),
+        ("View", "Camera", RibbonButton::new("Right", "Look along the X axis", 4, A(ViewRight))),
+        ("View", "Display", RibbonButton::new("Edges", "Toggle model edges", 0, A(ToggleEdges))),
         (
             "View",
-            "Camera",
-            RibbonButton {
-                label: "Ortho/Persp",
-                tooltip: "Orthographic (like a drawing) or perspective for the view under the pointer",
-                order: 6,
-                kind: A(ToggleProjection),
-            },
-        ),
-        (
-            "View",
-            "Camera",
-            RibbonButton {
-                label: "Four views",
-                tooltip: "Front, Right, Top, and an angled view in four panes",
-                order: 5,
-                kind: A(ToggleQuadView),
-            },
-        ),
-        ("View", "Camera", RibbonButton { label: "Top", tooltip: "Look down the Z axis", order: 2, kind: A(ViewTop) }),
-        (
-            "View",
-            "Camera",
-            RibbonButton { label: "Front", tooltip: "Look along the Y axis", order: 3, kind: A(ViewFront) },
-        ),
-        (
-            "View",
-            "Camera",
-            RibbonButton { label: "Right", tooltip: "Look along the X axis", order: 4, kind: A(ViewRight) },
-        ),
-        (
-            "View",
-            "Display",
-            RibbonButton { label: "Edges", tooltip: "Toggle model edges", order: 0, kind: A(ToggleEdges) },
+            "Settings",
+            RibbonButton::new(
+                "Performance",
+                "Show or hide CPU, memory, and fps in the corner of the view",
+                0,
+                A(TogglePerf),
+            ),
         ),
         (
             "View",
             "Settings",
-            RibbonButton {
-                label: "Performance",
-                tooltip: "Show or hide CPU, memory, and fps in the corner of the view",
-                order: 0,
-                kind: A(TogglePerf),
-            },
+            RibbonButton::new(
+                "Benchmark",
+                "Spin the view and report the frame time with the GPU and with the software renderer",
+                3,
+                A(Benchmark),
+            ),
         ),
         (
             "View",
             "Settings",
-            RibbonButton {
-                label: "Benchmark",
-                tooltip: "Spin the view and report the frame time with the GPU and with the software renderer",
-                order: 3,
-                kind: A(Benchmark),
-            },
+            RibbonButton::new(
+                "GPU viewport",
+                "Draw the model with OpenGL instead of the software rasterizer",
+                1,
+                A(ToggleGpu),
+            ),
         ),
         (
             "View",
             "Settings",
-            RibbonButton {
-                label: "GPU viewport",
-                tooltip: "Draw the model with OpenGL instead of the software rasterizer",
-                order: 1,
-                kind: A(ToggleGpu),
-            },
+            RibbonButton::new("Invert scroll", "Reverse the mouse wheel zoom direction", 2, A(ToggleScrollDir)),
         ),
-        (
-            "View",
-            "Settings",
-            RibbonButton {
-                label: "Invert scroll",
-                tooltip: "Reverse the mouse wheel zoom direction",
-                order: 2,
-                kind: A(ToggleScrollDir),
-            },
-        ),
-        (
-            "View",
-            "Settings",
-            RibbonButton {
-                label: "Settings",
-                tooltip: "Set the UI scale and text size",
-                order: 2,
-                kind: A(ToggleSettings),
-            },
-        ),
+        ("View", "Settings", RibbonButton::new("Settings", "Set the UI scale and text size", 2, A(ToggleSettings))),
     ]
 }
 
@@ -432,6 +393,14 @@ const UP_AXES: [(&str, &str); 4] = [
     ("Y up", "Keep the Y axis vertical on screen"),
     ("Z up", "Keep the Z axis vertical on screen (the default)"),
     ("Free orbit", "Hold no axis vertical: the view tumbles freely"),
+];
+
+/// The selection filter, on the Solid tab's Select panel.
+const SELECT_FILTERS: [(&str, &str); 4] = [
+    ("All", "A click picks an edge, a face, or a body"),
+    ("Body", "A click picks a whole body"),
+    ("Face", "A click picks a face"),
+    ("Edge", "A click picks an edge, with a wider catch radius"),
 ];
 
 pub fn build_ribbon() -> Vec<RibbonTab> {
@@ -461,66 +430,74 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
         place(
             "Examples",
             "Workbook",
-            RibbonButton {
+            RibbonButton::new(
                 label,
-                tooltip: "Workbook exercise, see docs/WORKBOOK.md",
-                order: 10 + i as u32,
-                kind: ButtonKind::Action(RibbonAction::Workbook(i as u8)),
-            },
+                "Workbook exercise, see docs/WORKBOOK.md",
+                10 + i as u32,
+                ButtonKind::Action(RibbonAction::Workbook(i as u8)),
+            ),
         );
     }
     place(
         "Examples",
         "Casting samples",
-        RibbonButton {
-            label: "Kettle",
-            tooltip: "Cast iron kettle with hobnail dots, see docs/KETTLE.md",
-            order: 20,
-            kind: ButtonKind::Action(RibbonAction::Kettle),
-        },
+        RibbonButton::new(
+            "Kettle",
+            "Cast iron kettle with hobnail dots, see docs/KETTLE.md",
+            20,
+            ButtonKind::Action(RibbonAction::Kettle),
+        ),
     );
     place(
         "Examples",
         "Casting samples",
-        RibbonButton {
-            label: "Kettle + gating",
-            tooltip: "The kettle with a sprue, runner, ingate, and riser",
-            order: 21,
-            kind: ButtonKind::Action(RibbonAction::KettleGated),
-        },
+        RibbonButton::new(
+            "Kettle + gating",
+            "The kettle with a sprue, runner, ingate, and riser",
+            21,
+            ButtonKind::Action(RibbonAction::KettleGated),
+        ),
     );
     place(
         "Examples",
         "Casting samples",
-        RibbonButton {
-            label: "Kettle mold",
-            tooltip: "Pattern halves, core, and core box for the kettle body",
-            order: 22,
-            kind: ButtonKind::Action(RibbonAction::KettleMold),
-        },
+        RibbonButton::new(
+            "Kettle mold",
+            "Pattern halves, core, and core box for the kettle body",
+            22,
+            ButtonKind::Action(RibbonAction::KettleMold),
+        ),
     );
     for (i, (label, tooltip)) in UP_AXES.iter().enumerate() {
         place(
             "View",
             "Camera",
-            RibbonButton {
-                label,
-                tooltip,
-                order: 10 + i as u32,
-                kind: ButtonKind::Action(RibbonAction::SetUpAxis(i as u8)),
-            },
+            RibbonButton::new(label, tooltip, 10 + i as u32, ButtonKind::Action(RibbonAction::SetUpAxis(i as u8))),
         );
     }
     for d in descriptors() {
+        place(d.tab, d.group, RibbonButton::new(d.label, d.tooltip, d.order, ButtonKind::Feature(d.id)));
+    }
+    for (i, (label, tooltip)) in SELECT_FILTERS.iter().enumerate() {
         place(
-            d.tab,
-            d.group,
-            RibbonButton { label: d.label, tooltip: d.tooltip, order: d.order, kind: ButtonKind::Feature(d.id) },
+            "Solid",
+            "Select",
+            RibbonButton::new(label, tooltip, i as u32, ButtonKind::Action(RibbonAction::SetSelectFilter(i as u8))),
         );
     }
     for t in &mut tabs {
         for g in &mut t.groups {
             g.buttons.sort_by_key(|b| (b.order, b.label));
+            let pins = PINNED.iter().find(|(tab, panel, _)| *tab == t.name && *panel == g.name).map(|(_, _, ids)| *ids);
+            for b in &mut g.buttons {
+                let id = b.kind.icon_id();
+                b.pinned = pins.is_some_and(|p| p.contains(&id));
+                b.shortcut = shortcut_of(id);
+            }
+            // Pinned icons show in the order the table gives.
+            if let Some(p) = pins {
+                g.buttons.sort_by_key(|b| p.iter().position(|id| *id == b.kind.icon_id()).unwrap_or(usize::MAX));
+            }
         }
         t.groups.sort_by_key(|g| GROUP_ORDER.iter().position(|n| *n == g.name).unwrap_or(usize::MAX));
     }

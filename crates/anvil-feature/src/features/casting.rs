@@ -354,9 +354,9 @@ impl Feature for RiserFeature {
     }
 }
 
-inventory::submit! { FeatureDescriptor { id: "sprue", label: "Sprue", tab: "Casting", group: "Gating", tooltip: "Pouring cup, tapered sprue, and well", order: 0, create: || Box::new(SprueFeature::default()) } }
-inventory::submit! { FeatureDescriptor { id: "runner", label: "Runner", tab: "Casting", group: "Gating", tooltip: "Straight gating channel, trapezoid cross section", order: 1, create: || Box::new(RunnerFeature::default()) } }
-inventory::submit! { FeatureDescriptor { id: "riser", label: "Riser", tab: "Casting", group: "Gating", tooltip: "Feeder reservoir with a neck, blind or open top", order: 2, create: || Box::new(RiserFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "sprue", label: "Sprue", tab: "Solid", group: "Casting", tooltip: "Pouring cup, tapered sprue, and well", order: 0, create: || Box::new(SprueFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "runner", label: "Runner", tab: "Solid", group: "Casting", tooltip: "Straight gating channel, trapezoid cross section", order: 1, create: || Box::new(RunnerFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "riser", label: "Riser", tab: "Solid", group: "Casting", tooltip: "Feeder reservoir with a neck, blind or open top", order: 2, create: || Box::new(RiserFeature::default()) } }
 
 #[cfg(test)]
 mod tests {
@@ -555,7 +555,7 @@ impl Feature for DraftCheckFeature {
     }
 }
 
-inventory::submit! { FeatureDescriptor { id: "draft_check", label: "Draft check", tab: "Casting", group: "Mold", tooltip: "Report faces that face away from the pull direction", order: 10, create: || Box::new(DraftCheckFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "draft_check", label: "Draft check", tab: "Solid", group: "Casting", tooltip: "Report faces that face away from the pull direction", order: 10, create: || Box::new(DraftCheckFeature::default()) } }
 
 /// Starting values for the alloys the casting check knows. Every number
 /// is a textbook or datasheet figure from docs/research/casting_simulation.md
@@ -805,4 +805,4 @@ impl Feature for CastingCheckFeature {
     }
 }
 
-inventory::submit! { FeatureDescriptor { id: "casting_check", label: "Casting check", tab: "Casting", group: "Check", tooltip: "Mass, modulus, freeze time, fill time, gating areas, riser rule", order: 20, create: || Box::new(CastingCheckFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "casting_check", label: "Casting check", tab: "Solid", group: "Casting", tooltip: "Mass, modulus, freeze time, fill time, gating areas, riser rule", order: 20, create: || Box::new(CastingCheckFeature::default()) } }

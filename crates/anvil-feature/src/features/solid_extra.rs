@@ -1,8 +1,7 @@
 //! Coil, Pipe, Insert Mesh, Split Body.
 
-use crate::features::{datum_plane, parse_index_list};
 use crate::{
-    Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, BODY_TYPES, PLANE_TYPES,
+    Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, PlaneRef, RegenContext, RegenError, BODY_TYPES,
 };
 use anvil_math::{DVec2, DVec3, Plane};
 use serde::{Deserialize, Serialize};
@@ -189,7 +188,7 @@ impl Feature for MeshFeature {
         vec![
             ParamSpec {
                 name: "path",
-                label: "STL file",
+                label: "STL or 3MF file",
                 kind: crate::param::ParamKind::Text,
                 value: ParamValue::Expr(self.path.clone()),
             },
@@ -206,12 +205,85 @@ impl Feature for MeshFeature {
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let k = ctx.eval(&self.scale)?;
-        let tris = crate::mesh_loader::load(&self.path).map_err(RegenError::Other)?;
+        let lower = self.path.to_ascii_lowercase();
+        let (tris, note) = if lower.ends_with(".3mf") {
+            let got = crate::import::threemf::read(std::path::Path::new(&self.path)).map_err(RegenError::Other)?;
+            (got.triangles(), (!got.notes.is_empty()).then(|| got.notes.join("; ")))
+        } else if lower.ends_with(".step") || lower.ends_with(".stp") {
+            return Err(RegenError::Other("a STEP file holds solids: use Import STEP (Solid > Insert)".into()));
+        } else {
+            (crate::mesh_loader::load(&self.path).map_err(RegenError::Other)?, None)
+        };
         let tris: Vec<[DVec3; 3]> = tris.iter().map(|t| [t[0] * k, t[1] * k, t[2] * k]).collect();
         if tris.is_empty() {
             return Err(RegenError::Other("no triangles in file".into()));
         }
-        Ok(FeatureOutput { bodies: vec![anvil_kernel::ops::from_triangles(&tris, 1e-6)], ..Default::default() })
+        Ok(FeatureOutput { bodies: vec![anvil_kernel::ops::from_triangles(&tris, 1e-6)], note, ..Default::default() })
+    }
+    fn clone_box(&self) -> Box<dyn Feature> {
+        Box::new(self.clone())
+    }
+}
+
+/// Bodies from a STEP file. Faces the reader cannot use are named in
+/// the Feature's note, so a part with missing faces is never silent.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ImportStepFeature {
+    pub path: String,
+    pub scale: String,
+}
+
+impl Default for ImportStepFeature {
+    fn default() -> Self {
+        ImportStepFeature { path: "part.step".into(), scale: "1".into() }
+    }
+}
+
+#[typetag::serde(name = "import_step")]
+impl Feature for ImportStepFeature {
+    fn kind(&self) -> &'static str {
+        "import_step"
+    }
+    fn name(&self) -> String {
+        let file = std::path::Path::new(&self.path).file_name().and_then(|f| f.to_str()).unwrap_or(&self.path);
+        format!("STEP ({file})")
+    }
+    fn params(&self) -> Vec<ParamSpec> {
+        vec![
+            ParamSpec {
+                name: "path",
+                label: "STEP file",
+                kind: crate::param::ParamKind::Text,
+                value: ParamValue::Expr(self.path.clone()),
+            },
+            ParamSpec::length("scale", "Scale", &self.scale),
+        ]
+    }
+    fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
+        match (name, value) {
+            ("path", ParamValue::Expr(s)) => self.path = s,
+            ("scale", ParamValue::Expr(s)) => self.scale = s,
+            (n, _) => return Err(format!("unknown parameter {n}")),
+        }
+        Ok(())
+    }
+    fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
+        let k = ctx.eval(&self.scale)?;
+        let got = crate::import::step::read(std::path::Path::new(&self.path)).map_err(RegenError::Other)?;
+        if got.solids.is_empty() {
+            let why = if got.notes.is_empty() { String::new() } else { format!(": {}", got.notes.join("; ")) };
+            return Err(RegenError::Other(format!("no body could be read{why}")));
+        }
+        let mut bodies = got.solids;
+        if (k - 1.0).abs() > 1e-12 {
+            for b in &mut bodies {
+                for v in b.vertices.values_mut() {
+                    v.pos *= k;
+                }
+            }
+        }
+        let note = (!got.notes.is_empty()).then(|| got.notes.join("; "));
+        Ok(FeatureOutput { bodies, note, ..Default::default() })
     }
     fn clone_box(&self) -> Box<dyn Feature> {
         Box::new(self.clone())
@@ -219,18 +291,41 @@ impl Feature for MeshFeature {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "SplitBodySaved")]
 pub struct SplitBodyFeature {
     pub body: usize,
-    pub plane: String,
-    pub plane_feature: Option<usize>,
+    pub plane: PlaneRef,
     pub offset: String,
     /// "both", "below", or "above".
     pub keep: String,
 }
 
+/// What a file holds. Files written before plane references had
+/// `"plane":"Feature"` and the Feature number in `plane_feature`.
+#[derive(Deserialize)]
+struct SplitBodySaved {
+    body: usize,
+    plane: PlaneRef,
+    #[serde(default)]
+    plane_feature: Option<usize>,
+    offset: String,
+    keep: String,
+}
+
+impl From<SplitBodySaved> for SplitBodyFeature {
+    fn from(s: SplitBodySaved) -> Self {
+        SplitBodyFeature {
+            body: s.body,
+            plane: PlaneRef::from_saved(s.plane, s.plane_feature),
+            offset: s.offset,
+            keep: s.keep,
+        }
+    }
+}
+
 impl Default for SplitBodyFeature {
     fn default() -> Self {
-        SplitBodyFeature { body: 1, plane: "XY".into(), plane_feature: None, offset: "5".into(), keep: "both".into() }
+        SplitBodyFeature { body: 1, plane: PlaneRef::Datum("XY".into()), offset: "5".into(), keep: "both".into() }
     }
 }
 
@@ -240,30 +335,22 @@ impl Feature for SplitBodyFeature {
         "split_body"
     }
     fn name(&self) -> String {
-        format!("Split body {} by {}", self.body, self.plane)
+        format!("Split body {} by {}", self.body, self.plane.short())
     }
     fn params(&self) -> Vec<ParamSpec> {
-        let mut v = vec![
+        vec![
             ParamSpec::feature_ref("body", "Body", BODY_TYPES.to_vec(), self.body),
-            ParamSpec::choice("plane", "Plane", vec!["XY", "XZ", "YZ", "Feature"], &self.plane),
+            ParamSpec::plane("plane", "Plane", self.plane.clone()),
             ParamSpec::length("offset", "Offset along normal", &self.offset),
             ParamSpec::choice("keep", "Keep", vec!["both", "below", "above"], &self.keep),
-        ];
-        if self.plane == "Feature" {
-            v.push(ParamSpec::feature_ref(
-                "plane_feature",
-                "Plane feature",
-                PLANE_TYPES.to_vec(),
-                self.plane_feature.unwrap_or(0),
-            ));
-        }
-        v
+        ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
             ("body", ParamValue::FeatureRef(i)) => self.body = i,
-            ("plane", ParamValue::Choice(p)) => self.plane = p,
-            ("plane_feature", ParamValue::FeatureRef(i)) => self.plane_feature = Some(i),
+            ("plane", v) if !matches!(v, ParamValue::FeatureRef(_)) => {
+                self.plane = crate::features::construct::plane_value(name, v)?
+            }
             ("offset", ParamValue::Expr(s)) => self.offset = s,
             ("keep", ParamValue::Choice(k)) => self.keep = k,
             (n, _) => return Err(format!("unknown parameter {n}")),
@@ -271,11 +358,7 @@ impl Feature for SplitBodyFeature {
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let mut plane = match (self.plane.as_str(), self.plane_feature) {
-            ("Feature", Some(i)) => ctx.plane_of(i)?,
-            ("Feature", None) => return Err(RegenError::Other("choose a plane feature".into())),
-            (d, _) => datum_plane(d),
-        };
+        let mut plane = ctx.plane_of_ref(&self.plane)?;
         plane.origin += plane.normal() * ctx.eval(&self.offset)?;
         let mut bodies = Vec::new();
         for b in ctx.bodies_of(self.body)? {
@@ -356,28 +439,16 @@ impl Feature for Plane3PointsFeature {
     }
 }
 
-/// Midplane between two plane features (or datum planes by name).
+/// Midplane between two planes: datums, plane Features, or flat faces.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MidplaneFeature {
-    pub first: String,
-    pub second: String,
+    pub first: PlaneRef,
+    pub second: PlaneRef,
 }
 
 impl Default for MidplaneFeature {
     fn default() -> Self {
-        MidplaneFeature { first: "XY".into(), second: "0".into() }
-    }
-}
-
-fn plane_by_ref(s: &str, ctx: &RegenContext) -> Result<Plane, RegenError> {
-    match s.trim() {
-        "XY" | "XZ" | "YZ" => Ok(datum_plane(s.trim())),
-        other => {
-            let idx = parse_index_list(other);
-            let i =
-                *idx.first().ok_or(RegenError::Other(format!("'{other}' is not XY, XZ, YZ, or a feature index")))?;
-            ctx.plane_of(i)
-        }
+        MidplaneFeature { first: PlaneRef::Datum("XY".into()), second: PlaneRef::Datum("XZ".into()) }
     }
 }
 
@@ -387,35 +458,31 @@ impl Feature for MidplaneFeature {
         "midplane"
     }
     fn name(&self) -> String {
-        format!("Midplane ({} | {})", self.first, self.second)
+        format!("Midplane ({} | {})", self.first.short(), self.second.short())
     }
     fn params(&self) -> Vec<ParamSpec> {
         vec![
-            ParamSpec {
-                name: "first",
-                label: "First (XY/XZ/YZ or feature #)",
-                kind: crate::param::ParamKind::Text,
-                value: ParamValue::Expr(self.first.clone()),
-            },
-            ParamSpec {
-                name: "second",
-                label: "Second (XY/XZ/YZ or feature #)",
-                kind: crate::param::ParamKind::Text,
-                value: ParamValue::Expr(self.second.clone()),
-            },
+            ParamSpec::plane("first", "First plane", self.first.clone()),
+            ParamSpec::plane("second", "Second plane", self.second.clone()),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
-        match (name, value) {
-            ("first", ParamValue::Expr(s)) => self.first = s,
-            ("second", ParamValue::Expr(s)) => self.second = s,
-            (n, _) => return Err(format!("unknown parameter {n}")),
+        let value = match value {
+            ParamValue::Plane(r) => r,
+            // Typed text still works: XY, XZ, YZ or a Feature number.
+            ParamValue::Expr(s) | ParamValue::Text(s) => PlaneRef::parse(&s),
+            _ => return Err(format!("{name} takes a plane")),
+        };
+        match name {
+            "first" => self.first = value,
+            "second" => self.second = value,
+            n => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let a = plane_by_ref(&self.first, ctx)?;
-        let b = plane_by_ref(&self.second, ctx)?;
+        let a = ctx.plane_of_ref(&self.first)?;
+        let b = ctx.plane_of_ref(&self.second)?;
         let n = (a.normal() + b.normal()).normalize_or_zero();
         let n = if n.length_squared() < 1e-12 { a.normal() } else { n };
         let origin = (a.origin + b.origin) * 0.5;
@@ -430,7 +497,8 @@ impl Feature for MidplaneFeature {
 
 inventory::submit! { FeatureDescriptor { id: "coil", label: "Coil", tab: "Solid", group: "Create", tooltip: "Helical coil about the Z axis", order: 54, create: || Box::new(CoilFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "pipe", label: "Pipe", tab: "Solid", group: "Create", tooltip: "Round pipe along a path sketch", order: 55, create: || Box::new(PipeFeature::default()) } }
-inventory::submit! { FeatureDescriptor { id: "mesh", label: "Insert Mesh", tab: "Solid", group: "Insert", tooltip: "Insert an STL file as a body", order: 0, create: || Box::new(MeshFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "mesh", label: "Insert Mesh", tab: "Solid", group: "Insert", tooltip: "Insert an STL or 3MF file as a body", order: 0, create: || Box::new(MeshFeature::default()) } }
+inventory::submit! { FeatureDescriptor { id: "import_step", label: "Import STEP", tab: "Solid", group: "Insert", tooltip: "Read the bodies of a STEP file (Fusion: File > Export > STEP)", order: 1, create: || Box::new(ImportStepFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "split_body", label: "Split Body", tab: "Solid", group: "Modify", tooltip: "Cut a body with a plane", order: 45, create: || Box::new(SplitBodyFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "plane_3pt", label: "Plane 3 Points", tab: "Solid", group: "Construct", tooltip: "Plane through three points", order: 2, create: || Box::new(Plane3PointsFeature::default()) } }
 inventory::submit! { FeatureDescriptor { id: "midplane", label: "Midplane", tab: "Solid", group: "Construct", tooltip: "Plane halfway between two planes", order: 3, create: || Box::new(MidplaneFeature::default()) } }

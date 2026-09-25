@@ -1,28 +1,46 @@
 //! Construction geometry: Offset plane, Plane at angle.
 
-use crate::features::{datum_axis, datum_plane};
-use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, RegenContext, RegenError, PLANE_TYPES};
+use crate::features::datum_axis;
+use crate::{Feature, FeatureDescriptor, FeatureOutput, ParamSpec, ParamValue, PlaneRef, RegenContext, RegenError};
 use anvil_math::{DQuat, Plane};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(from = "OffsetPlaneSaved")]
 pub struct OffsetPlaneFeature {
-    pub base: String,
-    pub base_feature: Option<usize>,
+    pub base: PlaneRef,
     pub offset: String,
+}
+
+/// What a file holds. Files written before plane references had
+/// `"base":"Feature"` and the Feature number in `base_feature`.
+#[derive(Deserialize)]
+struct OffsetPlaneSaved {
+    base: PlaneRef,
+    #[serde(default)]
+    base_feature: Option<usize>,
+    offset: String,
+}
+
+impl From<OffsetPlaneSaved> for OffsetPlaneFeature {
+    fn from(s: OffsetPlaneSaved) -> Self {
+        OffsetPlaneFeature { base: PlaneRef::from_saved(s.base, s.base_feature), offset: s.offset }
+    }
 }
 
 impl Default for OffsetPlaneFeature {
     fn default() -> Self {
-        OffsetPlaneFeature { base: "XY".into(), base_feature: None, offset: "10".into() }
+        OffsetPlaneFeature { base: PlaneRef::Datum("XY".into()), offset: "10".into() }
     }
 }
 
-fn resolve_base(base: &str, base_feature: Option<usize>, ctx: &RegenContext) -> Result<Plane, RegenError> {
-    match (base, base_feature) {
-        ("Feature", Some(i)) => ctx.plane_of(i),
-        ("Feature", None) => Err(RegenError::Other("choose a base plane feature".into())),
-        (d, _) => Ok(datum_plane(d)),
+/// A plane parameter that also reads typed text: XY, XZ, YZ or a
+/// Feature number.
+pub(crate) fn plane_value(name: &str, value: ParamValue) -> Result<PlaneRef, String> {
+    match value {
+        ParamValue::Plane(r) => Ok(r),
+        ParamValue::Expr(s) | ParamValue::Text(s) | ParamValue::Choice(s) => Ok(PlaneRef::parse(&s)),
+        _ => Err(format!("{name} takes a plane")),
     }
 }
 
@@ -32,34 +50,24 @@ impl Feature for OffsetPlaneFeature {
         "offset_plane"
     }
     fn name(&self) -> String {
-        format!("Offset plane ({} + {})", self.base, self.offset)
+        format!("Offset plane ({} + {})", self.base.short(), self.offset)
     }
     fn params(&self) -> Vec<ParamSpec> {
-        let mut v = vec![
-            ParamSpec::choice("base", "Base", vec!["XY", "XZ", "YZ", "Feature"], &self.base),
+        vec![
+            ParamSpec::plane("base", "Base plane", self.base.clone()),
             ParamSpec::length("offset", "Offset", &self.offset),
-        ];
-        if self.base == "Feature" {
-            v.push(ParamSpec::feature_ref(
-                "base_feature",
-                "Base plane feature",
-                PLANE_TYPES.to_vec(),
-                self.base_feature.unwrap_or(0),
-            ));
-        }
-        v
+        ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
-            ("base", ParamValue::Choice(p)) => self.base = p,
+            ("base", v) => self.base = plane_value(name, v)?,
             ("offset", ParamValue::Expr(s)) => self.offset = s,
-            ("base_feature", ParamValue::FeatureRef(i)) => self.base_feature = Some(i),
             (n, _) => return Err(format!("unknown parameter {n}")),
         }
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let mut p = resolve_base(&self.base, self.base_feature, ctx)?;
+        let mut p = ctx.plane_of_ref(&self.base)?;
         p.origin += p.normal() * ctx.eval(&self.offset)?;
         Ok(FeatureOutput { plane: Some(p), ..Default::default() })
     }
@@ -70,14 +78,14 @@ impl Feature for OffsetPlaneFeature {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AnglePlaneFeature {
-    pub base: String,
+    pub base: PlaneRef,
     pub axis: String,
     pub angle: String,
 }
 
 impl Default for AnglePlaneFeature {
     fn default() -> Self {
-        AnglePlaneFeature { base: "XY".into(), axis: "X".into(), angle: "45".into() }
+        AnglePlaneFeature { base: PlaneRef::Datum("XY".into()), axis: "X".into(), angle: "45".into() }
     }
 }
 
@@ -87,18 +95,18 @@ impl Feature for AnglePlaneFeature {
         "angle_plane"
     }
     fn name(&self) -> String {
-        format!("Plane at angle ({} about {} by {})", self.base, self.axis, self.angle)
+        format!("Plane at angle ({} about {} by {})", self.base.short(), self.axis, self.angle)
     }
     fn params(&self) -> Vec<ParamSpec> {
         vec![
-            ParamSpec::choice("base", "Base", vec!["XY", "XZ", "YZ"], &self.base),
+            ParamSpec::plane("base", "Base plane", self.base.clone()),
             ParamSpec::choice("axis", "Axis", vec!["X", "Y", "Z"], &self.axis),
             ParamSpec::angle("angle", "Angle", &self.angle),
         ]
     }
     fn set_param(&mut self, name: &str, value: ParamValue) -> Result<(), String> {
         match (name, value) {
-            ("base", ParamValue::Choice(p)) => self.base = p,
+            ("base", v) => self.base = plane_value(name, v)?,
             ("axis", ParamValue::Choice(p)) => self.axis = p,
             ("angle", ParamValue::Expr(s)) => self.angle = s,
             (n, _) => return Err(format!("unknown parameter {n}")),
@@ -106,7 +114,8 @@ impl Feature for AnglePlaneFeature {
         Ok(())
     }
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
-        let base = datum_plane(&self.base);
+        // The axis is a world axis through the base plane's origin.
+        let base = ctx.plane_of_ref(&self.base)?;
         let q = DQuat::from_axis_angle(datum_axis(&self.axis), ctx.eval(&self.angle)?.to_radians());
         let p = Plane { origin: base.origin, x_axis: q * base.x_axis, y_axis: q * base.y_axis };
         Ok(FeatureOutput { plane: Some(p), ..Default::default() })

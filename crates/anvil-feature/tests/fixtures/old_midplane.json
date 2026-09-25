@@ -1,0 +1,221 @@
+{
+  "name": "old midplane",
+  "features": [
+    {
+      "feature": {
+        "type": "sketch",
+        "source": {
+          "Datum": "XY"
+        },
+        "sketch": {
+          "plane": {
+            "origin": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "x_axis": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "y_axis": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "entities": [
+            {
+              "value": null,
+              "version": 0
+            },
+            {
+              "value": {
+                "Point": {
+                  "pos": [
+                    -20.0,
+                    -10.0
+                  ],
+                  "fixed": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Point": {
+                  "pos": [
+                    20.0,
+                    -10.0
+                  ],
+                  "fixed": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Point": {
+                  "pos": [
+                    20.0,
+                    10.0
+                  ],
+                  "fixed": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Point": {
+                  "pos": [
+                    -20.0,
+                    10.0
+                  ],
+                  "fixed": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Line": {
+                  "a": {
+                    "idx": 1,
+                    "version": 1
+                  },
+                  "b": {
+                    "idx": 2,
+                    "version": 1
+                  },
+                  "construction": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Line": {
+                  "a": {
+                    "idx": 2,
+                    "version": 1
+                  },
+                  "b": {
+                    "idx": 3,
+                    "version": 1
+                  },
+                  "construction": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Line": {
+                  "a": {
+                    "idx": 3,
+                    "version": 1
+                  },
+                  "b": {
+                    "idx": 4,
+                    "version": 1
+                  },
+                  "construction": false
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Line": {
+                  "a": {
+                    "idx": 4,
+                    "version": 1
+                  },
+                  "b": {
+                    "idx": 1,
+                    "version": 1
+                  },
+                  "construction": false
+                }
+              },
+              "version": 1
+            }
+          ],
+          "constraints": [
+            {
+              "value": null,
+              "version": 0
+            },
+            {
+              "value": {
+                "Horizontal": {
+                  "idx": 5,
+                  "version": 1
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Vertical": {
+                  "idx": 6,
+                  "version": 1
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Horizontal": {
+                  "idx": 7,
+                  "version": 1
+                }
+              },
+              "version": 1
+            },
+            {
+              "value": {
+                "Vertical": {
+                  "idx": 8,
+                  "version": 1
+                }
+              },
+              "version": 1
+            }
+          ]
+        },
+        "dim_exprs": []
+      },
+      "suppressed": false
+    },
+    {
+      "feature": {
+        "type": "extrude",
+        "sketch": 0,
+        "distance": "12",
+        "symmetric": false,
+        "operation": "new",
+        "target": 0,
+        "regions": ""
+      },
+      "suppressed": false
+    },
+    {
+      "feature": {
+        "type": "midplane",
+        "first": "XY",
+        "second": "0"
+      },
+      "suppressed": false
+    }
+  ],
+  "exprs": {
+    "params": {}
+  },
+  "appearance": {},
+  "material": {},
+  "unit": "mm",
+  "rollback": null
+}

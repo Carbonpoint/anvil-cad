@@ -40,6 +40,8 @@ pub struct ShotOptions {
     pub select: Option<usize>,
     /// Open the Settings window before the picture.
     pub open_settings: bool,
+    /// Ribbon tab to show, by name. `None` keeps the Solid tab.
+    pub tab: Option<String>,
     /// Keep only this part of the picture: (x, y, width, height) in
     /// pixels. Useful for a document that shows one panel or one ribbon
     /// group rather than the whole window.
@@ -55,6 +57,7 @@ impl Default for ShotOptions {
             frames: 4,
             select: None,
             open_settings: false,
+            tab: None,
             crop: None,
         }
     }
@@ -130,6 +133,9 @@ pub fn sample_image(name: &str, opts: &ShotOptions) -> Option<ColorImage> {
     app.panels.selected = opts.select;
     if opts.open_settings {
         app.run_action(crate::ribbon::RibbonAction::ToggleSettings);
+    }
+    if let Some(t) = &opts.tab {
+        app.show_tab(t);
     }
     Some(window_image(&mut app, opts))
 }

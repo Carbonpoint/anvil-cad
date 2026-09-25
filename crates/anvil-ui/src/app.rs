@@ -198,13 +198,16 @@ pub struct AnvilApp {
 /// What a click in the model viewport may select.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectFilter {
-    All,
+    All = 0,
     Body,
     Face,
     Edge,
 }
 
 const DATUMS: [(&str, Plane); 3] = [("XY", Plane::XY), ("XZ", Plane::XZ), ("YZ", Plane::YZ)];
+
+/// Status text while a plane parameter waits for a pick in the view.
+const PLANE_PICK_HINT: &str = "Click a flat face, or a datum plane. Escape cancels.";
 
 impl AnvilApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
@@ -510,6 +513,92 @@ impl AnvilApp {
         self.status = "Click a datum plane (XY, XZ, YZ) or a face to sketch on. Esc cancels.".into();
     }
 
+    /// Open a file. An Anvil document replaces the current one. A STEP,
+    /// 3MF or STL file starts a new document that imports it, so a file
+    /// exported from another CAD tool opens like a document.
+    pub fn open_path(&mut self, p: &std::path::Path) {
+        let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase();
+        let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("Imported").to_string();
+        let path = p.display().to_string();
+        let doc = match ext.as_str() {
+            "step" | "stp" => {
+                let mut d = Document::new(&stem);
+                d.add_feature(Box::new(anvil_feature::features::solid_extra::ImportStepFeature {
+                    path: path.clone(),
+                    scale: "1".into(),
+                }));
+                Ok(d)
+            }
+            "3mf" | "stl" => {
+                let mut d = Document::new(&stem);
+                d.add_feature(Box::new(anvil_feature::features::solid_extra::MeshFeature {
+                    path: path.clone(),
+                    scale: "1".into(),
+                }));
+                Ok(d)
+            }
+            _ => anvil_io::load_document(p).map_err(|e| e.to_string()),
+        };
+        match doc {
+            Ok(d) => {
+                let imported = !matches!(ext.as_str(), "anvil" | "json");
+                self.doc = d;
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.fit_view();
+                // An import saves next to the file it came from, as .anvil.
+                self.file_path = if imported { p.with_extension("anvil").display().to_string() } else { path.clone() };
+                self.status = match self.doc.features.first() {
+                    Some(n) if imported => match (&n.error, n.output.as_ref().and_then(|o| o.note.as_ref())) {
+                        (Some(e), _) => format!("Import failed: {e}"),
+                        (None, Some(note)) => format!("Imported {path}. {note}"),
+                        (None, None) => format!("Imported {path}"),
+                    },
+                    _ => format!("Loaded {path}"),
+                };
+            }
+            Err(e) => self.status = format!("Open failed: {e}"),
+        }
+    }
+
+    /// Show the ribbon tab with this name. Returns false when no tab has it.
+    pub fn show_tab(&mut self, name: &str) -> bool {
+        match self.ribbon.iter().position(|t| t.name.eq_ignore_ascii_case(name)) {
+            Some(i) => {
+                self.active_tab = i;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The plane reference under the pointer while a plane parameter of
+    /// feature `fi` is being picked: a flat face of an earlier feature, or
+    /// a datum square.
+    fn plane_ref_under_pointer(&self, fi: usize) -> Result<anvil_feature::PlaneRef, String> {
+        use anvil_feature::PlaneRef;
+        if let Some(t) = self.hovered_tri {
+            let (body_fi, body) = self.scene.body_of_tri(t).ok_or("No body under the pointer")?;
+            if body_fi >= fi {
+                return Err("Pick a face of a feature that comes before this one".into());
+            }
+            let solid = self.scene.solid_of_tri(&self.doc, t).ok_or("No body under the pointer")?;
+            let face = self.scene.face_of_tri(t).and_then(|f| solid.faces.get(f)).ok_or("Face not found")?;
+            if face.surface != anvil_kernel::Surface::Plane {
+                return Err("That face is curved. Click a flat face, or a datum plane.".into());
+            }
+            let plane = self.scene.face_plane(&self.doc, t).ok_or("Face not found")?;
+            return Ok(PlaneRef::Face { feature: body_fi, body, plane });
+        }
+        match self.hovered_datum {
+            Some(d) => Ok(PlaneRef::Datum(d.into())),
+            None => Err(PLANE_PICK_HINT.into()),
+        }
+    }
+
     fn start_sketch_on(&mut self, feature: Box<dyn Feature>) {
         let idx = self.doc.add_feature(feature);
         self.invalidate();
@@ -589,19 +678,19 @@ impl AnvilApp {
                 self.export_dialog = Some(self.export_format);
             }
             RibbonAction::Load => {
-                let p = PathBuf::from(&self.file_path);
-                match anvil_io::load_document(&p) {
-                    Ok(d) => {
-                        self.doc = d;
-                        self.panels = PanelState::default();
-                        self.mode = Mode::Model;
-                        self.camera.unlock();
-                        self.invalidate();
-                        self.refresh_scene();
-                        self.fit_view();
-                        self.status = format!("Loaded {}", p.display());
-                    }
-                    Err(e) => self.status = format!("Load failed: {e}"),
+                let dir = PathBuf::from(&self.file_path).parent().map(|p| p.to_path_buf()).filter(|p| p.is_dir());
+                let mut dialog = rfd::FileDialog::new()
+                    .set_title("Open")
+                    .add_filter("Anvil, STEP, 3MF or STL", &["anvil", "json", "step", "stp", "3mf", "stl"])
+                    .add_filter("Anvil document", &["anvil", "json"])
+                    .add_filter("STEP (from Fusion: File > Export)", &["step", "stp"])
+                    .add_filter("Mesh", &["3mf", "stl"]);
+                if let Some(d) = dir {
+                    dialog = dialog.set_directory(d);
+                }
+                match dialog.pick_file() {
+                    Some(p) => self.open_path(&p),
+                    None => self.status = "Open cancelled".into(),
                 }
             }
             RibbonAction::ExportGcode => {
@@ -895,6 +984,15 @@ impl AnvilApp {
                 self.file_path = format!("workbook_{}.anvil", &name[..2]);
                 self.status = format!("Workbook {name} loaded. Steps in docs/WORKBOOK.md.");
             }
+            RibbonAction::SetSelectFilter(n) => {
+                self.filter = match n {
+                    0 => SelectFilter::All,
+                    1 => SelectFilter::Body,
+                    2 => SelectFilter::Face,
+                    _ => SelectFilter::Edge,
+                };
+                self.status = format!("Select: {:?}", self.filter);
+            }
             RibbonAction::ToggleUnits => {
                 self.doc.unit = if self.doc.unit == "mm" { "in".into() } else { "mm".into() };
                 self.status = format!("Display unit: {}", self.doc.unit);
@@ -1099,26 +1197,58 @@ impl AnvilApp {
             }
         });
         ui.separator();
-        ui.horizontal_wrapped(|ui| {
-            if let Some(tab) = self.ribbon.get(self.active_tab) {
+        // One row of panels, as in Fusion. A narrow window scrolls the row
+        // instead of clipping it.
+        let filter = self.filter as u8;
+        egui::ScrollArea::horizontal().id_salt("ribbon_row").show(ui, |ui| {
+            ui.horizontal(|ui| {
+                let Some(tab) = self.ribbon.get(self.active_tab) else { return };
+                let mut click = |b: &crate::ribbon::RibbonButton| match b.kind {
+                    ButtonKind::Feature(id) => clicked_feature = Some(id),
+                    ButtonKind::Action(a) => clicked_action = Some(a),
+                };
                 for g in &tab.groups {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
-                            for b in &g.buttons {
-                                let btn = icons::icon_button(ui, b.kind.icon_id(), b.label);
-                                if btn.on_hover_text(b.tooltip).clicked() {
-                                    match b.kind {
-                                        ButtonKind::Feature(id) => clicked_feature = Some(id),
-                                        ButtonKind::Action(a) => clicked_action = Some(a),
-                                    }
+                            let mut any = false;
+                            for b in g.buttons.iter().filter(|b| b.pinned) {
+                                any = true;
+                                let tip = match b.shortcut {
+                                    Some(k) => format!("{} ({k})", b.tooltip),
+                                    None => b.tooltip.to_string(),
+                                };
+                                if icons::icon_only(ui, b.kind.icon_id(), b.label).on_hover_text(tip).clicked() {
+                                    click(b);
                                 }
                             }
+                            if !any {
+                                // Keep the panel names in one line.
+                                ui.allocate_exact_size(egui::vec2(30.0, 30.0), egui::Sense::hover());
+                            }
                         });
-                        ui.label(egui::RichText::new(g.name).small().weak());
+                        // The name is a menu; the triangle comes from egui's icon font.
+                        ui.menu_button(egui::RichText::new(format!("{} \u{23F7}", g.name.to_uppercase())).small(), |ui| {
+                            for b in &g.buttons {
+                                let chosen = matches!(b.kind, ButtonKind::Action(RibbonAction::SetSelectFilter(n)) if n == filter);
+                                ui.horizontal(|ui| {
+                                    let (r, _) = ui.allocate_exact_size(egui::vec2(18.0, 18.0), egui::Sense::hover());
+                                    icons::paint(b.kind.icon_id(), ui.painter(), r, ui.visuals().text_color());
+                                    let mut btn = egui::Button::new(b.label).frame(false).selected(chosen);
+                                    if let Some(k) = b.shortcut {
+                                        btn = btn.shortcut_text(k);
+                                    }
+                                    let resp = ui.add(btn).on_hover_text(b.tooltip);
+                                    if resp.clicked() {
+                                        click(b);
+                                        ui.close();
+                                    }
+                                });
+                            }
+                        });
                     });
                     ui.separator();
                 }
-            }
+            });
         });
         if let Some(id) = clicked_feature {
             if in_sketch {
@@ -1592,6 +1722,51 @@ impl AnvilApp {
         }
 
         match &mut self.mode {
+            Mode::Model if self.panels.plane_pick.is_some() => {
+                let (fi, name) = self.panels.plane_pick.unwrap();
+                if esc || fi >= self.doc.features.len() {
+                    self.panels.plane_pick = None;
+                    self.status = "Plane picking cancelled".into();
+                } else {
+                    let size = self.scene_size() * 0.6;
+                    if let Some((x, y)) = pointer {
+                        for (datum, plane) in DATUMS {
+                            if let Some(p) = proj.pixel_to_plane(x, y, &plane) {
+                                if p.x.abs() <= size && p.y.abs() <= size {
+                                    self.hovered_datum = Some(datum);
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    // A face in front of a datum square takes the click.
+                    if self.hovered_tri.is_some() {
+                        self.hovered_datum = None;
+                    }
+                    if resp.dragged_by(egui::PointerButton::Primary) {
+                        let d = resp.drag_delta();
+                        self.camera.orbit(d.x as f64, d.y as f64);
+                    }
+                    if resp.clicked() {
+                        match self.plane_ref_under_pointer(fi) {
+                            Ok(r) => {
+                                let label = r.label(&self.doc);
+                                self.doc.edit_feature(fi, |f| {
+                                    let _ = f.set_param(name, anvil_feature::ParamValue::Plane(r));
+                                });
+                                self.panels.drafts.retain(|(i, _), _| *i != fi);
+                                self.panels.plane_pick = None;
+                                self.invalidate();
+                                self.status = match &self.doc.features[fi].error {
+                                    Some(e) => format!("{label}: {e}"),
+                                    None => format!("Plane set to {label}"),
+                                };
+                            }
+                            Err(why) => self.status = why,
+                        }
+                    }
+                }
+            }
             Mode::Model => {
                 if esc && self.region_pick_mode {
                     self.region_pick_mode = false;
@@ -1605,6 +1780,13 @@ impl AnvilApp {
                     && !self.selected_edges.is_empty()
                 {
                     self.add_feature_by_id("fillet");
+                }
+                // E and H, as the ribbon menus show them.
+                if !typing && ui.input(|i| i.key_pressed(egui::Key::E) && !i.modifiers.any()) {
+                    self.add_feature_by_id("extrude");
+                }
+                if !typing && ui.input(|i| i.key_pressed(egui::Key::H) && !i.modifiers.any()) {
+                    self.add_feature_by_id("hole");
                 }
                 if !typing && ui.input(|i| i.key_pressed(egui::Key::Q)) && self.selected_face.is_some() {
                     self.press_pull();
@@ -2034,7 +2216,9 @@ impl AnvilApp {
                 }
             }
         }
-        if let Mode::PickPlane = self.mode {
+        if matches!(self.mode, Mode::PickPlane)
+            || (matches!(self.mode, Mode::Model) && self.panels.plane_pick.is_some())
+        {
             let size = self.scene_size() * 0.6;
             for (name, plane) in DATUMS {
                 let corners = [
@@ -2425,15 +2609,7 @@ impl AnvilApp {
                 ui.separator();
                 ui.label(format!("{} tris", self.scene.mesh.triangle_count()));
                 ui.separator();
-                ui.label("Select:");
-                for (f, label) in [
-                    (SelectFilter::All, "All"),
-                    (SelectFilter::Body, "Body"),
-                    (SelectFilter::Face, "Face"),
-                    (SelectFilter::Edge, "Edge"),
-                ] {
-                    ui.selectable_value(&mut self.filter, f, label);
-                }
+                ui.label(format!("Select: {:?}", self.filter)).on_hover_text("Change it in Solid > SELECT");
                 ui.separator();
                 ui.checkbox(&mut self.show_used_sketches, "Used sketches")
                     .on_hover_text("Also show sketches that a feature already uses");
@@ -2490,6 +2666,7 @@ impl AnvilApp {
 
         if self.panels.selected != selected_before {
             self.region_pick_mode = false;
+            self.panels.plane_pick = None;
         }
 
         egui::SidePanel::right("properties").default_width((260.0 * text_room).min(side_max)).width_range(160.0..=side_max).show(
@@ -2497,8 +2674,15 @@ impl AnvilApp {
             |ui| {
                 fit_panel(ui, |ui| {
                     egui::ScrollArea::both().id_salt("properties_scroll").show(ui, |ui| {
+                        let picking_before = self.panels.plane_pick;
                         if panels::property_panel(ui, &mut self.doc, &mut self.panels) {
                             self.invalidate();
+                        }
+                        if self.panels.plane_pick != picking_before {
+                            self.status = match self.panels.plane_pick {
+                                Some(_) => PLANE_PICK_HINT.into(),
+                                None => "Plane picking cancelled".into(),
+                            };
                         }
                         if let Some(sel) = self.panels.selected {
                             let takes_edges = self
@@ -2799,6 +2983,68 @@ mod layout_tests {
         assert!(app.selected_face.is_some(), "no face selected at {at:?}, status: {}", app.status);
         app.add_feature_by_id("sketch");
         assert!(matches!(app.mode, Mode::Sketch(_)), "Sketch did not open on the face, status: {}", app.status);
+    }
+
+    /// A plate with a Midplane after it: feature 1 makes the Body,
+    /// feature 2 is the Midplane, selected.
+    fn plate_with_midplane(ctx: &egui::Context, w: f32, h: f32) -> AnvilApp {
+        let mut app = AnvilApp::new_headless();
+        let mut doc = Document::new("midplane");
+        doc.add_feature(Box::new(SketchFeature::rectangle("XY", 40.0, 20.0)));
+        doc.add_feature(Box::new(ExtrudeFeature { sketch: 0, distance: "12".into(), ..Default::default() }));
+        doc.add_feature(Box::new(anvil_feature::features::solid_extra::MidplaneFeature::default()));
+        app.doc = doc;
+        app.invalidate();
+        app.refresh_scene();
+        app.fit_view();
+        let _ = view_after_ctx(ctx, &mut app, w, h, Some(2));
+        app
+    }
+
+    /// Pick in view: a click on a flat face sets the plane parameter to
+    /// that face, and the picking state ends.
+    #[test]
+    fn a_plane_parameter_takes_a_face_picked_in_the_view() {
+        let ctx = egui::Context::default();
+        let (w, h) = (1200.0, 800.0);
+        let mut app = plate_with_midplane(&ctx, w, h);
+        let at = point_on_a_face(&ctx, &mut app, w, h).expect("a face is visible");
+        app.panels.plane_pick = Some((2, "first"));
+        click_at(&ctx, &mut app, w, h, at);
+        assert!(app.panels.plane_pick.is_none(), "picking did not end, status: {}", app.status);
+        let first = app.doc.features[2].feature.params().into_iter().find(|p| p.name == "first").unwrap().value;
+        assert!(
+            matches!(first, anvil_feature::ParamValue::Plane(anvil_feature::PlaneRef::Face { feature: 1, .. })),
+            "first is {first:?}, status: {}",
+            app.status
+        );
+        assert!(app.doc.features[2].error.is_none(), "{:?}", app.doc.features[2].error);
+    }
+
+    /// Escape leaves plane picking and changes nothing.
+    #[test]
+    fn escape_cancels_plane_picking() {
+        let ctx = egui::Context::default();
+        let (w, h) = (1200.0, 800.0);
+        let mut app = plate_with_midplane(&ctx, w, h);
+        let at = app.view_rect.center();
+        move_pointer(&ctx, &mut app, w, h, at);
+        app.panels.plane_pick = Some((2, "first"));
+        let before = format!("{:?}", app.doc.features[2].feature.params());
+        let mut i = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(Pos2::ZERO, egui::vec2(w, h))),
+            ..Default::default()
+        };
+        i.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::default(),
+        });
+        let _ = ctx.run(i, |ctx| app.frame_ui(ctx));
+        assert!(app.panels.plane_pick.is_none(), "Escape did not end picking");
+        assert_eq!(before, format!("{:?}", app.doc.features[2].feature.params()));
     }
 
     #[test]
