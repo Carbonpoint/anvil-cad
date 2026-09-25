@@ -392,16 +392,28 @@ pub fn kettle_gated() -> Document {
         alloy: "grey cast iron".into(),
         pour_temp: "1400".into(),
         mold_constant: "0".into(),
+        measured_freeze: "0".into(),
         has_sprue: true,
         sprue: 24,
         choke_diameter: "12".into(),
         has_riser: true,
         riser: 27,
     }));
+    // 29: where the casting may shrink, and whether the pour reaches it.
+    doc.add_feature(Box::new(anvil_feature::features::hot_spots::HotSpotsFeature {
+        metal: "15, 24, 25, 26, 27".into(),
+        casting: "15".into(),
+        risers: "27".into(),
+        pour_at: "24".into(),
+        alloy: "grey cast iron".into(),
+        mold_constant: "0".into(),
+        voxel: "1.5".into(),
+    }));
     let brass = [178, 142, 66];
     for i in 24usize..=27 {
         doc.appearance.insert(i, brass);
     }
+    doc.appearance.insert(29, [220, 40, 40]);
     doc.0
 }
 
@@ -831,7 +843,11 @@ mod tests {
         for (i, f) in doc.features.iter().enumerate() {
             assert!(f.error.is_none(), "feature {i} ({}): {:?}", f.feature.name(), f.error);
         }
-        assert_eq!(doc.bodies().len(), 7, "kettle bodies plus sprue, runner, ingate, riser");
+        // Kettle bodies, sprue, runner, ingate, riser, and the hot spots.
+        assert_eq!(doc.bodies().len(), 8, "kettle bodies plus gating and hot spots");
+        let note = doc.features[29].output.as_ref().unwrap().note.clone().unwrap_or_default();
+        eprintln!("{note}");
+        assert!(note.contains("fill: all the metal is reached"), "{note}");
         let note = doc.features[28].output.as_ref().unwrap().note.clone().unwrap_or_default();
         eprintln!("{note}");
         assert!(note.contains("grey cast iron") && note.contains("choke") && note.contains("riser modulus"));

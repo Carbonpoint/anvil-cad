@@ -360,6 +360,29 @@ inventory::submit! { FeatureDescriptor { id: "riser", label: "Riser", tab: "Soli
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn one_measured_pour_calibrates_the_mold_constant() {
+        let mut doc = crate::Document::new("plate");
+        doc.add_feature(Box::new(crate::features::primitives::BoxFeature {
+            x: "0".into(),
+            y: "0".into(),
+            z: "0".into(),
+            width: "100".into(),
+            depth: "100".into(),
+            height: "10".into(),
+        }));
+        let i = doc.add_feature(Box::new(CastingCheckFeature {
+            casting: 0,
+            measured_freeze: "120".into(),
+            ..Default::default()
+        }));
+        let note = doc.features[i].output.as_ref().unwrap().note.clone().unwrap();
+        // Modulus of a 100 x 100 x 10 plate: 100000 / 24000 = 4.17 mm, so
+        // 120 s gives C = 120 / 4.17^2 = 6.912 s/mm2.
+        assert!(note.contains("C = 6.912 s/mm2 from the measured 120 s"), "{note}");
+        assert!(note.contains("freezes in about 120 s"), "{note}");
+    }
+
     use super::*;
     use crate::Document;
 
@@ -628,6 +651,10 @@ pub const ALLOYS: [Alloy; 3] = [
     },
 ];
 
+fn zero() -> String {
+    "0".into()
+}
+
 pub fn alloy_by_name(name: &str) -> Alloy {
     ALLOYS.iter().copied().find(|a| a.name == name).unwrap_or(ALLOYS[0])
 }
@@ -659,6 +686,10 @@ pub struct CastingCheckFeature {
     pub pour_temp: String,
     /// Chvorinov mold constant in s/mm2; 0 takes the alloy's starting value.
     pub mold_constant: String,
+    /// Freeze time measured on one real pour, in seconds; 0 when there is
+    /// none. When set, it gives the mold constant: C = t / M^2.
+    #[serde(default = "zero")]
+    pub measured_freeze: String,
     pub has_sprue: bool,
     pub sprue: usize,
     /// Diameter of the sprue choke (its smallest section).
@@ -674,6 +705,7 @@ impl Default for CastingCheckFeature {
             alloy: "grey cast iron".into(),
             pour_temp: "1400".into(),
             mold_constant: "0".into(),
+            measured_freeze: "0".into(),
             has_sprue: false,
             sprue: 0,
             choke_diameter: "12".into(),
@@ -698,6 +730,7 @@ impl Feature for CastingCheckFeature {
             ParamSpec::choice("alloy", "Alloy", names, &self.alloy),
             ParamSpec::length("pour_temp", "Pouring temperature (C)", &self.pour_temp),
             ParamSpec::length("mold_constant", "Mold constant s/mm2 (0 = alloy default)", &self.mold_constant),
+            ParamSpec::length("measured_freeze", "Measured freeze time s (0 = none)", &self.measured_freeze),
             ParamSpec::boolean("has_sprue", "Check a sprue", self.has_sprue),
         ];
         if self.has_sprue {
@@ -716,6 +749,7 @@ impl Feature for CastingCheckFeature {
             ("alloy", ParamValue::Choice(a)) => self.alloy = a,
             ("pour_temp", ParamValue::Expr(s)) => self.pour_temp = s,
             ("mold_constant", ParamValue::Expr(s)) => self.mold_constant = s,
+            ("measured_freeze", ParamValue::Expr(s)) => self.measured_freeze = s,
             ("has_sprue", ParamValue::Bool(b)) => self.has_sprue = b,
             ("sprue", ParamValue::FeatureRef(i)) => self.sprue = i,
             ("choke_diameter", ParamValue::Expr(s)) => self.choke_diameter = s,
@@ -738,17 +772,26 @@ impl Feature for CastingCheckFeature {
         }
         let mass_kg = volume * 1e-9 * alloy.density_solid;
         let modulus = volume / area;
+        // One measured pour fixes the mold constant for this alloy and sand.
+        let measured = ctx.eval(&self.measured_freeze)?;
+        let calibrated = (measured > 0.0).then(|| measured / (modulus * modulus));
+        let c = calibrated.unwrap_or(c);
         let freeze = c * modulus * modulus;
         let mut parts = vec![
             format!(
-                "{}: {:.0} cm3, {:.2} kg, area {:.0} cm2, modulus {:.2} mm, freezes in about {:.0} s (C = {} s/mm2, calibrate from one pour)",
+                "{}: {:.0} cm3, {:.2} kg, area {:.0} cm2, modulus {:.2} mm, freezes in about {:.0} s ({})",
                 alloy.name,
                 volume * 1e-3,
                 mass_kg,
                 area * 1e-2,
                 modulus,
                 freeze,
-                c
+                match calibrated {
+                    Some(k) => format!(
+                        "C = {k:.3} s/mm2 from the measured {measured:.0} s; use it as the mold constant for this sand"
+                    ),
+                    None => format!("C = {c} s/mm2, calibrate from one pour"),
+                }
             ),
             if pour >= alloy.pour_min && pour <= alloy.pour_max {
                 format!("pour {pour:.0} C is inside {:.0} to {:.0} C", alloy.pour_min, alloy.pour_max)

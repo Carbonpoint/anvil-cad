@@ -188,6 +188,38 @@ metal is in before the thin wall freezes, with little margin. The
 pressurized 1:2:1 ratio wants a 226 mm2 runner and 113 mm2 of ingates.
 The riser modulus, 7.1 mm, is far above 1.2 times the casting modulus.
 
+### Hot spots (a voxel model)
+
+Hot spots (Solid tab, Casting panel) is a coarse fill and feeding model
+that needs no outside solver. The gated kettle has one as feature 29,
+with the casting, the gating, the riser and the sprue marked:
+
+* **Fill.** Metal spreads from the top of the sprue through touching
+  voxels. All of the kettle is reached.
+* **Freezing order.** Each voxel's distance to the mold ranks when it
+  freezes (the inscribed sphere method, Heuvers' circles in 3D). The
+  last metal to freeze is in the riser, 17 mm from the mold, as it
+  should be.
+* **Feeding.** Walking back from the last voxel to freeze, liquid regions
+  join. A region that reaches the riser only through metal that froze
+  first was cut off while it froze: a shrinkage pocket. The kettle shows
+  one real pocket, around the lug boss on the far side from the riser
+  (about 14 cm3 of the shoulder, cut off from 3 s to 8 s). Four specks of
+  0.1 cm3 on the ridge sit at 90 degree steps, so they come from the
+  voxel grid; at 1.5 mm the 3 mm wall is only two voxels thick. Use
+  0.75 mm voxels for a closer look.
+
+The pockets are a red voxel body. They lie inside the metal, so select
+the Hot spots feature: its outline shows through the part, dashed where
+metal covers it. Times come from Chvorinov with the
+distance as the modulus. That is exact for a plate and too long for a
+bar or a ball, so the times are an upper bound and the order is what
+counts.
+
+**Calibration.** Casting check takes a measured freeze time from one real
+pour. With it, the check reports the mold constant C = t / M^2 for that
+alloy and sand; enter it as the mold constant of both features.
+
 `anvil-cli kettle --variant gated` writes the Truchas case for the real
 fill and freeze run. The numbers are starting values from the survey in
 docs/research/casting_simulation.md and need one calibration pour.
@@ -206,6 +238,8 @@ docs/research/casting_simulation.md and need one calibration pour.
 
 ## Progress log
 
+* 2026-09-25: Hot spots voxel model (fill, freezing order, isolated
+  pockets) and calibration of the mold constant from a measured pour.
 * 2026-09-25: spout re-aimed to a 48 degree rise with a thin lip (Pipe
   lip length and lip diameter).
 * 2026-09-25: match plate sample with the gating split between the

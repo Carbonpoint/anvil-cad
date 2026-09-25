@@ -10,6 +10,7 @@ pub mod emboss;
 pub mod extrude;
 pub mod fillet;
 pub mod hole;
+pub mod hot_spots;
 pub mod lattice;
 pub mod loft;
 pub mod pending;
