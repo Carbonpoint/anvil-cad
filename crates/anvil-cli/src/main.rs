@@ -3,7 +3,7 @@
 //!
 //! Commands:
 //!   anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
-//!   anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
+//!   anvil-cli kettle [--variant plain|gated|mold|match] [--out DIR] [--voxel MM] [--end-time S]
 //!   anvil-cli lattice --stl IN [--kind gyroid] [--cell 8] [--wall 1.2] [--skin 1.2] [--res 0.4] [--out DIR]
 //!   anvil-cli aircraft [--out DIR]
 //!   anvil-cli slice --stl IN [--layer 0.2] [--res 0.4] [--out DIR]
@@ -20,7 +20,7 @@ const USAGE: &str = "anvil-cli: headless Anvil CAD tools
 
 USAGE:
     anvil-cli card --name NAME --url URL [--out DIR] [--font FONT]
-    anvil-cli kettle [--variant plain|gated|mold] [--out DIR]
+    anvil-cli kettle [--variant plain|gated|mold|match] [--out DIR] [--voxel MM] [--end-time S]
     anvil-cli lattice --stl IN [options] [--out DIR]
     anvil-cli aircraft [--out DIR]
     anvil-cli slice --stl IN [--layer 0.2] [--res 0.4] [--out DIR]
@@ -57,6 +57,7 @@ COMMANDS:
 OPTIONS for kettle:
     --variant V    plain (default), gated (with sprue, runner, riser), or
                    mold (pattern halves, core, core box)
+                   match (pattern halves on a match plate, with gating)
     --out DIR      Output folder (created if missing)
 
 OPTIONS for lattice:
@@ -179,10 +180,14 @@ fn run_card(a: &CardArgs) -> Result<(), String> {
 struct KettleArgs {
     variant: String,
     out: PathBuf,
+    /// Voxel size of the Truchas mesh, mm.
+    voxel: f64,
+    /// Simulated seconds for Truchas; 0 runs a little past the fill.
+    end_time: f64,
 }
 
 fn parse_kettle(args: &[String]) -> Result<KettleArgs, String> {
-    let mut a = KettleArgs { variant: "plain".into(), out: PathBuf::from(".") };
+    let mut a = KettleArgs { variant: "plain".into(), out: PathBuf::from("."), voxel: 2.0, end_time: 0.0 };
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -194,11 +199,19 @@ fn parse_kettle(args: &[String]) -> Result<KettleArgs, String> {
                 a.out = PathBuf::from(args.get(i + 1).ok_or("--out needs a value")?);
                 i += 2;
             }
+            "--voxel" => {
+                a.voxel = args.get(i + 1).and_then(|v| v.parse().ok()).ok_or("--voxel needs a number (mm)")?;
+                i += 2;
+            }
+            "--end-time" => {
+                a.end_time = args.get(i + 1).and_then(|v| v.parse().ok()).ok_or("--end-time needs a number (s)")?;
+                i += 2;
+            }
             other => return Err(format!("unknown option {other}")),
         }
     }
-    if !["plain", "gated", "mold"].contains(&a.variant.as_str()) {
-        return Err(format!("unknown variant {}; use plain, gated, or mold", a.variant));
+    if !["plain", "gated", "mold", "match"].contains(&a.variant.as_str()) {
+        return Err(format!("unknown variant {}; use plain, gated, mold, or match", a.variant));
     }
     Ok(a)
 }
@@ -207,6 +220,7 @@ fn run_kettle(a: &KettleArgs) -> Result<(), String> {
     let doc = match a.variant.as_str() {
         "gated" => anvil_io::kettle::kettle_gated(),
         "mold" => anvil_io::kettle::kettle_mold(),
+        "match" => anvil_io::kettle::kettle_match_plate(),
         _ => anvil_io::kettle::kettle(),
     };
     for (i, f) in doc.features.iter().enumerate() {
@@ -226,8 +240,8 @@ fn run_kettle(a: &KettleArgs) -> Result<(), String> {
     if a.variant == "gated" {
         let alloy = anvil_feature::features::casting::ALLOYS[0];
         let dir = a.out.join("truchas");
-        let written =
-            anvil_io::casting::write_truchas_case(&doc, 15, &alloy, 1400.0, 1.5, &dir).map_err(|e| e.to_string())?;
+        let written = anvil_io::casting::write_truchas_case(&doc, 15, &alloy, 1400.0, 1.5, a.voxel, a.end_time, &dir)
+            .map_err(|e| e.to_string())?;
         println!("Wrote a Truchas case ({} files) to {}", written.len(), dir.display());
     }
     Ok(())
@@ -856,7 +870,7 @@ mod tests {
     #[test]
     fn parses_kettle_options() {
         let a = parse_kettle(&["--variant".into(), "gated".into(), "--out".into(), "o".into()]).unwrap();
-        assert_eq!(a, KettleArgs { variant: "gated".into(), out: PathBuf::from("o") });
+        assert_eq!(a, KettleArgs { variant: "gated".into(), out: PathBuf::from("o"), voxel: 2.0, end_time: 0.0 });
         assert!(parse_kettle(&["--variant".into(), "cup".into()]).is_err());
     }
 

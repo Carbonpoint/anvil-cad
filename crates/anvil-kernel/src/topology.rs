@@ -414,6 +414,65 @@ impl Solid {
     }
 }
 
+/// Volume, centre and inertia of a solid of unit density.
+#[derive(Clone, Copy, Debug)]
+pub struct MassProperties {
+    /// mm3.
+    pub volume: f64,
+    pub centroid: DVec3,
+    /// Inertia tensor about the centroid, in mm5 (times the density
+    /// gives mass times mm2).
+    pub inertia: anvil_math::DMat3,
+}
+
+impl Solid {
+    /// Volume, centroid and inertia tensor about the centroid, for a unit
+    /// density, by summing the tetrahedra from the origin to each triangle.
+    pub fn mass_properties(&self) -> MassProperties {
+        let m = crate::mesh::tessellate(self);
+        let (mut vol, mut first) = (0.0, DVec3::ZERO);
+        // Second moments: x2, y2, z2, xy, yz, zx.
+        let mut s = [0.0f64; 6];
+        for t in m.indices.as_chunks::<3>().0 {
+            let (a, b, c) = (m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]);
+            let v = a.dot(b.cross(c)) / 6.0;
+            vol += v;
+            first += (a + b + c) / 4.0 * v;
+            let sq = |i: usize| {
+                let (p, q, r) = (a[i], b[i], c[i]);
+                v / 10.0 * (p * p + q * q + r * r + p * q + p * r + q * r)
+            };
+            let cross = |i: usize, j: usize| {
+                v / 20.0
+                    * (2.0 * (a[i] * a[j] + b[i] * b[j] + c[i] * c[j])
+                        + a[i] * b[j]
+                        + a[j] * b[i]
+                        + a[i] * c[j]
+                        + a[j] * c[i]
+                        + b[i] * c[j]
+                        + b[j] * c[i])
+            };
+            s[0] += sq(0);
+            s[1] += sq(1);
+            s[2] += sq(2);
+            s[3] += cross(0, 1);
+            s[4] += cross(1, 2);
+            s[5] += cross(2, 0);
+        }
+        let centroid = if vol.abs() > 1e-300 { first / vol } else { DVec3::ZERO };
+        // About the origin, then moved to the centroid.
+        let c = centroid;
+        let (xx, yy, zz) = (s[0] - vol * c.x * c.x, s[1] - vol * c.y * c.y, s[2] - vol * c.z * c.z);
+        let (xy, yz, zx) = (s[3] - vol * c.x * c.y, s[4] - vol * c.y * c.z, s[5] - vol * c.z * c.x);
+        let inertia = anvil_math::DMat3::from_cols(
+            DVec3::new(yy + zz, -xy, -zx),
+            DVec3::new(-xy, xx + zz, -yz),
+            DVec3::new(-zx, -yz, xx + yy),
+        );
+        MassProperties { volume: vol, centroid, inertia }
+    }
+}
+
 impl Solid {
     /// Remove T-junctions: where a vertex lies on the interior of another
     /// face's edge, insert it into that face loop. CSG output needs this so
@@ -1011,6 +1070,21 @@ mod feature_edge_tests {
     /// along the split. The split line is not a feature edge: before the
     /// sliver was allowed to vote, its noisy normal drew a stray line
     /// across the face.
+    #[test]
+    fn a_box_has_the_textbook_inertia() {
+        // A 20 x 10 x 4 box: Ixx = V (b2 + c2) / 12 about its centre.
+        let b = crate::ops::box_solid(DVec3::new(5.0, -3.0, 2.0), DVec3::new(20.0, 10.0, 4.0)).unwrap();
+        let mp = b.mass_properties();
+        let v = 800.0;
+        assert!((mp.volume - v).abs() < 1e-9);
+        assert!((mp.centroid - DVec3::new(15.0, 2.0, 4.0)).length() < 1e-9, "{:?}", mp.centroid);
+        let i = mp.inertia;
+        assert!((i.x_axis.x - v * (100.0 + 16.0) / 12.0).abs() < 1e-6, "{i:?}");
+        assert!((i.y_axis.y - v * (400.0 + 16.0) / 12.0).abs() < 1e-6);
+        assert!((i.z_axis.z - v * (400.0 + 100.0) / 12.0).abs() < 1e-6);
+        assert!(i.x_axis.y.abs() < 1e-6 && i.y_axis.z.abs() < 1e-6 && i.z_axis.x.abs() < 1e-6);
+    }
+
     #[test]
     fn a_sliver_does_not_draw_a_line_across_a_flat_face() {
         let mut s = Solid::default();

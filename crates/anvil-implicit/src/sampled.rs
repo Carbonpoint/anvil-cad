@@ -35,51 +35,7 @@ impl Sampled {
             ((hi.y - lo.y) / step).ceil().max(1.0) as usize,
             ((hi.z - lo.z) / step).ceil().max(1.0) as usize,
         ];
-        let idx = |i: usize, j: usize, k: usize| (i * n[1] + j) * n[2] + k;
-        // Parity along x rows: for each (j, k) row through voxel centres,
-        // collect the x of every triangle crossing, then walk the row.
-        let mut crossings: Vec<Vec<f64>> = vec![Vec::new(); n[1] * n[2]];
-        for t in tris {
-            let (a, b, c) = (t[0], t[1], t[2]);
-            let ymin = a.y.min(b.y).min(c.y);
-            let ymax = a.y.max(b.y).max(c.y);
-            let zmin = a.z.min(b.z).min(c.z);
-            let zmax = a.z.max(b.z).max(c.z);
-            let j0 = (((ymin - lo.y) / step - 0.5).ceil().max(0.0)) as usize;
-            let j1 = (((ymax - lo.y) / step - 0.5).floor().min(n[1] as f64 - 1.0)) as isize;
-            let k0 = (((zmin - lo.z) / step - 0.5).ceil().max(0.0)) as usize;
-            let k1 = (((zmax - lo.z) / step - 0.5).floor().min(n[2] as f64 - 1.0)) as isize;
-            for j in j0..=(j1.max(-1) as usize).min(n[1].saturating_sub(1)) {
-                if j1 < 0 {
-                    break;
-                }
-                let y = lo.y + (j as f64 + 0.5) * step;
-                for k in k0..=(k1.max(-1) as usize).min(n[2].saturating_sub(1)) {
-                    if k1 < 0 {
-                        break;
-                    }
-                    let z = lo.z + (k as f64 + 0.5) * step;
-                    if let Some(x) = ray_x(a, b, c, y, z) {
-                        crossings[j * n[2] + k].push(x);
-                    }
-                }
-            }
-        }
-        let mut inside = vec![false; n[0] * n[1] * n[2]];
-        for j in 0..n[1] {
-            for k in 0..n[2] {
-                let xs = &mut crossings[j * n[2] + k];
-                if xs.is_empty() {
-                    continue;
-                }
-                xs.sort_by(|a, b| a.total_cmp(b));
-                for i in 0..n[0] {
-                    let x = lo.x + (i as f64 + 0.5) * step;
-                    let before = xs.partition_point(|&c| c < x);
-                    inside[idx(i, j, k)] = before % 2 == 1;
-                }
-            }
-        }
+        let inside = inside_grid(tris, lo, step, n);
         // Distance to the nearest voxel of the other sign, both ways.
         let d_out = distance_transform(&inside, n, true);
         let d_in = distance_transform(&inside, n, false);
@@ -95,6 +51,64 @@ impl Sampled {
         let k = k.min(self.n[2] - 1);
         self.values[(i * self.n[1] + j) * self.n[2] + k]
     }
+}
+
+/// Which voxel centres of the grid (`lo`, `step`, `n` voxels per axis,
+/// x-major) lie inside the closed triangle mesh, by ray parity along x
+/// rows. Used to put several bodies on one grid.
+pub fn inside_grid(tris: &[[DVec3; 3]], lo: DVec3, step: f64, n: [usize; 3]) -> Vec<bool> {
+    let idx = |i: usize, j: usize, k: usize| (i * n[1] + j) * n[2] + k;
+    // Parity along x rows: for each (j, k) row through voxel centres,
+    // collect the x of every triangle crossing, then walk the row.
+    let mut crossings: Vec<Vec<f64>> = vec![Vec::new(); n[1] * n[2]];
+    for t in tris {
+        let (a, b, c) = (t[0], t[1], t[2]);
+        let ymin = a.y.min(b.y).min(c.y);
+        let ymax = a.y.max(b.y).max(c.y);
+        let zmin = a.z.min(b.z).min(c.z);
+        let zmax = a.z.max(b.z).max(c.z);
+        let j0 = (((ymin - lo.y) / step - 0.5).ceil().max(0.0)) as usize;
+        let j1 = (((ymax - lo.y) / step - 0.5).floor().min(n[1] as f64 - 1.0)) as isize;
+        let k0 = (((zmin - lo.z) / step - 0.5).ceil().max(0.0)) as usize;
+        let k1 = (((zmax - lo.z) / step - 0.5).floor().min(n[2] as f64 - 1.0)) as isize;
+        for j in j0..=(j1.max(-1) as usize).min(n[1].saturating_sub(1)) {
+            if j1 < 0 {
+                break;
+            }
+            let y = lo.y + (j as f64 + 0.5) * step;
+            for k in k0..=(k1.max(-1) as usize).min(n[2].saturating_sub(1)) {
+                if k1 < 0 {
+                    break;
+                }
+                let z = lo.z + (k as f64 + 0.5) * step;
+                if let Some(x) = ray_x(a, b, c, y, z) {
+                    crossings[j * n[2] + k].push(x);
+                }
+            }
+        }
+    }
+    let mut inside = vec![false; n[0] * n[1] * n[2]];
+    for j in 0..n[1] {
+        for k in 0..n[2] {
+            let xs = &mut crossings[j * n[2] + k];
+            if xs.is_empty() {
+                continue;
+            }
+            xs.sort_by(|a, b| a.total_cmp(b));
+            for i in 0..n[0] {
+                let x = lo.x + (i as f64 + 0.5) * step;
+                let before = xs.partition_point(|&c| c < x);
+                inside[idx(i, j, k)] = before % 2 == 1;
+            }
+        }
+    }
+    inside
+}
+
+/// Squared Euclidean distance, in voxels, from every voxel to the nearest
+/// voxel whose flag equals `target`.
+pub fn distance_squared(inside: &[bool], n: [usize; 3], target: bool) -> Vec<f64> {
+    distance_transform(inside, n, target)
 }
 
 /// x where the line through (y, z) crosses the triangle, if it does. The

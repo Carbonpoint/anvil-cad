@@ -25,8 +25,20 @@ the mold. Stage 5 is the simulation.
 
 Spout: the shape must pour without dripping. The rules of thumb are a
 sharp thin lip, a bore that narrows toward the tip, an outlet above the
-full water level, and a rise of 40 to 50 degrees. The spout is parametric
-so these can be tuned, and stage 5 can test pouring later.
+full water level, and a rise of 40 to 50 degrees. The sample meets them:
+
+* **Rise:** 48 degrees at the tip (`SPOUT_RISE_DEG`). The first spout rose
+  78 degrees at the tip, which makes the kettle tilt far before it pours
+  and lets the water run down the outside.
+* **Lip:** over the last 8 mm (`lip_len`) the outside eases from the
+  taper down to 13.4 mm (`lip_d`), which leaves a 0.8 mm edge over the
+  11.8 mm bore at the tip. The Pipe feature does this with its lip
+  length and lip diameter, so the mold pattern gets the same lip.
+* **Bore:** narrows from 18 mm to 11 mm.
+* **Outlet:** the tip sits at z = 88 mm, above the ridge and 6 mm under
+  the collar, so the kettle fills to just under the outlet.
+
+Stage 5 can test the pouring later.
 
 ## Design decisions
 
@@ -68,8 +80,8 @@ against the full mesh, so the result is still exact.
 Examples > Casting samples > Kettle, or `anvil_io::kettle::kettle()`. The document
 builds in about 4 seconds on a workstation and renders in under a
 second. Three bodies: body 208 cm3 (1.50 kg in cast iron), bail 15 cm3,
-lid 27 cm3. The spout tip reaches x = 101 mm, so the kettle is 181 mm
-wide, the bail apex is at 189 mm.
+lid 27 cm3. The spout tip reaches x = 101.8 mm, so the kettle is about
+182 mm wide, the bail apex is at 189 mm.
 
 ![Kettle](kettle.png)
 
@@ -143,9 +155,27 @@ a printed pattern and a foundry pattern differ.
 
 ![Kettle mold](kettle_mold.png)
 
-The gating from stage 3 is not on the pattern yet. It goes onto the
-match plate between the halves, which is the next step, together with
-a plane pick for the parting plane so any body can be split the same way.
+### Match plate
+
+Examples > Casting samples > Match plate, `anvil_io::kettle::kettle_match_plate()`,
+or `anvil-cli kettle --variant match`. The two pattern halves sit on the
+two faces of a 12 mm plate, with the gating on the plate:
+
+| Part | Where |
+| --- | --- |
+| Runner, 20 x 15 mm | In the plate plane, from 12 mm past the sprue to the ridge band. The extension past the sprue catches the first, cold metal |
+| Ingate, 14 x 6 mm | In the plate plane, into the ridge band |
+| Side riser, 36 mm, with a neck | In the plate plane, beside the ridge band on the spout side, below the spout |
+| Sprue pin, 12 mm widening to 18 mm | A loose pattern on the cope side, standing on the runner at right angles to the plate |
+
+Everything in the plate plane is split with the pattern, so each half
+carries one half of the runner, the ingate and the riser. The halves are
+closed and equal, about 870 cm3 each. In the model the plate stands
+upright beside the kettle. In the foundry it lies flat, cope side up, so
+the sprue pin points up. The plate plane is a plane reference, so Split
+Body can use any flat face or plane Feature instead of XZ.
+
+![Kettle match plate](kettle_match_plate.png)
 
 ## Simulation (stage 5, first cut)
 
@@ -158,8 +188,69 @@ metal is in before the thin wall freezes, with little margin. The
 pressurized 1:2:1 ratio wants a 226 mm2 runner and 113 mm2 of ingates.
 The riser modulus, 7.1 mm, is far above 1.2 times the casting modulus.
 
-`anvil-cli kettle --variant gated` writes the Truchas case for the real
-fill and freeze run. The numbers are starting values from the survey in
+### Hot spots (a voxel model)
+
+Hot spots (Solid tab, Casting panel) is a coarse fill and feeding model
+that needs no outside solver. The gated kettle has one as feature 29,
+with the casting, the gating, the riser and the sprue marked:
+
+* **Fill.** Metal spreads from the top of the sprue through touching
+  voxels. All of the kettle is reached.
+* **Freezing order.** Each voxel's distance to the mold ranks when it
+  freezes (the inscribed sphere method, Heuvers' circles in 3D). The
+  last metal to freeze is in the riser, 17 mm from the mold, as it
+  should be.
+* **Feeding.** Walking back from the last voxel to freeze, liquid regions
+  join. A region that reaches the riser only through metal that froze
+  first was cut off while it froze: a shrinkage pocket. The kettle shows
+  one real pocket, around the lug boss on the far side from the riser
+  (about 14 cm3 of the shoulder, cut off from 3 s to 8 s). Four specks of
+  0.1 cm3 on the ridge sit at 90 degree steps, so they come from the
+  voxel grid; at 1.5 mm the 3 mm wall is only two voxels thick. Use
+  0.75 mm voxels for a closer look.
+
+The pockets are a red voxel body. They lie inside the metal, so select
+the Hot spots feature: its outline shows through the part, dashed where
+metal covers it. Times come from Chvorinov with the
+distance as the modulus. That is exact for a plate and too long for a
+bar or a ball, so the times are an upper bound and the order is what
+counts.
+
+**Calibration.** Casting check takes a measured freeze time from one real
+pour. With it, the check reports the mold constant C = t / M^2 for that
+alloy and sand; enter it as the mold constant of both features.
+
+### Truchas (a real run)
+
+`anvil-cli kettle --variant gated --voxel 2` writes a Truchas case into
+`truchas/`: `mesh.exo`, an Exodus II voxel mesh of the mold (block 1 sand,
+block 2 the empty cavity, at least 30 mm of sand round it), and two decks.
+
+* `casting.inp` is the fill: flow and heat. Metal pours at the pour speed
+  through the middle of the cup top until a little past the expected
+  fill; the rest of the cup top is open to the room, so the air (void)
+  can leave.
+* `freeze.inp` is the freeze on its own, from a full cavity at the pour
+  temperature. Truchas crashes when void, flow and freezing meet (its own
+  htvoid3 test crashes the same way), so the two run apart.
+
+Both were checked against Truchas built from source on stalker, with a
+60 x 30 x 8 mm grey iron plate fed by a 12 mm sprue
+(`cargo run -p anvil-io --example truchas_plate`), at 2 mm voxels:
+
+| Run | Result |
+| --- | --- |
+| Fill, 4 cores, 1 s | Fills at the predicted rate, 9% per 0.05 s, full in 0.56 s; 91% at 1 s and 99.5% at 20 s as trapped air leaves |
+| Freeze, 16 cores, 1 minute | First solid at 6 s, half at 24 s, 99.7% at 60 s |
+| Last metal to freeze | Truchas: (17, 15, 6) mm, the sprue to plate junction; Hot spots: (7.5, 14.5, 6.5), the same junction, 10 mm nearer the sprue axis |
+
+`scripts/truchas_fill.py` prints the fill and freeze table from a run.
+Two things follow. The textbook mold constant of 1.5 s/mm2 gives this
+plate about 13 s to freeze; Truchas, with the sand properties in the deck,
+gives 60 s, which is a mold constant near 7 s/mm2. Calibrate from one pour
+before trusting either. And the kettle at 2 mm is 924,000 cells and about
+13 s per step on 32 cores, so its fill wants a day on one machine or a
+few hours on the cluster. The numbers are starting values from the survey in
 docs/research/casting_simulation.md and need one calibration pour.
 
 ## Known limits
@@ -168,13 +259,22 @@ docs/research/casting_simulation.md and need one calibration pour.
   edges shared by more than two faces, the lid about 100. There are no
   open edges, so slicers accept the meshes. ADR 0001 (a tolerant kernel)
   is the real fix.
-* The spout is a plain tapered tube. The lip is not thinned yet.
+* The match plate layout is a first cut: the gate and riser sizes come
+  from the textbook ratios of the casting check, not from a flow run.
 * An edit reruns the edited feature and everything after it. Put the
   pattern late in the history so most edits skip it. The pattern step
   itself takes under one second.
 
 ## Progress log
 
+* 2026-09-25: Truchas built and run: an Exodus voxel mold, a fill deck
+  and a separate freeze deck, checked on a plate casting.
+* 2026-09-25: Hot spots voxel model (fill, freezing order, isolated
+  pockets) and calibration of the mold constant from a measured pour.
+* 2026-09-25: spout re-aimed to a 48 degree rise with a thin lip (Pipe
+  lip length and lip diameter).
+* 2026-09-25: match plate sample with the gating split between the
+  halves; plane references let Split Body use a picked face.
 * 2026-09-16: plan written. Reference photos reviewed.
 * 2026-09-17 (later): mold split (stage 4), casting check and the
   Truchas case export (stage 5), and the split cap and orientation fixes.

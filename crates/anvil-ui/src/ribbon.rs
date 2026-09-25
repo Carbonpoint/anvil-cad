@@ -68,9 +68,13 @@ pub enum RibbonAction {
     KettleGated,
     /// The kettle body split into pattern halves, core, and core box.
     KettleMold,
+    /// The kettle pattern halves on a match plate, with the gating.
+    KettleMatchPlate,
     Interference,
     /// What a click in the view picks: 0 All, 1 Body, 2 Face, 3 Edge.
     SetSelectFilter(u8),
+    /// Pick an SVG file and add it as a new sketch.
+    InsertSvg,
 }
 
 pub struct RibbonButton {
@@ -147,7 +151,9 @@ impl RibbonAction {
             RibbonAction::Kettle => "kettle",
             RibbonAction::KettleGated => "kettle_gated",
             RibbonAction::KettleMold => "kettle_mold",
+            RibbonAction::KettleMatchPlate => "kettle_match_plate",
             RibbonAction::Interference => "interference",
+            RibbonAction::InsertSvg => "insert_svg",
             RibbonAction::SetSelectFilter(0) => "select_all",
             RibbonAction::SetSelectFilter(1) => "select_body",
             RibbonAction::SetSelectFilter(2) => "select_face",
@@ -194,7 +200,7 @@ const PINNED: &[(&str, &str, &[&str])] = &[
     ("Solid", "Create", &["sketch", "extrude", "revolve", "hole"]),
     ("Solid", "Modify", &["press_pull", "fillet", "chamfer", "combine"]),
     ("Solid", "Construct", &["offset_plane", "midplane"]),
-    ("Solid", "Insert", &["mesh"]),
+    ("Solid", "Insert", &["mesh", "import_step", "insert_svg"]),
     ("Solid", "Casting", &["sprue", "runner", "riser", "casting_check"]),
     ("Field", "Fill", &["lattice_fill"]),
     ("Field", "Generate", &["aircraft", "density_body"]),
@@ -204,7 +210,7 @@ const PINNED: &[(&str, &str, &[&str])] = &[
     ("View", "Display", &["toggle_edges"]),
     ("View", "Settings", &["settings"]),
     ("Examples", "Parts", &["demo_part", "sample_card"]),
-    ("Examples", "Casting samples", &["kettle", "kettle_gated", "kettle_mold"]),
+    ("Examples", "Casting samples", &["kettle", "kettle_gated", "kettle_mold", "kettle_match_plate"]),
 ];
 
 /// Keyboard shortcuts, as the menus show them. The keys work in the model
@@ -221,6 +227,16 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
     use ButtonKind::Action as A;
     use RibbonAction::*;
     vec![
+        (
+            "Solid",
+            "Insert",
+            RibbonButton::new(
+                "Insert SVG",
+                "Add an SVG drawing as a new sketch, on the selected face or on XY",
+                2,
+                A(InsertSvg),
+            ),
+        ),
         ("File", "Document", RibbonButton::new("New", "Start an empty document", 0, A(NewDocument))),
         (
             "File",
@@ -320,7 +336,12 @@ fn app_actions() -> Vec<(&'static str, &'static str, RibbonButton)> {
         (
             "File",
             "Export",
-            RibbonButton::new("Contour G-code", "Contour the first sketch profile and write G-code", 0, A(ExportGcode)),
+            RibbonButton::new(
+                "CAM",
+                "Contour, pocket or drill a sketch and save G-code for LinuxCNC, GRBL, Fanuc or Haas",
+                0,
+                A(ExportGcode),
+            ),
         ),
         ("View", "Camera", RibbonButton::new("Fit", "Fit all bodies in the viewport", 0, A(FitView))),
         ("View", "Camera", RibbonButton::new("Iso", "Isometric view", 1, A(ViewIso))),
@@ -466,6 +487,16 @@ pub fn build_ribbon() -> Vec<RibbonTab> {
             "Pattern halves, core, and core box for the kettle body",
             22,
             ButtonKind::Action(RibbonAction::KettleMold),
+        ),
+    );
+    place(
+        "Examples",
+        "Casting samples",
+        RibbonButton::new(
+            "Match plate",
+            "The kettle pattern halves on a match plate, with runner, ingate, riser and sprue pin",
+            23,
+            ButtonKind::Action(RibbonAction::KettleMatchPlate),
         ),
     );
     for (i, (label, tooltip)) in UP_AXES.iter().enumerate() {

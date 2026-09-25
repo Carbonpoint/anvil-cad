@@ -262,6 +262,48 @@ Mirror, and the patterns take a body feature as input; they default to the
 selected feature. Measure shows the volume and bounding box in the status
 bar.
 
+## Construction axes and points
+
+![An axis, an offset plane and a point](images/ui_construction.png)
+
+Solid > Construct has Axis and Point. Construction planes, axes and
+points are drawn in the view in orange, faint, and bold when selected,
+each with its feature number.
+
+* **Axis:** where two planes meet, along a picked edge, through the
+  centre of a picked round face, or normal to a plane. Select an edge or
+  a round face first and the Axis takes it.
+* **Point:** by coordinates (expressions), where three planes meet, or
+  where an axis meets a plane.
+
+Circular Pattern and Revolve take an axis feature: set Axis to Feature
+and choose it.
+
+## CAM: G-code from a sketch
+
+File > Export > CAM opens a window that turns a flat sketch into G-code.
+Sketch X and Y are the machine's X and Y, and the top of the stock is
+the height of the sketch plane.
+
+| Operation | What it cuts |
+|---|---|
+| Contour outside, Contour inside | Round each closed profile, a tool radius out or in, in depth passes |
+| Pocket | The inside of each region, ring by ring from the middle out, leaving islands (holes in the sketch) standing |
+| Drill circle centres | A hole at the centre of every circle, with pecks when Peck is above 0 |
+
+Set the tool, feeds, depth, step down, stepover and clearance, choose a
+post, and press Save G-code. The posts:
+
+| Post | Notes |
+|---|---|
+| Generic G-code | Plain RS-274; drilling written as moves, so it runs anywhere |
+| LinuxCNC | G81 and G83 cycles, M6 with G43 tool length, ends M2 |
+| GRBL | No canned cycles and no tool changer: drilling as moves, M0 pause for a tool change |
+| Fanuc | Program number O0001, cycles, G28 home at the end |
+| Haas | As Fanuc, ending at G53 Z0 |
+
+Check a program in a simulator or with the spindle off before cutting.
+
 ## Open files from other CAD tools
 
 File > Open reads an Anvil document, and it also imports:
@@ -366,11 +408,46 @@ that would reach a cut edge or the end of the surface are dropped whole,
 like dots. On a vertical wall printed upright the tubes are small
 overhangs that need no support.
 
+## Insert SVG
+
+Solid > Insert > Insert SVG asks for an SVG file and adds it as a new
+sketch, on the selected face or on XY. Paths (lines, curves and arcs),
+rectangles (with rounded corners), circles, ellipses, lines, polylines
+and polygons are read, with their transforms. The size comes from the
+file's width and viewBox; a file in px is taken at 96 px per inch.
+Curves become short lines within 0.05 mm, and a circle stays a circle.
+Closed shapes are profiles, ready to extrude. In the sketch editor,
+Import reads a DXF or an SVG file into the open sketch.
+
+## Shell
+
+Shell (Solid > Modify) hollows a body and leaves walls of one thickness.
+Click the face to leave open, then Shell: the face you clicked becomes
+the Open face, so a box turns into a tray. With no open face, the body
+keeps a closed hollow inside. The Open face is a plane reference, so it
+follows the body when an earlier feature changes, and Pick in view
+chooses another one. A wall thicker than a feature of the body is
+refused with a message.
+
+## Draft
+
+Draft (Solid > Modify) tilts the side faces of a body, the faces that
+run along the pull, so a pattern leaves the sand or a part leaves its
+mold. The neutral plane stays put and its normal is the pull; the body
+narrows away from it. Click the face to keep (for example the bottom),
+then Draft: that face becomes the neutral plane. One to three degrees is
+usual. Draft check (Solid > Casting) shows what is still undercut.
+
 ## Tapered pipe
 
 Pipe has a second value, Diameter at end. Leave it at 0 for one
 diameter along the whole path. Set it for a spout that narrows toward
 the tip: the section scales linearly by arc length.
+
+Lip length and Lip diameter give the far end a thin lip. Over the last
+Lip length of the path, the outside eases down to Lip diameter, starting
+tangent to the taper. A spout with a thin, sharp lip pours without
+dripping. Leave Lip length at 0 for no lip.
 
 ## Kettle sample
 

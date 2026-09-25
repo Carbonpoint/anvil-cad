@@ -25,139 +25,327 @@ pub fn cavity_mesh(doc: &Document, casting: usize) -> TriMesh {
     out
 }
 
-/// Write `cavity.stl`, `casting.inp`, and `README.md` into `dir`. Returns
-/// the paths written. `pour_temp` is in C, `pour_speed` in m/s at the
-/// sprue inlet.
+/// The metal bodies of a document: the casting and every sprue, runner
+/// and riser.
+pub fn metal_bodies(doc: &Document, casting: usize) -> Vec<&anvil_kernel::Solid> {
+    doc.visible_bodies()
+        .into_iter()
+        .filter(|(fi, _)| *fi == casting || GATING_KINDS.contains(&doc.features[*fi].feature.kind()))
+        .map(|(_, b)| b)
+        .collect()
+}
+
+/// A voxel mesh of the mold for Truchas: block 1 is sand, block 2 the
+/// empty cavity. The mesh top is the cup rim, so the cup's top faces lie
+/// on the outside of the mesh: the middle half is side set 1, the pour
+/// inlet, and the rest side set 3, open to the room. Every other outside
+/// face is side set 2. `sand` is the wall of sand kept
+/// round the cavity, in mm. Returns the mesh and the cavity volume and
+/// inlet area in mm3 and mm2.
+pub fn voxel_mold(
+    metal: &[&anvil_kernel::Solid],
+    voxel: f64,
+    sand: f64,
+) -> Result<(crate::exodus::VoxelMesh, f64, f64), IoError> {
+    use crate::exodus::{hex_side, VoxelMesh};
+    let err = |m: &str| IoError::Import(m.to_string());
+    if voxel.is_nan() || voxel <= 0.0 {
+        return Err(err("the voxel size must be above 0"));
+    }
+    let mut lo = anvil_math::DVec3::splat(f64::INFINITY);
+    let mut hi = anvil_math::DVec3::splat(f64::NEG_INFINITY);
+    for b in metal {
+        let bb = b.bounds();
+        lo = lo.min(bb.min);
+        hi = hi.max(bb.max);
+    }
+    if !lo.is_finite() {
+        return Err(err("no casting body"));
+    }
+    let pad = (sand / voxel).ceil().max(2.0) * voxel;
+    let lo = lo - anvil_math::DVec3::splat(pad);
+    // No sand over the cup: the mesh ends at the rim.
+    let hi = hi + anvil_math::DVec3::new(pad, pad, 0.0);
+    let n = [
+        ((hi.x - lo.x) / voxel).ceil() as usize,
+        ((hi.y - lo.y) / voxel).ceil() as usize,
+        ((hi.z - lo.z) / voxel).round().max(1.0) as usize,
+    ];
+    // Put the top of the grid on the rim exactly.
+    let lo = anvil_math::DVec3::new(lo.x, lo.y, hi.z - n[2] as f64 * voxel);
+    let cells = n[0] * n[1] * n[2];
+    if cells > 20_000_000 {
+        return Err(err("too many voxels; use a larger voxel size"));
+    }
+    let mut cavity = vec![false; cells];
+    for b in metal {
+        let m = anvil_kernel::mesh::tessellate(b);
+        let tris: Vec<[anvil_math::DVec3; 3]> = m
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]])
+            .collect();
+        for (q, inside) in anvil_implicit::sampled::inside_grid(&tris, lo, voxel, n).into_iter().enumerate() {
+            cavity[q] |= inside;
+        }
+    }
+    let idx = |i: usize, j: usize, k: usize| (i * n[1] + j) * n[2] + k;
+    let blocks: Vec<u8> = cavity.iter().map(|&c| if c { 2 } else { 1 }).collect();
+    let (mut inlet, mut outside) = (Vec::new(), Vec::new());
+    for i in 0..n[0] {
+        for j in 0..n[1] {
+            for k in 0..n[2] {
+                let q = idx(i, j, k);
+                let at = [i, j, k];
+                for axis in 0..3 {
+                    for high in [false, true] {
+                        let edge = if high { at[axis] + 1 == n[axis] } else { at[axis] == 0 };
+                        if !edge {
+                            continue;
+                        }
+                        let side = hex_side(axis, high);
+                        if axis == 2 && high && cavity[q] {
+                            inlet.push((q, side));
+                        } else {
+                            outside.push((q, side));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if inlet.len() < 2 {
+        return Err(err("no cavity reaches the top of the mold: the sprue cup must be the highest metal"));
+    }
+    // The middle half of the cup top pours; the rest stays open to the
+    // room, so void can leave and the pressure has a reference.
+    let centre = |q: usize| {
+        let (i, r) = (q / (n[1] * n[2]), q % (n[1] * n[2]));
+        anvil_math::DVec2::new(i as f64, (r / n[2]) as f64)
+    };
+    let mid = inlet.iter().map(|(q, _)| centre(*q)).sum::<anvil_math::DVec2>() / inlet.len() as f64;
+    inlet.sort_by(|a, b| (centre(a.0) - mid).length_squared().total_cmp(&(centre(b.0) - mid).length_squared()));
+    let open = inlet.split_off(inlet.len().div_ceil(2));
+    let v3 = voxel * voxel * voxel;
+    let volume = cavity.iter().filter(|&&c| c).count() as f64 * v3;
+    let inlet_area = inlet.len() as f64 * voxel * voxel;
+    let mesh = VoxelMesh {
+        lo,
+        step: voxel,
+        n,
+        blocks,
+        side_sets: vec![
+            (1, "pour inlet".into(), inlet),
+            (2, "mold outside".into(), outside),
+            (3, "cup open top".into(), open),
+        ],
+    };
+    Ok((mesh, volume, inlet_area))
+}
+
+/// Write `mesh.exo`, `casting.inp`, `cavity.stl` and `README.md` into
+/// `dir`. `pour_temp` is in C, `pour_speed` in m/s down through the cup,
+/// `voxel` in mm, `end_time` in s (0 runs a little past the fill).
+#[allow(clippy::too_many_arguments)]
 pub fn write_truchas_case(
     doc: &Document,
     casting: usize,
     alloy: &Alloy,
     pour_temp: f64,
     pour_speed: f64,
+    voxel: f64,
+    end_time: f64,
     dir: &Path,
 ) -> Result<Vec<PathBuf>, IoError> {
     std::fs::create_dir_all(dir)?;
-    let mesh = cavity_mesh(doc, casting);
     let stl = dir.join("cavity.stl");
-    crate::write_stl(&mesh, &stl)?;
-    let volume_cm3 = mesh.signed_volume() * 1e-3;
-    let deck = truchas_deck(alloy, pour_temp, pour_speed, volume_cm3);
+    crate::write_stl(&cavity_mesh(doc, casting), &stl)?;
+    let metal = metal_bodies(doc, casting);
+    // Sand thick enough not to fill up with heat during the freeze.
+    let (mesh, volume, inlet_area) = voxel_mold(&metal, voxel, (3.0 * voxel).max(30.0))?;
+    let exo = dir.join("mesh.exo");
+    std::fs::write(&exo, mesh.to_exodus(&doc.name))?;
+    // Fill time: the cavity volume through the inlet at the pour speed.
+    let fill_s = volume * 1e-9 / (inlet_area * 1e-6 * pour_speed.max(0.01));
+    let end = if end_time > 0.0 { end_time } else { fill_s * 1.5 };
     let inp = dir.join("casting.inp");
-    std::fs::write(&inp, deck)?;
+    std::fs::write(&inp, truchas_deck(alloy, pour_temp, pour_speed, fill_s, end))?;
+    // The freeze: long enough for the Chvorinov time of the casting, at
+    // least a minute.
+    let freeze = dir.join("freeze.inp");
+    std::fs::write(&freeze, truchas_freeze_deck(alloy, pour_temp, 60f64.max(4.0 * fill_s)))?;
     let readme = dir.join("README.md");
-    std::fs::write(&readme, truchas_readme(alloy, volume_cm3))?;
-    Ok(vec![stl, inp, readme])
+    std::fs::write(&readme, truchas_readme(alloy, volume * 1e-3, fill_s, mesh.blocks.len(), voxel))?;
+    Ok(vec![exo, inp, freeze, stl, readme])
 }
 
-/// A Truchas namelist deck with the alloy data filled in. The mesh, the
-/// face sets, and the time step are the parts to check against the
-/// Truchas reference manual before a run; they depend on the mesh you
-/// make from `cavity.stl`.
-pub fn truchas_deck(alloy: &Alloy, pour_temp: f64, pour_speed: f64, volume_cm3: f64) -> String {
+/// A Truchas input deck for `mesh.exo` from `voxel_mold`. Units are SI
+/// (the mesh is in mm and scaled), temperatures in K. The namelists follow
+/// the Truchas reference manual and its freezing-flow tests.
+pub fn truchas_deck(alloy: &Alloy, pour_temp: f64, pour_speed: f64, fill_s: f64, end_s: f64) -> String {
     let tag = alloy.name.split_whitespace().next().unwrap_or("metal").to_lowercase();
     let latent_j_per_kg = alloy.latent_heat * 1e3;
     let pour_k = pour_temp + 273.15;
     let mold_k = 300.0;
-    // A guess at the fill time from the inlet speed and a 12 mm choke,
-    // so the run lasts long enough to fill and start to freeze.
-    let choke_area_m2 = std::f64::consts::PI * 0.006 * 0.006;
-    let fill_s = (volume_cm3 * 1e-6 / (choke_area_m2 * pour_speed.max(0.1))).max(1.0);
-    let end_s = fill_s * 4.0;
+    // Pour until a little past the expected fill, then stop.
+    let stop = fill_s * 1.05;
     format!(
-        r#"! Truchas input deck written by Anvil. Check every namelist against
-! the Truchas reference manual (https://www.truchas.org/docs/) before a
-! run; face set ids and the time step depend on the mesh you make from
-! cavity.stl (see README.md). Units: SI, temperatures in K.
+        r#"Truchas input deck written by Anvil: {name} poured at {pour_temp:.0} C into a
+sand mold. mesh.exo is a voxel mesh in mm: block 1 sand, block 2 the empty
+cavity; side set 1 is the pour inlet in the middle of the cup rim, side set
+3 the rest of the cup rim, open to the room, side set 2 the rest of the
+outside. Units SI, temperatures in K.
 
 &MESH
-  mesh_file = 'cavity.exo'
+  mesh_file = 'mesh.exo'
+  coord_scale_factor = 0.001
 /
 
 &OUTPUTS
-  output_t  = 0.0, {end_s:.2}
-  output_dt = {out_dt:.3}
+  output_t  = 0.0, {end_s:.3}
+  output_dt = {out_dt:.4}
 /
 
 &PHYSICS
+  materials = 'sand', '{tag}', 'VOID'
   flow = .true.
   heat_transport = .true.
+  body_force_density = 0.0, 0.0, -9.81
 /
 
+Freezing metal next to void needs the interface order that Truchas's
+htvoid3 test (flow, void and phase change together) gives.
 &FLOW
-  inviscid = .false.
+  inviscid = .true.
+  courant_number = 0.4
   vol_track_subcycles = 2
+  material_priority = 'SOLID', '{tag}-liquid', 'VOID'
+/
+
+&FLOW_PRESSURE_SOLVER
+  rel_tol = 0.0
+  abs_tol = 1.0e-10
+  max_ds_iter = 50
+  max_amg_iter = 25
+  krylov_method = 'cg'
+/
+
+Void in the cavity needs the non-adaptive stepping, as in Truchas's
+htvoid tests.
+&DIFFUSION_SOLVER
+  stepping_method       = 'Non-adaptive BDF1'
+  cond_vfrac_threshold  = 1.0e-4
+  residual_atol         = 1.0e-9
+  residual_rtol         = 1.0e-5
+  max_nlk_itr           = 50
+  nlk_preconditioner    = 'hypre_amg'
+  vfr_solve_tol         = 1.0e-6
 /
 
 &NUMERICS
   dt_init = 1.0e-4
+  dt_min  = 1.0e-8
   dt_max  = 5.0e-3
-  dt_grow = 1.05
+  dt_grow = 1.1
 /
 
-&MATERIAL
-  name = '{tag}'
-  phases = '{tag}_solid', '{tag}_liquid'
-  density = {rho_l:.0}
-/
-
-&PHASE
-  name = '{tag}_solid'
-  specific_heat = {cp:.0}
-  conductivity = {k:.1}
-/
-
-&PHASE
-  name = '{tag}_liquid'
-  specific_heat = {cp:.0}
-  conductivity = {k:.1}
-  viscosity = 5.0e-3
-/
-
-&PHASE_CHANGE
-  low_temp_phase  = '{tag}_solid'
-  high_temp_phase = '{tag}_liquid'
-  solidus_temp  = {solidus:.1}
-  liquidus_temp = {liquidus:.1}
-  latent_heat   = {latent:.0}
-/
-
-! The cavity starts empty (void) at the mold temperature.
+The sand.
 &BODY
   surface_name = 'from mesh file'
   mesh_material_number = 1
+  material_name = 'sand'
+  temperature = {mold_k:.1}
+/
+
+The empty cavity.
+&BODY
+  surface_name = 'from mesh file'
+  mesh_material_number = 2
   material_name = 'VOID'
   temperature = {mold_k:.1}
 /
 
-! Face set 1 is the pouring cup rim: metal enters at the pour speed.
+Metal pours down through the middle of the cup top until a little past
+the expected fill ({fill_s:.2} s), then the pour stops.
+&VFUNCTION
+  name = 'pour-speed'
+  type = 'tabular'
+  tabular_data(:,1) = 0.0, 0.0, 0.0, -{pour_speed:.3}
+  tabular_data(:,2) = {stop:.3}, 0.0, 0.0, -{pour_speed:.3}
+  tabular_data(:,3) = {stop_end:.3}, 0.0, 0.0, 0.0
+  tabular_data(:,4) = 1.0e6, 0.0, 0.0, 0.0
+/
+
 &FLOW_BC
   name = 'pour'
   face_set_ids = 1
   type = 'velocity'
-  velocity = 0.0, 0.0, -{pour_speed:.2}
-  inflow_material = '{tag}'
+  velocity_func = 'pour-speed'
+  inflow_material = '{tag}-liquid'
   inflow_temperature = {pour_k:.1}
 /
 
-! Face set 2 is every mold wall: heat leaves by a sand contact
-! coefficient. Calibrate htc from one pour of the same sand.
-&THERMAL_BC
-  name = 'mold'
-  face_set_ids = 2
-  type = 'htc'
-  htc = 500.0
-  ambient_temp = {mold_k:.1}
+The rest of the cup top is open to the room: void leaves through it while
+the mold fills, and metal once it is full, so the pressure always has a
+reference.
+&FLOW_BC
+  name = 'open cup'
+  face_set_ids = 3
+  type = 'pressure'
+  pressure = 0.0
 /
 
 &THERMAL_BC
-  name = 'pour-inlet'
-  face_set_ids = 1
+  name = 'pour'
+  face_set_ids = 1, 3
   type = 'temperature'
-  temperature = {pour_k:.1}
+  temp = {pour_k:.1}
+/
+
+The outside of the sand loses heat slowly to the room. Calibrate from one
+pour.
+&THERMAL_BC
+  name = 'mold outside'
+  face_set_ids = 2
+  type = 'htc'
+  htc = 10.0
+  ambient_temp = {mold_k:.1}
+/
+
+Green sand, starting values.
+&MATERIAL
+  name = 'sand'
+  density = 1600.0
+  specific_heat = 1100.0
+  conductivity = 0.7
+/
+
+&MATERIAL
+  name = '{tag}'
+  density = {rho_l:.0}
+  specific_heat = {cp:.0}
+  conductivity = {k:.1}
+  phases = '{tag}-solid', '{tag}-liquid'
+/
+
+&PHASE
+  name = '{tag}-liquid'
+  is_fluid = T
+/
+
+&PHASE_CHANGE
+  low_temp_phase  = '{tag}-solid'
+  high_temp_phase = '{tag}-liquid'
+  solidus_temp  = {solidus:.1}
+  liquidus_temp = {liquidus:.1}
+  latent_heat   = {latent:.0}
 /
 "#,
+        name = alloy.name,
         end_s = end_s,
-        out_dt = (end_s / 40.0).max(0.01),
+        out_dt = (end_s / 20.0).max(1e-3),
         tag = tag,
         rho_l = alloy.density_liquid,
         cp = alloy.specific_heat,
@@ -168,28 +356,141 @@ pub fn truchas_deck(alloy: &Alloy, pour_temp: f64, pour_speed: f64, volume_cm3: 
         mold_k = mold_k,
         pour_speed = pour_speed,
         pour_k = pour_k,
+        fill_s = fill_s,
+        stop = stop,
+        stop_end = stop + 0.05,
     )
 }
 
-fn truchas_readme(alloy: &Alloy, volume_cm3: f64) -> String {
+/// A Truchas deck for the freeze alone, on the same `mesh.exo`: heat only,
+/// the cavity full of liquid metal at the pour temperature from the start
+/// (an instant fill). Truchas crashes when void, flow and freezing meet
+/// (its own htvoid3 test is marked broken), so the freeze runs apart from
+/// the fill.
+pub fn truchas_freeze_deck(alloy: &Alloy, pour_temp: f64, end_s: f64) -> String {
+    let tag = alloy.name.split_whitespace().next().unwrap_or("metal").to_lowercase();
+    format!(
+        r#"Truchas input deck written by Anvil: the freeze of {name} poured at
+{pour_temp:.0} C, starting from a full cavity (instant fill). Same mesh as
+casting.inp. Units SI, temperatures in K.
+
+&MESH
+  mesh_file = 'mesh.exo'
+  coord_scale_factor = 0.001
+/
+
+&OUTPUTS
+  output_t  = 0.0, {end_s:.3}
+  output_dt = {out_dt:.4}
+/
+
+&PHYSICS
+  materials = 'sand', '{tag}'
+  heat_transport = .true.
+/
+
+&DIFFUSION_SOLVER
+  abs_temp_tol       = 0.0
+  rel_temp_tol       = 1.0e-3
+  abs_enthalpy_tol   = 0.0
+  rel_enthalpy_tol   = 1.0e-3
+  max_nlk_itr        = 5
+  nlk_tol            = 0.02
+  nlk_preconditioner = 'hypre_amg'
+/
+
+&NUMERICS
+  dt_init = 1.0e-3
+  dt_min  = 1.0e-8
+  dt_max  = 1.0
+  dt_grow = 1.2
+/
+
+&BODY
+  surface_name = 'from mesh file'
+  mesh_material_number = 1
+  material_name = 'sand'
+  temperature = 300.0
+/
+
+&BODY
+  surface_name = 'from mesh file'
+  mesh_material_number = 2
+  material_name = '{tag}-liquid'
+  temperature = {pour_k:.1}
+/
+
+&THERMAL_BC
+  name = 'outside'
+  face_set_ids = 1, 2, 3
+  type = 'htc'
+  htc = 10.0
+  ambient_temp = 300.0
+/
+
+&MATERIAL
+  name = 'sand'
+  density = 1600.0
+  specific_heat = 1100.0
+  conductivity = 0.7
+/
+
+&MATERIAL
+  name = '{tag}'
+  density = {rho_l:.0}
+  specific_heat = {cp:.0}
+  conductivity = {k:.1}
+  phases = '{tag}-solid', '{tag}-liquid'
+/
+
+&PHASE
+  name = '{tag}-liquid'
+/
+
+&PHASE_CHANGE
+  low_temp_phase  = '{tag}-solid'
+  high_temp_phase = '{tag}-liquid'
+  solidus_temp  = {solidus:.1}
+  liquidus_temp = {liquidus:.1}
+  latent_heat   = {latent:.0}
+/
+"#,
+        name = alloy.name,
+        end_s = end_s,
+        out_dt = (end_s / 20.0).max(1e-3),
+        tag = tag,
+        pour_k = pour_temp + 273.15,
+        rho_l = alloy.density_liquid,
+        cp = alloy.specific_heat,
+        k = alloy.conductivity,
+        solidus = alloy.solidus + 273.15,
+        liquidus = alloy.liquidus + 273.15,
+        latent = alloy.latent_heat * 1e3,
+    )
+}
+
+fn truchas_readme(alloy: &Alloy, volume_cm3: f64, fill_s: f64, cells: usize, voxel: f64) -> String {
     format!(
         r#"# Truchas case from Anvil
 
-Cavity volume {volume_cm3:.0} cm3, alloy {name}.
+Cavity {volume_cm3:.0} cm3 of {name}, fills in about {fill_s:.1} s at the
+pour speed. mesh.exo has {cells} hex cells of {voxel} mm: block 1 sand,
+block 2 the empty cavity. Side set 1 is the pour inlet in the middle of the
+cup rim, side set 3 the rest of the rim, open to the room, and side set 2
+the rest of the outside.
 
-1. Mesh the cavity. Truchas reads Exodus II. One free path:
-   `gmsh -3 -clmax 3 cavity.stl -o cavity.msh` then
-   `meshio convert cavity.msh cavity.exo` (pip install meshio netCDF4).
-   Use a 2 to 3 mm element size for a 3 mm wall.
-2. Mark face sets in the mesh: id 1 on the pouring cup rim, id 2 on all
-   other faces (the sand contact). Gmsh physical surfaces or a meshio
-   script can do this; Truchas needs them for the BCs in casting.inp.
-3. Check casting.inp against the Truchas reference manual, then run
-   `truchas casting.inp`. Results are Exodus files for ParaView.
+`casting.inp` is the fill (flow and heat). `freeze.inp` is the freeze on
+its own, starting from a full cavity: Truchas crashes when void, flow and
+freezing meet, so the two run apart. Run either with `truchas -f
+casting.inp`, or on several cores with `mpirun -np 8 truchas -f
+freeze.inp`. Results go to `casting_output/` as an
+HDF5 file. `scripts/truchas_fill.py casting_output/casting.h5` in the Anvil
+repository prints how full and how frozen the cavity is at each output
+time; `write-xdmf.py` from Truchas makes a file ParaView opens.
 
 The material numbers are starting values from
-docs/research/casting_simulation.md. Calibrate the mold heat transfer
-coefficient (htc) and the pouring speed from one real pour.
+docs/research/casting_simulation.md. Calibrate the mold heat transfer and
+the pour speed from one real pour.
 "#,
         name = alloy.name,
     )
@@ -202,15 +503,32 @@ mod tests {
 
     #[test]
     fn truchas_case_has_the_alloy_numbers() {
-        let deck = truchas_deck(&ALLOYS[0], 1400.0, 1.5, 250.0);
+        let deck = truchas_deck(&ALLOYS[0], 1400.0, 1.5, 2.0, 3.0);
         assert!(deck.contains("solidus_temp  = 1423."), "{deck}");
         assert!(deck.contains("latent_heat   = 280000"));
         assert!(deck.contains("inflow_temperature = 1673."));
-        let dir = std::env::temp_dir().join("anvil_truchas_test");
-        let doc = crate::kettle::kettle_gated();
-        let files = write_truchas_case(&doc, 15, &ALLOYS[0], 1400.0, 1.5, &dir).unwrap();
-        assert_eq!(files.len(), 3);
-        let stl = std::fs::metadata(&files[0]).unwrap().len();
-        assert!(stl > 1_000_000, "cavity.stl is {stl} bytes");
+        assert!(deck.contains("temp = 1673."), "a temperature condition takes temp");
+        // The pour stops at 1.05 times the fill.
+        assert!(deck.contains("tabular_data(:,2) = 2.100, 0.0, 0.0, -1.500"), "{deck}");
+    }
+
+    #[test]
+    fn a_plate_with_a_sprue_makes_a_mold_mesh_with_an_inlet() {
+        use anvil_kernel::ops;
+        use anvil_math::{DVec2, DVec3, Plane};
+        // A 40 x 20 x 6 plate, and a 10 x 10 sprue standing 30 mm on it.
+        let plate = ops::box_solid(DVec3::ZERO, DVec3::new(40.0, 20.0, 6.0)).unwrap();
+        let sprue = ops::extrude(
+            &Plane { origin: DVec3::new(0.0, 0.0, 6.0), ..Plane::XY },
+            &[DVec2::new(0.0, 5.0), DVec2::new(10.0, 5.0), DVec2::new(10.0, 15.0), DVec2::new(0.0, 15.0)],
+            30.0,
+        )
+        .unwrap();
+        let (mesh, volume, inlet) = voxel_mold(&[&plate, &sprue], 2.0, 6.0).unwrap();
+        assert!((volume - (4800.0 + 3000.0)).abs() < 1.0, "{volume}");
+        // The sprue top is 10 x 10 mm, 25 voxels; the middle 13 pour.
+        assert!((inlet - 52.0).abs() < 1e-9, "{inlet}");
+        let bytes = mesh.to_exodus("plate");
+        assert_eq!(&bytes[..4], b"CDF\x02");
     }
 }

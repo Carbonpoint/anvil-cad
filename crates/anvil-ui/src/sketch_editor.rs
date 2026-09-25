@@ -588,16 +588,28 @@ impl SketchEditor {
         }
     }
 
-    /// Import LINE, CIRCLE, ARC, and LWPOLYLINE entities from a DXF file,
-    /// placed at the sketch origin in drawing units (assumed mm).
+    /// Import a drawing at the sketch origin: a DXF file (LINE, CIRCLE,
+    /// ARC, LWPOLYLINE, in mm) or an SVG file (shapes and paths, sized by
+    /// its width and viewBox), chosen by the file extension.
     pub fn import_dxf(&mut self, doc: &mut Document) {
-        match std::fs::read_to_string(self.dxf_path.trim()) {
-            Err(e) => self.message = format!("DXF: {e}"),
+        let path = self.dxf_path.trim().to_string();
+        match std::fs::read_to_string(&path) {
+            Err(e) => self.message = format!("Import: {e}"),
             Ok(text) => {
-                let n = crate::dxf::import(&text, &mut self.sketch);
+                let n = if path.to_ascii_lowercase().ends_with(".svg") {
+                    match anvil_feature::import::svg::import(&text, &mut self.sketch) {
+                        Ok(n) => n,
+                        Err(e) => {
+                            self.message = format!("SVG: {e}");
+                            return;
+                        }
+                    }
+                } else {
+                    crate::dxf::import(&text, &mut self.sketch)
+                };
                 self.solve();
                 self.commit(doc);
-                self.message = format!("Imported {n} entities from {}", self.dxf_path.trim());
+                self.message = format!("Imported {n} entities from {path}");
             }
         }
     }

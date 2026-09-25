@@ -47,10 +47,29 @@ impl Feature for LoftFeature {
         if idx.len() < 2 {
             return Err(RegenError::Other("loft needs at least two sketches".into()));
         }
-        let mut sections = Vec::new();
+        // The largest region of the first sketch, then in each later
+        // sketch the region nearest the one before it.
+        let mut sections: Vec<(anvil_math::Plane, Vec<anvil_math::DVec2>)> = Vec::new();
+        let mut last: Option<anvil_math::DVec3> = None;
         for i in idx {
             let (plane, profiles) = ctx.profiles_of(i)?;
-            sections.push((*plane, profiles[0].points.clone()));
+            let regions = crate::region_select::select(profiles, "")?;
+            let centre = |pts: &[anvil_math::DVec2]| {
+                plane.to_world(pts.iter().copied().sum::<anvil_math::DVec2>() / pts.len().max(1) as f64)
+            };
+            let area = |pts: &[anvil_math::DVec2]| {
+                let n = pts.len();
+                (0..n).map(|k| pts[k].perp_dot(pts[(k + 1) % n])).sum::<f64>().abs() * 0.5
+            };
+            let pick = match last {
+                None => regions.iter().max_by(|a, b| area(&a.0).total_cmp(&area(&b.0))),
+                Some(c) => regions
+                    .iter()
+                    .min_by(|a, b| (centre(&a.0) - c).length_squared().total_cmp(&(centre(&b.0) - c).length_squared())),
+            };
+            let outer = pick.ok_or(RegenError::BadReference(ctx.index, i, "closed profile"))?.0.clone();
+            last = Some(centre(&outer));
+            sections.push((*plane, outer));
         }
         Ok(FeatureOutput { bodies: vec![ctx.kernel.loft(&sections)?], ..Default::default() })
     }
