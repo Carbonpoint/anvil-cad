@@ -2,7 +2,6 @@
 #SBATCH --job-name=kettle-truchas
 #SBATCH --account=binl
 #SBATCH --partition=nova
-#SBATCH --exclusive
 #SBATCH --output=/ptmp/binl/agold/truchas/logs/run-%j.out
 #
 # Run one deck of the Anvil kettle case with Truchas, then make pictures.
