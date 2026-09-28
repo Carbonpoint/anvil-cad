@@ -279,8 +279,11 @@ htvoid tests.
   vfr_solve_tol         = 1.0e-6
 /
 
+The first step must carry more than 1% of an inlet cell in, or the
+flow solver treats the empty inlet cells as solid (fluid_frac_threshold)
+and the pour never starts; after that the Courant limit sets the step.
 &NUMERICS
-  dt_init = 1.0e-4
+  dt_init = 1.0e-3
   dt_min  = 1.0e-8
   dt_max  = 5.0e-3
   dt_grow = 1.1
