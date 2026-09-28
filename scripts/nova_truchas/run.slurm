@@ -38,7 +38,7 @@ echo "solver exit $status after $((end - start)) s; last step: $steps"
 grep -a -E 'FATAL|SIGSEGV|terminated' truchas.log | head -3
 h5=$(ls ${DECK%.inp}_output/*.h5 2>/dev/null | head -1)
 mode=fill
-[ "$DECK" = freeze.inp ] && mode=freeze
+case $DECK in freeze*) mode=freeze ;; esac
 if [ -n "$h5" ]; then
   $B/venv/bin/python $B/truchas_pictures.py "$h5" $RUN/pictures $mode
 fi
