@@ -28,9 +28,9 @@ cd $RUN
 echo "node $SLURM_JOB_NODELIST job $SLURM_JOB_ID ranks $SLURM_NTASKS deck $DECK $(date)"
 start=$(date +%s)
 if [ "$LIMIT" -gt 0 ]; then
-  timeout $LIMIT mpirun -np $SLURM_NTASKS --bind-to core $B/install/bin/t-linux.x86_64.gnu -f $DECK > truchas.log 2>&1
+  timeout $LIMIT srun --mpi=pmix --cpu-bind=cores $B/install/bin/t-linux.x86_64.gnu -f $DECK > truchas.log 2>&1
 else
-  mpirun -np $SLURM_NTASKS --bind-to core $B/install/bin/t-linux.x86_64.gnu -f $DECK > truchas.log 2>&1
+  srun --mpi=pmix --cpu-bind=cores $B/install/bin/t-linux.x86_64.gnu -f $DECK > truchas.log 2>&1
 fi
 status=$?
 end=$(date +%s)

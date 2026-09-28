@@ -39,11 +39,15 @@ pub fn metal_bodies(doc: &Document, casting: usize) -> Vec<&anvil_kernel::Solid>
 /// empty cavity. The mesh top is the cup rim, so the cup's top faces lie
 /// on the outside of the mesh: the middle half is side set 1, the pour
 /// inlet, and the rest side set 3, open to the room. Every other outside
-/// face is side set 2. `sand` is the wall of sand kept
-/// round the cavity, in mm. Returns the mesh and the cavity volume and
-/// inlet area in mm3 and mm2.
+/// face is side set 2. `pour` is the body metal is poured into (the
+/// sprue with its cup): the mesh top is its rim, only its top faces pour,
+/// and metal above the rim (a riser dome, say) is left out, since metal
+/// cannot rise above the cup. `sand` is the wall of sand kept round the
+/// cavity, in mm. Returns the mesh and the cavity volume and inlet area in
+/// mm3 and mm2.
 pub fn voxel_mold(
     metal: &[&anvil_kernel::Solid],
+    pour: &[&anvil_kernel::Solid],
     voxel: f64,
     sand: f64,
 ) -> Result<(crate::exodus::VoxelMesh, f64, f64), IoError> {
@@ -54,13 +58,18 @@ pub fn voxel_mold(
     }
     let mut lo = anvil_math::DVec3::splat(f64::INFINITY);
     let mut hi = anvil_math::DVec3::splat(f64::NEG_INFINITY);
-    for b in metal {
+    for b in metal.iter().chain(pour.iter()) {
         let bb = b.bounds();
         lo = lo.min(bb.min);
         hi = hi.max(bb.max);
     }
     if !lo.is_finite() {
         return Err(err("no casting body"));
+    }
+    // The rim of the pour body is the top of the mold.
+    let rim = pour.iter().map(|b| b.bounds().max.z).fold(f64::NEG_INFINITY, f64::max);
+    if rim.is_finite() {
+        hi.z = rim;
     }
     let pad = (sand / voxel).ceil().max(2.0) * voxel;
     let lo = lo - anvil_math::DVec3::splat(pad);
@@ -91,6 +100,22 @@ pub fn voxel_mold(
             cavity[q] |= inside;
         }
     }
+    // Pour cells: inside the pour body. Without one, every top cell pours.
+    let mut pours = vec![pour.is_empty(); cells];
+    for b in pour {
+        let m = anvil_kernel::mesh::tessellate(b);
+        let tris: Vec<[anvil_math::DVec3; 3]> = m
+            .indices
+            .as_chunks::<3>()
+            .0
+            .iter()
+            .map(|t| [m.positions[t[0] as usize], m.positions[t[1] as usize], m.positions[t[2] as usize]])
+            .collect();
+        for (q, inside) in anvil_implicit::sampled::inside_grid(&tris, lo, voxel, n).into_iter().enumerate() {
+            pours[q] |= inside;
+            cavity[q] |= inside;
+        }
+    }
     let idx = |i: usize, j: usize, k: usize| (i * n[1] + j) * n[2] + k;
     let blocks: Vec<u8> = cavity.iter().map(|&c| if c { 2 } else { 1 }).collect();
     let (mut inlet, mut outside) = (Vec::new(), Vec::new());
@@ -106,7 +131,7 @@ pub fn voxel_mold(
                             continue;
                         }
                         let side = hex_side(axis, high);
-                        if axis == 2 && high && cavity[q] {
+                        if axis == 2 && high && cavity[q] && pours[q] {
                             inlet.push((q, side));
                         } else {
                             outside.push((q, side));
@@ -146,7 +171,8 @@ pub fn voxel_mold(
 }
 
 /// Write `mesh.exo`, `casting.inp`, `cavity.stl` and `README.md` into
-/// `dir`. `pour_temp` is in C, `pour_speed` in m/s down through the cup,
+/// `dir`. `pour_temp` is in C, `pour_rate` in cm3/s (the flow the sprue
+/// choke lets through; the inlet speed follows from it),
 /// `voxel` in mm, `end_time` in s (0 runs a little past the fill).
 #[allow(clippy::too_many_arguments)]
 pub fn write_truchas_case(
@@ -154,7 +180,7 @@ pub fn write_truchas_case(
     casting: usize,
     alloy: &Alloy,
     pour_temp: f64,
-    pour_speed: f64,
+    pour_rate: f64,
     voxel: f64,
     end_time: f64,
     dir: &Path,
@@ -164,11 +190,19 @@ pub fn write_truchas_case(
     crate::write_stl(&cavity_mesh(doc, casting), &stl)?;
     let metal = metal_bodies(doc, casting);
     // Sand thick enough not to fill up with heat during the freeze.
-    let (mesh, volume, inlet_area) = voxel_mold(&metal, voxel, (3.0 * voxel).max(30.0))?;
+    let pour: Vec<&anvil_kernel::Solid> = doc
+        .visible_bodies()
+        .into_iter()
+        .filter(|(fi, _)| doc.features[*fi].feature.kind() == "sprue")
+        .map(|(_, b)| b)
+        .collect();
+    let (mesh, volume, inlet_area) = voxel_mold(&metal, &pour, voxel, (3.0 * voxel).max(30.0))?;
     let exo = dir.join("mesh.exo");
     std::fs::write(&exo, mesh.to_exodus(&doc.name))?;
-    // Fill time: the cavity volume through the inlet at the pour speed.
-    let fill_s = volume * 1e-9 / (inlet_area * 1e-6 * pour_speed.max(0.01));
+    // Fill time: the cavity volume at the pour rate.
+    // The inlet speed that carries the pour rate through the inlet faces.
+    let pour_speed = pour_rate.max(1e-3) * 1e-6 / (inlet_area * 1e-6);
+    let fill_s = volume * 1e-3 / pour_rate.max(1e-3);
     let end = if end_time > 0.0 { end_time } else { fill_s * 1.5 };
     let inp = dir.join("casting.inp");
     std::fs::write(&inp, truchas_deck(alloy, pour_temp, pour_speed, fill_s, end))?;
@@ -184,6 +218,7 @@ pub fn write_truchas_case(
 /// A Truchas input deck for `mesh.exo` from `voxel_mold`. Units are SI
 /// (the mesh is in mm and scaled), temperatures in K. The namelists follow
 /// the Truchas reference manual and its freezing-flow tests.
+/// `pour_speed` is the inlet speed in m/s.
 pub fn truchas_deck(alloy: &Alloy, pour_temp: f64, pour_speed: f64, fill_s: f64, end_s: f64) -> String {
     let tag = alloy.name.split_whitespace().next().unwrap_or("metal").to_lowercase();
     let latent_j_per_kg = alloy.latent_heat * 1e3;
@@ -272,8 +307,8 @@ the expected fill ({fill_s:.2} s), then the pour stops.
 &VFUNCTION
   name = 'pour-speed'
   type = 'tabular'
-  tabular_data(:,1) = 0.0, 0.0, 0.0, -{pour_speed:.3}
-  tabular_data(:,2) = {stop:.3}, 0.0, 0.0, -{pour_speed:.3}
+  tabular_data(:,1) = 0.0, 0.0, 0.0, -{pour_speed:.4}
+  tabular_data(:,2) = {stop:.3}, 0.0, 0.0, -{pour_speed:.4}
   tabular_data(:,3) = {stop_end:.3}, 0.0, 0.0, 0.0
   tabular_data(:,4) = 1.0e6, 0.0, 0.0, 0.0
 /
@@ -474,7 +509,7 @@ fn truchas_readme(alloy: &Alloy, volume_cm3: f64, fill_s: f64, cells: usize, vox
         r#"# Truchas case from Anvil
 
 Cavity {volume_cm3:.0} cm3 of {name}, fills in about {fill_s:.1} s at the
-pour speed. mesh.exo has {cells} hex cells of {voxel} mm: block 1 sand,
+pour rate. mesh.exo has {cells} hex cells of {voxel} mm: block 1 sand,
 block 2 the empty cavity. Side set 1 is the pour inlet in the middle of the
 cup rim, side set 3 the rest of the rim, open to the room, and side set 2
 the rest of the outside.
@@ -490,7 +525,7 @@ time; `write-xdmf.py` from Truchas makes a file ParaView opens.
 
 The material numbers are starting values from
 docs/research/casting_simulation.md. Calibrate the mold heat transfer and
-the pour speed from one real pour.
+the pour rate from one real pour.
 "#,
         name = alloy.name,
     )
@@ -509,7 +544,22 @@ mod tests {
         assert!(deck.contains("inflow_temperature = 1673."));
         assert!(deck.contains("temp = 1673."), "a temperature condition takes temp");
         // The pour stops at 1.05 times the fill.
-        assert!(deck.contains("tabular_data(:,2) = 2.100, 0.0, 0.0, -1.500"), "{deck}");
+        assert!(deck.contains("tabular_data(:,2) = 2.100, 0.0, 0.0, -1.5000"), "{deck}");
+    }
+
+    #[test]
+    fn a_riser_as_high_as_the_cup_does_not_pour() {
+        use anvil_kernel::ops;
+        use anvil_math::DVec3;
+        // A plate with a sprue at one end and a blind riser at the other,
+        // both 30 mm tall: only the sprue top pours.
+        let plate = ops::box_solid(DVec3::ZERO, DVec3::new(60.0, 20.0, 6.0)).unwrap();
+        let sprue = ops::box_solid(DVec3::new(0.0, 5.0, 6.0), DVec3::new(10.0, 10.0, 30.0)).unwrap();
+        let riser = ops::box_solid(DVec3::new(46.0, 3.0, 6.0), DVec3::new(14.0, 14.0, 32.0)).unwrap();
+        let (mesh, _, inlet) = voxel_mold(&[&plate, &riser], &[&sprue], 2.0, 6.0).unwrap();
+        assert!((inlet - 52.0).abs() < 1e-9, "only the middle of the sprue top pours: {inlet}");
+        let open = &mesh.side_sets.iter().find(|s| s.0 == 3).unwrap().2;
+        assert_eq!(open.len(), 12, "the rest of the sprue top is open, not the riser");
     }
 
     #[test]
@@ -524,7 +574,7 @@ mod tests {
             30.0,
         )
         .unwrap();
-        let (mesh, volume, inlet) = voxel_mold(&[&plate, &sprue], 2.0, 6.0).unwrap();
+        let (mesh, volume, inlet) = voxel_mold(&[&plate], &[&sprue], 2.0, 6.0).unwrap();
         assert!((volume - (4800.0 + 3000.0)).abs() < 1.0, "{volume}");
         // The sprue top is 10 x 10 mm, 25 voxels; the middle 13 pour.
         assert!((inlet - 52.0).abs() < 1e-9, "{inlet}");

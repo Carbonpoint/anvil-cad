@@ -240,8 +240,16 @@ fn run_kettle(a: &KettleArgs) -> Result<(), String> {
     if a.variant == "gated" {
         let alloy = anvil_feature::features::casting::ALLOYS[0];
         let dir = a.out.join("truchas");
-        let written = anvil_io::casting::write_truchas_case(&doc, 15, &alloy, 1400.0, 1.5, a.voxel, a.end_time, &dir)
-            .map_err(|e| e.to_string())?;
+        // The pour rate the sprue lets through, as Casting check works it
+        // out: Torricelli at the 12 mm choke under the sprue's head, with
+        // 0.74 for a tapered sprue.
+        let sprue = doc.features[24].output.as_ref().and_then(|o| o.bodies.first()).map(|b| b.bounds());
+        let head_m = sprue.map(|b| (b.max.z - b.min.z) * 1e-3).unwrap_or(0.135);
+        let choke_m2 = std::f64::consts::PI * 0.006 * 0.006;
+        let rate_cm3_s = choke_m2 * (2.0 * 9.81 * head_m).sqrt() * 0.74 * 1e6;
+        let written =
+            anvil_io::casting::write_truchas_case(&doc, 15, &alloy, 1400.0, rate_cm3_s, a.voxel, a.end_time, &dir)
+                .map_err(|e| e.to_string())?;
         println!("Wrote a Truchas case ({} files) to {}", written.len(), dir.display());
     }
     Ok(())

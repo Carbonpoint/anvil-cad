@@ -20,7 +20,7 @@ fn main() {
     .unwrap();
     let alloy = anvil_feature::features::casting::ALLOYS[0];
     let (mesh, volume, inlet) =
-        anvil_io::casting::voxel_mold(&[&plate, &sprue], voxel, (3.0 * voxel).max(30.0)).unwrap();
+        anvil_io::casting::voxel_mold(&[&plate], &[&sprue], voxel, (3.0 * voxel).max(30.0)).unwrap();
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("mesh.exo"), mesh.to_exodus("plate")).unwrap();
     let speed = 0.5;
