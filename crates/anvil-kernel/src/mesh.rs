@@ -180,8 +180,20 @@ fn ear_clip_plain(poly: &[DVec2]) -> Vec<usize> {
             if (b - a).perp_dot(c - b) <= 1e-14 {
                 continue; // reflex or degenerate
             }
-            let inside = idx.iter().any(|&j| j != ia && j != ib && j != ic && point_in_tri(poly[j], a, b, c));
-            if inside {
+            // A reflex vertex inside the ear, or on its boundary, spoils
+            // it. The boundary counts because the bridge to a hole puts
+            // two copies of a point in the loop; a copy sitting on the
+            // ear's corner can still turn back into the ear.
+            let blocked = (0..m).any(|k| {
+                let j = idx[k];
+                if j == ia || j == ib || j == ic {
+                    return false;
+                }
+                let (p, q, r) = (poly[idx[(k + m - 1) % m]], poly[j], poly[idx[(k + 1) % m]]);
+                let reflex = (q - p).perp_dot(r - q) <= 1e-14;
+                reflex && point_in_tri_closed(q, a, b, c)
+            });
+            if blocked {
                 continue;
             }
             out.extend_from_slice(&[ia, ib, ic]);
@@ -281,11 +293,12 @@ pub fn ear_clip_with_holes(pts: &[DVec2], outer_n: usize, holes: &[Vec<usize>]) 
     ear_clip(&local).into_iter().map(|i| merged[i]).collect()
 }
 
-fn point_in_tri(p: DVec2, a: DVec2, b: DVec2, c: DVec2) -> bool {
+/// Inside or on the boundary of the counter-clockwise triangle a, b, c.
+fn point_in_tri_closed(p: DVec2, a: DVec2, b: DVec2, c: DVec2) -> bool {
     let s1 = (b - a).perp_dot(p - a);
     let s2 = (c - b).perp_dot(p - b);
     let s3 = (a - c).perp_dot(p - c);
-    s1 > 1e-14 && s2 > 1e-14 && s3 > 1e-14
+    s1 >= -1e-14 && s2 >= -1e-14 && s3 >= -1e-14
 }
 
 #[cfg(test)]

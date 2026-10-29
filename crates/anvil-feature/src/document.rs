@@ -54,6 +54,9 @@ pub struct RegenContext<'a> {
     /// Face references that matched: the reference, the plane found, and
     /// the face. The Document writes the plane back into the reference.
     pub face_hits: std::cell::RefCell<Vec<(crate::PlaneRef, anvil_math::Plane, crate::plane_ref::FaceMemory)>>,
+    /// Picked edges found again, with their two face normals. The
+    /// Document writes them back into the feature.
+    pub edge_hits: std::cell::RefCell<Vec<([anvil_math::DVec3; 2], [anvil_math::DVec3; 2])>>,
 }
 
 impl RegenContext<'_> {
@@ -80,6 +83,24 @@ impl RegenContext<'_> {
             .and_then(|o| o.as_ref())
             .and_then(|o| o.plane)
             .ok_or(RegenError::BadReference(self.index, idx, "plane"))
+    }
+
+    /// Axis defined by an earlier construction feature.
+    pub fn axis_of(&self, idx: FeatureId) -> Result<anvil_math::Axis, RegenError> {
+        self.upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .and_then(|o| o.axis)
+            .ok_or(RegenError::BadReference(self.index, idx, "axis"))
+    }
+
+    /// Point defined by an earlier construction feature.
+    pub fn point_of(&self, idx: FeatureId) -> Result<anvil_math::DVec3, RegenError> {
+        self.upstream
+            .get(idx)
+            .and_then(|o| o.as_ref())
+            .and_then(|o| o.point)
+            .ok_or(RegenError::BadReference(self.index, idx, "point"))
     }
 
     /// Open paths of an earlier sketch feature, in world coordinates.
@@ -463,11 +484,16 @@ impl Document {
                     face_memory: &self.face_memory,
                     notes: Default::default(),
                     face_hits: Default::default(),
+                    edge_hits: Default::default(),
                 };
                 let r = self.features[i].feature.regenerate(&mut ctx);
-                (r, ctx.notes.into_inner(), ctx.face_hits.into_inner())
+                (r, ctx.notes.into_inner(), (ctx.face_hits.into_inner(), ctx.edge_hits.into_inner()))
             };
+            let (hits, edges) = hits;
             self.remember_faces(i, hits);
+            if result.is_ok() && !edges.is_empty() {
+                self.features[i].feature.update_edges(&edges);
+            }
             match result {
                 Ok(mut out) => {
                     for n in notes {

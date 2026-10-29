@@ -39,6 +39,10 @@ pub struct FeatureOutput {
     pub paths: Vec<Vec<anvil_math::DVec2>>,
     /// The plane a sketch or construction feature defines.
     pub plane: Option<anvil_math::Plane>,
+    /// The axis a construction feature defines.
+    pub axis: Option<anvil_math::Axis>,
+    /// The point a construction feature defines.
+    pub point: Option<anvil_math::DVec3>,
     /// Short advice shown under the feature in Properties, for example a
     /// printability warning. Not an error: the feature still regenerated.
     pub note: Option<String>,
@@ -65,6 +69,7 @@ pub const BODY_TYPES: &[&str] = &[
     "fillet",
     "chamfer",
     "shell",
+    "draft",
     "combine",
     "hole",
     "surface_pattern",
@@ -75,6 +80,12 @@ pub const BODY_TYPES: &[&str] = &[
 
 /// Feature type ids that define a plane.
 pub const PLANE_TYPES: &[&str] = &["sketch", "offset_plane", "angle_plane", "plane_3pt", "midplane"];
+
+/// Feature type ids that define an axis.
+pub const AXIS_TYPES: &[&str] = &["axis"];
+
+/// Feature type ids that define a point.
+pub const POINT_TYPES: &[&str] = &["point"];
 
 /// The trait every feature implements.
 ///
@@ -120,6 +131,10 @@ pub trait Feature: Send + Sync + std::fmt::Debug + std::any::Any {
     fn set_edges(&mut self, _edges: Vec<[anvil_math::DVec3; 2]>, _body: usize) -> bool {
         false
     }
+
+    /// Take the edges found again on the last Regenerate, each with the
+    /// normals of its two faces, for features that keep picked edges.
+    fn update_edges(&mut self, _found: &[([anvil_math::DVec3; 2], [anvil_math::DVec3; 2])]) {}
 
     /// Rewrite references to other features after the history changes.
     /// `map(old)` returns the new index, or `None` if the target was

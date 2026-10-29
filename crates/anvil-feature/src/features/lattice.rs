@@ -297,6 +297,11 @@ impl Feature for LatticeFillFeature {
                     })
                 }
                 (Some(k), _) => Box::new(Lattice { kind: k, cell, wall: 0.0 }),
+                (_, Some(b)) if cell_end > 0.0 && ramp_axis.is_some() => {
+                    let ax = ramp_axis.unwrap_or(0);
+                    let (from, to) = ([bb.min.x, bb.min.y, bb.min.z][ax], [bb.max.x, bb.max.y, bb.max.z][ax]);
+                    Box::new(anvil_implicit::BeamRamp::new(b, ax, from, to, cell, cell_end))
+                }
                 (_, Some(b)) => Box::new(BeamLattice::new(b, cell, 0.0)),
                 _ => unreachable!(),
             };

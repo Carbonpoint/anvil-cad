@@ -39,6 +39,8 @@ fn main() {
         }
     }
     write("kettle_mold.ppm", anvil_ui::render_view(&mold, 1600, 1000, 0.9, 0.5));
+    let plate = anvil_io::kettle::kettle_match_plate();
+    write("kettle_match_plate.ppm", anvil_ui::render_view(&plate, 1600, 1000, 0.5, 0.9));
     let gated = anvil_io::kettle::kettle_gated();
     write("kettle_gated.ppm", anvil_ui::render_view(&gated, 1400, 1000, 2.6, 0.35));
     anvil_io::write_3mf(&doc, &out.join("kettle.3mf")).unwrap();

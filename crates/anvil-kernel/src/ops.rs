@@ -504,17 +504,45 @@ pub fn loft(sections: &[(Plane, Vec<DVec2>)]) -> KernelResult<Solid> {
         return Err(KernelError::InvalidInput("loft needs at least two sections".into()));
     }
     let n = sections.iter().map(|(_, p)| p.len()).max().unwrap().max(CIRCLE_SEGMENTS);
-    let mut rings = Vec::new();
-    let mut hint = DVec2::new(1e9, 0.0);
+    // Resample every section to n points, in space.
+    let mut rings: Vec<Vec<DVec3>> = Vec::new();
     for (plane, prof) in sections {
         if prof.len() < 3 {
             return Err(KernelError::DegenerateProfile);
         }
-        let p = ccw(prof);
-        // Start every ring at the point with the largest x so twist stays small.
-        let rs = resample_closed(&p, n, hint);
-        hint = rs[0];
-        rings.push(rs.iter().map(|&q| plane.to_world(q)).collect::<Vec<_>>());
+        let rs = resample_closed(&ccw(prof), n, DVec2::new(1e9, 0.0));
+        rings.push(rs.iter().map(|&q| plane.to_world(q)).collect());
+    }
+    let centre = |r: &[DVec3]| r.iter().copied().sum::<DVec3>() / r.len() as f64;
+    let winding = |r: &[DVec3]| {
+        let c = centre(r);
+        (0..r.len()).map(|i| (r[i] - c).cross(r[(i + 1) % r.len()] - c)).sum::<DVec3>()
+    };
+    // The sketch planes may face different ways and have their x axes
+    // turned, so line the rings up in space, not in each sketch's frame.
+    // 1. Every ring winds the same way about the loft direction.
+    for i in 0..rings.len() {
+        let along = if i + 1 < rings.len() {
+            centre(&rings[i + 1]) - centre(&rings[i])
+        } else {
+            centre(&rings[i]) - centre(&rings[i - 1])
+        };
+        let w = winding(&rings[i]);
+        let reference = if along.length_squared() > 1e-18 { along } else { winding(&rings[0]) };
+        if w.dot(reference) < 0.0 {
+            rings[i].reverse();
+        }
+    }
+    // 2. Each ring starts at the point that matches the ring before it
+    //    best, compared about their centres.
+    for i in 1..rings.len() {
+        let (ca, cb) = (centre(&rings[i - 1]), centre(&rings[i]));
+        let prev = &rings[i - 1];
+        let cur = &rings[i];
+        let cost =
+            |k: usize| -> f64 { (0..n).map(|j| ((cur[(j + k) % n] - cb) - (prev[j] - ca)).length_squared()).sum() };
+        let best = (0..n).min_by(|&a, &b| cost(a).total_cmp(&cost(b))).unwrap_or(0);
+        rings[i].rotate_left(best);
     }
     skin_rings(&rings, false, Surface::Revolved { id: 2 })
 }
@@ -1016,6 +1044,26 @@ pub fn section_properties(loops: &[Vec<DVec2>]) -> (f64, f64, DVec2) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_loft_between_turned_sketch_planes_does_not_twist() {
+        // The same 20 x 10 rectangle on XY and 30 mm up, on a plane whose
+        // x axis is turned 90 degrees: the loft is a straight prism.
+        let rect = [DVec2::new(-10.0, -5.0), DVec2::new(10.0, -5.0), DVec2::new(10.0, 5.0), DVec2::new(-10.0, 5.0)];
+        let turned = Plane { origin: DVec3::new(0.0, 0.0, 30.0), x_axis: DVec3::Y, y_axis: -DVec3::X };
+        // In the turned frame the same world rectangle has x and y swapped.
+        let local: Vec<DVec2> = rect.iter().map(|p| DVec2::new(p.y, -p.x)).collect();
+        let s = loft(&[(Plane::XY, rect.to_vec()), (turned, local)]).unwrap();
+        assert!((s.volume() - 20.0 * 10.0 * 30.0).abs() < 1e-6, "{}", s.volume());
+    }
+
+    #[test]
+    fn a_loft_to_a_plane_facing_the_other_way_is_not_inside_out() {
+        let sq = [DVec2::new(-5.0, -5.0), DVec2::new(5.0, -5.0), DVec2::new(5.0, 5.0), DVec2::new(-5.0, 5.0)];
+        let down = Plane { origin: DVec3::new(0.0, 0.0, 10.0), x_axis: DVec3::X, y_axis: -DVec3::Y };
+        let s = loft(&[(Plane::XY, sq.to_vec()), (down, sq.to_vec())]).unwrap();
+        assert!((s.volume() - 1000.0).abs() < 1e-6, "{}", s.volume());
+    }
+
     use super::*;
     use anvil_math::DVec3;
 

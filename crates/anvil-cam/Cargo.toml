@@ -8,5 +8,6 @@ repository.workspace = true
 
 [dependencies]
 anvil-math.workspace = true
+cavalier_contours = "0.9"
 serde.workspace = true
 thiserror.workspace = true

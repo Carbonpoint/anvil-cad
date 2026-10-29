@@ -23,7 +23,7 @@ pub mod sampled;
 pub mod slice;
 pub mod vtk;
 pub mod wing;
-pub use beam::{cylindrical, BeamCell, BeamLattice, Graded, Honeycomb, Radial, Ramp, Warp};
+pub use beam::{cylindrical, BeamCell, BeamLattice, BeamRamp, Graded, Honeycomb, Radial, Ramp, Warp};
 // CellRamp and Blend live in this file.
 pub use pointmap::{PointMap, Remap};
 pub use sampled::Sampled;
@@ -305,10 +305,28 @@ pub struct CellRamp {
     pub wall: f64,
 }
 
+/// Local cell size, its slope, and the phase (radians) along a ramp from
+/// `cell_a` at `from` to `cell_b` at `to`, at coordinate `t`. The phase is
+/// the integral of `2 pi / cell`, so cells never tear.
+pub fn ramp_phase(from: f64, to: f64, cell_a: f64, cell_b: f64, t: f64) -> (f64, f64, f64) {
+    RampSpan { from, to, cell_a, cell_b }.at(t)
+}
+
+struct RampSpan {
+    from: f64,
+    to: f64,
+    cell_a: f64,
+    cell_b: f64,
+}
+
 impl CellRamp {
-    /// Local cell size, its slope, and the phase along the ramp axis at
-    /// coordinate `t`.
     fn cell_and_phase(&self, t: f64) -> (f64, f64, f64) {
+        ramp_phase(self.from, self.to, self.cell_a, self.cell_b, t)
+    }
+}
+
+impl RampSpan {
+    fn at(&self, t: f64) -> (f64, f64, f64) {
         use std::f64::consts::TAU;
         let (a, b) = (self.from, self.to);
         let span = (b - a).abs().max(1e-12);
@@ -330,7 +348,9 @@ impl CellRamp {
             (ca + k * (t - lo), k, phase_in(t))
         }
     }
+}
 
+impl CellRamp {
     /// Level set value and its world gradient.
     fn level(&self, p: DVec3) -> (f64, DVec3) {
         use std::f64::consts::TAU;

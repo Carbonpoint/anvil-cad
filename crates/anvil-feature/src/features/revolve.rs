@@ -7,8 +7,11 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RevolveFeature {
     pub sketch: usize,
-    /// "X" or "Y": the sketch axis to revolve about, through the sketch origin.
+    /// "X" or "Y": the sketch axis to revolve about, through the sketch
+    /// origin; or "Feature" for an axis feature.
     pub axis: String,
+    #[serde(default)]
+    pub axis_feature: usize,
     pub angle_deg: String,
     #[serde(default = "crate::features::extrude::default_op")]
     pub operation: String,
@@ -37,6 +40,7 @@ impl Default for RevolveFeature {
             target: 0,
             segments: default_segments(),
             regions: String::new(),
+            axis_feature: 0,
         }
     }
 }
@@ -53,11 +57,21 @@ impl Feature for RevolveFeature {
         let mut v = vec![
             ParamSpec::feature_ref("sketch", "Sketch", vec!["sketch"], self.sketch),
             ParamSpec::regions("regions", "sketch", &self.regions),
-            ParamSpec::choice("axis", "Axis", vec!["X", "Y"], &self.axis),
+            ParamSpec::choice("axis", "Axis", vec!["X", "Y", "Feature"], &self.axis),
+        ];
+        if self.axis == "Feature" {
+            v.push(ParamSpec::feature_ref(
+                "axis_feature",
+                "Axis feature",
+                crate::AXIS_TYPES.to_vec(),
+                self.axis_feature,
+            ));
+        }
+        v.extend([
             ParamSpec::angle("angle", "Angle", &self.angle_deg),
             ParamSpec::choice("operation", "Operation", vec!["new", "join", "cut", "intersect"], &self.operation),
             ParamSpec::length("segments", "Segments per turn", &self.segments),
-        ];
+        ]);
         if self.operation != "new" {
             v.push(ParamSpec::feature_ref("target", "Target body", crate::BODY_TYPES.to_vec(), self.target));
         }
@@ -67,6 +81,7 @@ impl Feature for RevolveFeature {
         match (name, value) {
             ("sketch", ParamValue::FeatureRef(i)) => self.sketch = i,
             ("axis", ParamValue::Choice(a)) => self.axis = a,
+            ("axis_feature", ParamValue::FeatureRef(i)) => self.axis_feature = i,
             ("angle", ParamValue::Expr(s)) => self.angle_deg = s,
             ("operation", ParamValue::Choice(o)) => self.operation = o,
             ("target", ParamValue::FeatureRef(i)) => self.target = i,
@@ -79,8 +94,12 @@ impl Feature for RevolveFeature {
     fn regenerate(&self, ctx: &mut RegenContext) -> Result<FeatureOutput, RegenError> {
         let angle = ctx.eval(&self.angle_deg)?.to_radians();
         let (plane, profiles) = ctx.profiles_of(self.sketch)?;
-        let dir2 = if self.axis == "X" { DVec2::X } else { DVec2::Y };
-        let axis = Axis::new(plane.origin, plane.to_world(dir2) - plane.origin);
+        let axis = if self.axis == "Feature" {
+            ctx.axis_of(self.axis_feature)?
+        } else {
+            let dir2 = if self.axis == "X" { DVec2::X } else { DVec2::Y };
+            Axis::new(plane.origin, plane.to_world(dir2) - plane.origin)
+        };
         let segments = ctx.eval(&self.segments)?.round().clamp(6.0, 4096.0) as usize;
         let mut bodies = Vec::new();
         for (outer, holes) in crate::region_select::select(profiles, &self.regions)? {

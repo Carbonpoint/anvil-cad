@@ -42,6 +42,8 @@ pub struct ShotOptions {
     pub open_settings: bool,
     /// Ribbon tab to show, by name. `None` keeps the Solid tab.
     pub tab: Option<String>,
+    /// A file to open (as File > Open does) after the sample loads.
+    pub open: Option<std::path::PathBuf>,
     /// Keep only this part of the picture: (x, y, width, height) in
     /// pixels. Useful for a document that shows one panel or one ribbon
     /// group rather than the whole window.
@@ -58,6 +60,7 @@ impl Default for ShotOptions {
             select: None,
             open_settings: false,
             tab: None,
+            open: None,
             crop: None,
         }
     }
@@ -130,6 +133,9 @@ pub fn sample_image(name: &str, opts: &ShotOptions) -> Option<ColorImage> {
         app.run_action(a);
         app.fit_view();
     }
+    if let Some(f) = &opts.open {
+        app.open_path(f);
+    }
     app.panels.selected = opts.select;
     if opts.open_settings {
         app.run_action(crate::ribbon::RibbonAction::ToggleSettings);
@@ -152,6 +158,7 @@ pub const SAMPLES: &[(&str, &str)] = &[
     ("wb6", "workbook 6: adapter"),
     ("card", "the business card"),
     ("kettle", "the kettle casting sample"),
+    ("match_plate", "the kettle pattern on a match plate"),
 ];
 
 fn sample_action(name: &str) -> Option<Option<crate::ribbon::RibbonAction>> {
@@ -167,6 +174,7 @@ fn sample_action(name: &str) -> Option<Option<crate::ribbon::RibbonAction>> {
         "wb6" => Some(A::Workbook(5)),
         "card" => Some(A::SampleCard),
         "kettle" => Some(A::Kettle),
+        "match_plate" => Some(A::KettleMatchPlate),
         _ => return None,
     })
 }

@@ -275,10 +275,15 @@ fn fillet_and_chamfer_on_picked_edges() {
         ..Default::default()
     }));
     let e = [DVec3::new(0.0, 0.0, 10.0), DVec3::new(20.0, 0.0, 10.0)];
-    doc.add_feature(Box::new(FilletFeature { body_feature: 0, radius: "2".into(), edges: vec![e] }));
+    doc.add_feature(Box::new(FilletFeature {
+        body_feature: 0,
+        radius: "2".into(),
+        edges: vec![e],
+        edge_normals: vec![],
+    }));
     assert!(doc.features[1].error.is_none(), "{:?}", doc.features[1].error);
     let e2 = [DVec3::new(0.0, 10.0, 0.0), DVec3::new(20.0, 10.0, 0.0)];
-    doc.add_feature(Box::new(ChamferFeature { body: 1, distance: "1".into(), edges: vec![e2] }));
+    doc.add_feature(Box::new(ChamferFeature { body: 1, distance: "1".into(), edges: vec![e2], edge_normals: vec![] }));
     assert!(doc.features[2].error.is_none(), "{:?}", doc.features[2].error);
     assert_eq!(doc.bodies().len(), 1);
     let v = doc.bodies()[0].volume();
@@ -343,11 +348,10 @@ fn glyphs_with_counters_tessellate_to_the_right_area() {
     }
 }
 
-/// Known issue: ear clipping inverts one triangle in some glyphs with
-/// counters (visible as a notch in R). A fix that passed this test
-/// changed boolean results elsewhere and was reverted; see PROGRESS.md.
+/// Ear clipping once inverted one triangle in glyphs with counters (a
+/// notch in R): an ear was accepted with a bridge copy of a reflex point
+/// on its corner. Ears now check reflex points on the boundary too.
 #[test]
-#[ignore = "known triangulation fault in glyphs with counters"]
 fn glyph_cap_triangles_all_face_the_same_way() {
     use anvil_feature::features::emboss::{nest_loops, text_outlines};
     use anvil_feature::fonts;

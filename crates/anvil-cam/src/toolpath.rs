@@ -1,4 +1,4 @@
-use anvil_math::DVec3;
+use anvil_math::{DVec2, DVec3};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -37,6 +37,16 @@ pub enum Move {
     },
     SpindleOff,
     Comment(String),
+    /// One drilled hole as a canned cycle: rapid to `at` at the retract
+    /// height, feed to `bottom_z` (in pecks of `peck` when above 0), and
+    /// back to the retract height.
+    Drill {
+        at: DVec2,
+        bottom_z: f64,
+        retract_z: f64,
+        peck: f64,
+        feed: f64,
+    },
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -61,6 +71,10 @@ impl Toolpath {
                         len += (*to - l).length();
                     }
                     last = Some(*to);
+                }
+                Move::Drill { at, bottom_z, retract_z, .. } => {
+                    len += retract_z - bottom_z;
+                    last = Some(DVec3::new(at.x, at.y, *retract_z));
                 }
                 _ => {}
             }

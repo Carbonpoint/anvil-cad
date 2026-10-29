@@ -132,10 +132,15 @@ costs nothing either. Writing the 3MF beam lattice skips the field
 entirely: `BeamLattice::beams_in` lists the segments whose ends are
 inside the part and hands the list to the writer.
 
+## Graded cell size
+
+Lattice fill grades beam cells too. Set Grade to x, y or z and Cell size
+at end above 0: the cells grow from Cell size at one side of the part to
+Cell size at end at the other. `BeamRamp` uses the same phase as the
+sheet lattices, so the beams along the ramp stay joined.
+
 ## Not yet available
 
-* Cell size grading for beam lattices. `CellRamp` grades sheet lattices
-  only, so `cell_end` does nothing with a beam kind.
 * Per beam radii in the 3MF. Anvil writes one radius for the whole
   lattice, although the extension allows a radius per beam end.
 * A skin around a 3MF beam lattice. `beams` writes struts only; the

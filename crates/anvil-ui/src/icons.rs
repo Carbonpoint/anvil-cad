@@ -241,6 +241,10 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.rect((0.16, 0.16), (0.84, 0.84));
             c.rect((0.32, 0.32), (0.68, 0.68));
         }
+        "draft" => {
+            c.poly_closed(&[(0.2, 0.82), (0.8, 0.82), (0.68, 0.22), (0.32, 0.22)]);
+            c.dashed((0.2, 0.22), (0.2, 0.82), 6);
+        }
         "fillet" => draw_corner(&c, true),
         "chamfer" => draw_corner(&c, false),
         "combine" => {
@@ -313,6 +317,25 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
             c.poly_closed(&[(0.2, 0.75), (0.5, 0.25), (0.8, 0.75)]);
             c.line((0.35, 0.5), (0.65, 0.5));
             c.line((0.5, 0.25), (0.5, 0.75));
+        }
+        "hot_spots" => {
+            c.rect((0.15, 0.6), (0.85, 0.85));
+            c.poly_closed(&[(0.5, 0.12), (0.64, 0.34), (0.6, 0.52), (0.5, 0.58), (0.4, 0.52), (0.36, 0.34)]);
+            c.dot((0.5, 0.45));
+        }
+        "insert_svg" => {
+            c.rect((0.15, 0.2), (0.85, 0.8));
+            c.arc((0.5, 0.62), 0.22, std::f32::consts::PI, std::f32::consts::TAU);
+            c.line((0.28, 0.62), (0.72, 0.62));
+        }
+        "axis" => {
+            c.dashed((0.15, 0.85), (0.85, 0.15), 7);
+            c.dot((0.5, 0.5));
+        }
+        "point" => {
+            c.line((0.3, 0.5), (0.7, 0.5));
+            c.line((0.5, 0.3), (0.5, 0.7));
+            c.circle((0.5, 0.5), 0.08);
         }
         "import_step" => {
             c.poly_closed(&[(0.2, 0.4), (0.5, 0.25), (0.8, 0.4), (0.8, 0.75), (0.5, 0.9), (0.2, 0.75)]);
@@ -638,6 +661,11 @@ pub fn paint(id: &str, painter: &Painter, rect: Rect, color: Color32) -> bool {
         "kettle_gated" => {
             draw_kettle(&c);
             c.poly_closed(&[(0.35, 0.06), (0.55, 0.06), (0.48, 0.2), (0.42, 0.2)]);
+        }
+        "kettle_match_plate" => {
+            c.rect((0.1, 0.46), (0.9, 0.54));
+            c.arc((0.5, 0.46), 0.26, std::f32::consts::PI, std::f32::consts::TAU);
+            c.arc((0.5, 0.54), 0.26, 0.0, std::f32::consts::PI);
         }
         "kettle_mold" => {
             draw_kettle(&c);

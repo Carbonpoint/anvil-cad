@@ -47,6 +47,9 @@ fn main() {
     if let Some(n) = value("--select") {
         opts.select = Some(n.parse().expect("feature number"));
     }
+    if let Some(f) = value("--open") {
+        opts.open = Some(f.into());
+    }
     if let Some(t) = value("--tab") {
         opts.tab = Some(t.to_string());
     }
@@ -91,5 +94,6 @@ shot: a picture of the Anvil window, with no display.
   --select N         select feature N in the Part Navigator
   --settings         open the Settings window
   --tab NAME         show this ribbon tab (File, Solid, Field, ...)
+  --open FILE        open a document or an import file instead of a sample
   --crop x,y,w,h     keep only this part of the picture
   --out PATH         where to write the PPM (default: NAME.ppm)";

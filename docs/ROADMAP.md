@@ -44,7 +44,12 @@ Open:
 * Native format container per ADR 0002.
 * Rhai scripting for journaling and design automation.
 
-## M5: CAM
+## M5: CAM (started 2026-09-25)
+
+Done: contour-parallel pocketing with islands and drilling cycles (G81,
+G83, or moves), with offsets through cavalier_contours; posts for
+generic RS-274, LinuxCNC, GRBL, Fanuc and Haas; a CAM window. Open:
+adaptive clearing, 3-axis, Sinumerik, stock simulation.
 
 * Pocketing with contour-parallel and adaptive clearing (cavalier_contours
   for offsets).

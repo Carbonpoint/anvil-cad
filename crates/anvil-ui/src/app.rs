@@ -1,4 +1,5 @@
 use crate::camera::{Camera, Projector, UpAxis};
+use crate::construct_view;
 use crate::drag_handle::{self, DragHandle};
 use crate::ghost_view;
 use crate::icons;
@@ -178,6 +179,9 @@ pub struct AnvilApp {
     gpu: crate::gpu::GpuViewport,
     perf: crate::perf::PerfMonitor,
     /// UI scale and text size (View > Settings > Settings), persisted.
+    /// The CAM window and its settings.
+    cam: crate::cam_view::CamState,
+    cam_open: bool,
     pub(crate) settings: crate::settings::UiSettings,
     settings_window_open: bool,
     /// In sketch mode: the Sketch tab is showing (not another ribbon tab).
@@ -279,6 +283,8 @@ impl AnvilApp {
             gpu: crate::gpu::GpuViewport::default(),
             perf: Default::default(),
             settings: crate::settings::UiSettings::default(),
+            cam: crate::cam_view::CamState::default(),
+            cam_open: false,
             settings_window_open: false,
             section_axis: 0,
             section_offset: 0.0,
@@ -694,44 +700,9 @@ impl AnvilApp {
                 }
             }
             RibbonAction::ExportGcode => {
-                let profile = self
-                    .doc
-                    .features
-                    .iter()
-                    .filter_map(|n| n.output.as_ref())
-                    .flat_map(|o| o.profiles.iter())
-                    .next()
-                    .cloned();
-                match profile {
-                    Some(prof) => {
-                        let tool = anvil_cam::Tool {
-                            number: 1,
-                            name: "6mm endmill".into(),
-                            diameter: 6.0,
-                            rpm: 12000.0,
-                            feed: 800.0,
-                            plunge: 200.0,
-                        };
-                        let params = anvil_cam::ops::ContourParams {
-                            top_z: 0.0,
-                            depth: 10.0,
-                            step_down: 2.5,
-                            clearance: 5.0,
-                            outside: true,
-                        };
-                        let tp = anvil_cam::ops::contour(&prof.points, &tool, &params);
-                        let text = anvil_cam::Post::emit(
-                            &anvil_cam::GenericGcode { program_name: self.doc.name.clone() },
-                            &tp,
-                        );
-                        let p = PathBuf::from(&self.file_path).with_extension("nc");
-                        self.status = match std::fs::write(&p, text) {
-                            Ok(()) => format!("Wrote {} ({:.0} mm of cutting)", p.display(), tp.cut_length()),
-                            Err(e) => format!("G-code export failed: {e}"),
-                        };
-                    }
-                    None => self.status = "No sketch profile to contour".into(),
-                }
+                self.cam_open = !self.cam_open;
+                self.status =
+                    if self.cam_open { "CAM: choose a sketch, an operation and a post".into() } else { String::new() };
             }
             RibbonAction::FitView => {
                 self.refresh_scene();
@@ -845,27 +816,52 @@ impl AnvilApp {
                 let errors = self.doc.features.iter().filter(|f| f.error.is_some()).count();
                 self.status = format!("Regenerated {} features, {errors} with errors", self.doc.features.len());
             }
-            RibbonAction::CenterOfMass => match self.panels.selected.and_then(|i| self.doc.features[i].output.as_ref())
-            {
-                Some(out) if !out.bodies.is_empty() => {
-                    let mut total = 0.0;
-                    let mut c = DVec3::ZERO;
-                    for b in &out.bodies {
-                        let v = b.volume();
-                        c += b.centroid() * v;
-                        total += v;
+            RibbonAction::CenterOfMass => {
+                match self.panels.selected.and_then(|i| self.doc.features[i].output.as_ref().map(|o| (i, o))) {
+                    Some((idx, out)) if !out.bodies.is_empty() => {
+                        // Sum the bodies: volumes and first moments add, and the
+                        // tensors add once each is moved to the common centre.
+                        let parts: Vec<anvil_kernel::MassProperties> =
+                            out.bodies.iter().map(|b| b.mass_properties()).collect();
+                        let total: f64 = parts.iter().map(|p| p.volume).sum();
+                        let c = if total > 0.0 {
+                            parts.iter().map(|p| p.centroid * p.volume).sum::<DVec3>() / total
+                        } else {
+                            DVec3::ZERO
+                        };
+                        let mut inertia = anvil_math::DMat3::ZERO;
+                        for p in &parts {
+                            let d = p.centroid - c;
+                            let shift = anvil_math::DMat3::from_diagonal(DVec3::splat(d.length_squared()))
+                                - anvil_math::DMat3::from_cols(d * d.x, d * d.y, d * d.z);
+                            inertia += p.inertia + shift * p.volume;
+                        }
+                        // Density in kg/mm3 from the material, if one is set.
+                        let density = self.doc.material.get(&idx).map(|m| m.density * 1e-6);
+                        self.com_marker = Some(c);
+                        let moments = match density {
+                        Some(rho) => format!(
+                            "; inertia about the centre Ixx {:.1}, Iyy {:.1}, Izz {:.1} kg mm2 ({})",
+                            inertia.x_axis.x * rho,
+                            inertia.y_axis.y * rho,
+                            inertia.z_axis.z * rho,
+                            self.doc.material[&idx].name
+                        ),
+                        None => format!(
+                            "; inertia per unit density Ixx {:.4e}, Iyy {:.4e}, Izz {:.4e} mm5 (set a material for kg mm2)",
+                            inertia.x_axis.x, inertia.y_axis.y, inertia.z_axis.z
+                        ),
+                    };
+                        self.status = format!(
+                            "Centre of mass: {}, {}, {}{moments}",
+                            self.doc.fmt_length(c.x),
+                            self.doc.fmt_length(c.y),
+                            self.doc.fmt_length(c.z)
+                        );
                     }
-                    let c = if total > 0.0 { c / total } else { DVec3::ZERO };
-                    self.com_marker = Some(c);
-                    self.status = format!(
-                        "Centre of mass: {}, {}, {}",
-                        self.doc.fmt_length(c.x),
-                        self.doc.fmt_length(c.y),
-                        self.doc.fmt_length(c.z)
-                    );
+                    _ => self.status = "Select a feature that produces a body".into(),
                 }
-                _ => self.status = "Select a feature that produces a body".into(),
-            },
+            }
             RibbonAction::BillOfMaterials => {
                 let mut lines = Vec::new();
                 let mut total_mass = 0.0;
@@ -939,6 +935,17 @@ impl AnvilApp {
                     }
                 }
             }
+            RibbonAction::KettleMatchPlate => {
+                self.doc = anvil_io::kettle::kettle_match_plate();
+                self.panels = PanelState::default();
+                self.mode = Mode::Model;
+                self.camera.unlock();
+                self.invalidate();
+                self.refresh_scene();
+                self.fit_view();
+                self.file_path = "kettle_match_plate.anvil".into();
+                self.status = "Match plate loaded: the pattern halves on the plate, with their gating.".into();
+            }
             RibbonAction::KettleMold => {
                 self.doc = anvil_io::kettle::kettle_mold();
                 self.panels = PanelState::default();
@@ -983,6 +990,14 @@ impl AnvilApp {
                 self.fit_view();
                 self.file_path = format!("workbook_{}.anvil", &name[..2]);
                 self.status = format!("Workbook {name} loaded. Steps in docs/WORKBOOK.md.");
+            }
+            RibbonAction::InsertSvg => {
+                let picked =
+                    rfd::FileDialog::new().set_title("Insert SVG").add_filter("SVG drawing", &["svg"]).pick_file();
+                match picked {
+                    Some(p) => self.insert_svg(&p),
+                    None => self.status = "Insert SVG cancelled".into(),
+                }
             }
             RibbonAction::SetSelectFilter(n) => {
                 self.filter = match n {
@@ -1124,6 +1139,31 @@ impl AnvilApp {
         self.selected_face = None;
         self.invalidate();
         self.status = "Press Pull added as a new body. Set its distance in Properties (negative goes inward).".into();
+    }
+
+    /// Add the SVG drawing at `path` as a new sketch, on the selected face
+    /// or on XY, and open it.
+    pub fn insert_svg(&mut self, path: &std::path::Path) {
+        let text = match std::fs::read_to_string(path) {
+            Ok(t) => t,
+            Err(e) => {
+                self.status = format!("Insert SVG: {e}");
+                return;
+            }
+        };
+        let plane = self.selected_face.and_then(|(_, _, tri)| self.scene.face_plane(&self.doc, tri));
+        let mut sk = match plane {
+            Some(p) => SketchFeature::on_plane(p),
+            None => SketchFeature::on_datum("XY"),
+        };
+        match anvil_feature::import::svg::import(&text, &mut sk.sketch) {
+            Ok(n) => {
+                self.selected_face = None;
+                self.start_sketch_on(Box::new(sk));
+                self.status = format!("Inserted {n} shapes from {}", path.display());
+            }
+            Err(e) => self.status = format!("Insert SVG: {e}"),
+        }
     }
 
     fn sketch_on_selected_face(&mut self) {
@@ -1429,10 +1469,20 @@ impl AnvilApp {
             ui.separator();
             ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.add(egui::TextEdit::singleline(&mut ed.dxf_path).desired_width(110.0).hint_text("file.dxf"));
+                    ui.add(
+                        egui::TextEdit::singleline(&mut ed.dxf_path).desired_width(110.0).hint_text("file.dxf or .svg"),
+                    );
+                    if ui.button("Browse").clicked() {
+                        if let Some(p) = rfd::FileDialog::new().add_filter("Drawing", &["dxf", "svg"]).pick_file() {
+                            ed.dxf_path = p.display().to_string();
+                            import_dxf = true;
+                        }
+                    }
                     if ui
-                        .button("Import DXF")
-                        .on_hover_text("Add lines, arcs, circles, and polylines from a DXF file (mm)")
+                        .button("Import")
+                        .on_hover_text(
+                            "Add the drawing: DXF lines, arcs, circles and polylines (mm), or SVG shapes and paths",
+                        )
                         .clicked()
                     {
                         import_dxf = true;
@@ -2205,6 +2255,7 @@ impl AnvilApp {
             if let Some(pk) = &pick {
                 sketch_view::draw_regions(&painter, origin, &proj, pk, hovered_region);
             }
+            construct_view::draw(&painter, origin, &proj, &self.doc, sel, self.scene_size());
             // The selected feature, outlined inside the part.
             if let Some(idx) = sel {
                 if self.ghost.as_ref().map(|(i, id, _)| (*i, *id)) != Some((idx, self.scene.id)) {
@@ -2584,6 +2635,13 @@ impl AnvilApp {
         crate::settings::set_icon_room(ctx, ctx.content_rect().height());
         self.export_windows(ctx);
         self.settings_window(ctx);
+        if self.cam_open {
+            let mut open = true;
+            if let Some(m) = crate::cam_view::window(ctx, &self.doc, self.panels.selected, &mut open, &mut self.cam) {
+                self.status = m;
+            }
+            self.cam_open = open;
+        }
         let typing = ctx.wants_keyboard_input();
         let (undo, redo) = ctx.input(|i| {
             (i.modifiers.command && i.key_pressed(egui::Key::Z), i.modifiers.command && i.key_pressed(egui::Key::Y))

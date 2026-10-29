@@ -1,0 +1,54 @@
+{
+ "name": "construction",
+ "exprs": {
+  "params": {}
+ },
+ "features": [
+  {
+   "feature": {
+    "type": "box",
+    "x": "0",
+    "y": "0",
+    "z": "0",
+    "width": "60",
+    "depth": "40",
+    "height": "10"
+   },
+   "suppressed": false
+  },
+  {
+   "feature": {
+    "type": "offset_plane",
+    "base": {
+     "Datum": "XY"
+    },
+    "offset": "25"
+   },
+   "suppressed": false
+  },
+  {
+   "feature": {
+    "type": "axis",
+    "method": "Two planes",
+    "first": {
+     "Datum": "XZ"
+    },
+    "second": {
+     "Datum": "YZ"
+    }
+   },
+   "suppressed": false
+  },
+  {
+   "feature": {
+    "type": "point",
+    "method": "Coordinates",
+    "x": "60",
+    "y": "40",
+    "z": "10"
+   },
+   "suppressed": false
+  }
+ ],
+ "unit": "mm"
+}

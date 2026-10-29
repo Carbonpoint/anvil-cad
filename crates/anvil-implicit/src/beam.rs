@@ -449,3 +449,58 @@ mod tests {
         assert!(w.at(DVec3::new(0.0, 20.0, 5.0)) < 0.0);
     }
 }
+
+/// A beam lattice whose cell size ramps along one axis, from `cell_a` at
+/// `from` to `cell_b` at `to` (clamped beyond). The lattice coordinate
+/// along the axis is the ramp phase, so beams along it stay joined; across
+/// it the coordinates are divided by the local cell size. The value is the
+/// distance to the nearest beam centreline, in world units, close to exact
+/// where the ramp is gentle.
+pub struct BeamRamp {
+    unit: BeamLattice,
+    pub axis: usize,
+    pub from: f64,
+    pub to: f64,
+    pub cell_a: f64,
+    pub cell_b: f64,
+}
+
+impl BeamRamp {
+    pub fn new(cell: BeamCell, axis: usize, from: f64, to: f64, cell_a: f64, cell_b: f64) -> BeamRamp {
+        BeamRamp { unit: BeamLattice::new(cell, 1.0, 0.0), axis: axis.min(2), from, to, cell_a, cell_b }
+    }
+}
+
+impl Field for BeamRamp {
+    fn at(&self, p: DVec3) -> f64 {
+        let c = [p.x, p.y, p.z];
+        let (cell, _, phase) = crate::ramp_phase(self.from, self.to, self.cell_a, self.cell_b, c[self.axis]);
+        let mut u = [c[0] / cell, c[1] / cell, c[2] / cell];
+        u[self.axis] = phase / std::f64::consts::TAU;
+        self.unit.centreline_distance(DVec3::new(u[0], u[1], u[2])) * cell
+    }
+}
+
+#[cfg(test)]
+mod ramp_tests {
+    use super::*;
+
+    #[test]
+    fn a_beam_ramp_matches_plain_lattices_at_its_ends() {
+        let r = BeamRamp::new(BeamCell::Cubic, 0, 0.0, 60.0, 4.0, 12.0);
+        let a = BeamLattice::new(BeamCell::Cubic, 4.0, 0.0);
+        // Before the ramp the cells are 4 mm: the same field.
+        for p in [DVec3::new(-3.1, 1.3, 2.7), DVec3::new(-10.0, 0.4, 5.5)] {
+            assert!((r.at(p) - a.at(p)).abs() < 1e-9, "{p}");
+        }
+        // Past the ramp the cells are 12 mm: the pattern repeats every 12.
+        let p = DVec3::new(70.0, 3.0, 5.0);
+        assert!((r.at(p) - r.at(p + DVec3::new(12.0, 0.0, 0.0))).abs() < 1e-9);
+        // Beams along the ramp stay joined: the field along a beam line
+        // (y = z = 0, a cell edge) is zero all the way.
+        for k in 0..60 {
+            let q = DVec3::new(k as f64 + 0.37, 0.0, 0.0);
+            assert!(r.at(q).abs() < 1e-9, "a gap at x = {}", q.x);
+        }
+    }
+}

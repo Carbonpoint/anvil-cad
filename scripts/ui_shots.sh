@@ -27,6 +27,7 @@ shots=(
   "part_navigator|--sample kettle --size 1500x950 --theme light --crop 0,275,230,600"
   "settings_window|--sample demo --size 1500x950 --theme light --settings --crop 10,10,215,265"
   "laptop|--sample wb2 --size 1366x768 --theme light --text 20"
+  "construction|--sample empty --open docs/tutorials/files/construction.anvil --size 1500x950 --theme light --select 2"
 )
 
 for s in "${shots[@]}"; do
